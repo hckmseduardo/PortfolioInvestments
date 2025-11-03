@@ -1,15 +1,14 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Container,
-  Grid,
-  Paper,
-  Typography,
   Box,
+  Stack,
+  TextField,
+  Button,
   Card,
   CardContent,
-  TextField,
-  Stack,
-  Button
+  Paper,
+  Typography
 } from '@mui/material';
 import {
   TrendingUp,
@@ -19,22 +18,141 @@ import {
 } from '@mui/icons-material';
 import { accountsAPI, positionsAPI, dividendsAPI, dashboardAPI } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import RGL, { WidthProvider } from 'react-grid-layout';
+import 'react-grid-layout/css/styles.css';
+import 'react-resizable/css/styles.css';
 
-const DEFAULT_LAYOUT = [
-  'total_value',
-  'book_value',
-  'capital_gains',
-  'dividends',
-  'total_gains',
-  'accounts_summary',
-  'performance',
-  'accounts_list'
+const GridLayout = WidthProvider(RGL);
+const GRID_COLS = 12;
+const ROW_HEIGHT = 120;
+const GRID_MARGIN = [16, 16];
+
+const DEFAULT_TILE_LAYOUT = [
+  { i: 'total_value', x: 0, y: 0, w: 3, h: 1 },
+  { i: 'book_value', x: 3, y: 0, w: 3, h: 1 },
+  { i: 'capital_gains', x: 6, y: 0, w: 3, h: 1 },
+  { i: 'dividends', x: 9, y: 0, w: 3, h: 1 },
+  { i: 'total_gains', x: 0, y: 1, w: 3, h: 1 },
+  { i: 'accounts_summary', x: 3, y: 1, w: 3, h: 1 },
+  { i: 'performance', x: 0, y: 2, w: 8, h: 3 },
+  { i: 'accounts_list', x: 8, y: 2, w: 4, h: 3 }
 ];
 
-const PLACEHOLDER_PREFIX = '__EMPTY__';
-const placeholderGrid = { xs: 12, sm: 6, md: 3 };
+const DEFAULT_TILE_MAP = DEFAULT_TILE_LAYOUT.reduce((acc, item) => {
+  acc[item.i] = { ...item };
+  return acc;
+}, {});
 
-const isPlaceholder = (id) => typeof id === 'string' && id.startsWith(PLACEHOLDER_PREFIX);
+const TILE_CONSTRAINTS = {
+  total_value: { minW: 2, minH: 1 },
+  book_value: { minW: 2, minH: 1 },
+  capital_gains: { minW: 2, minH: 1 },
+  dividends: { minW: 2, minH: 1 },
+  total_gains: { minW: 2, minH: 1 },
+  accounts_summary: { minW: 2, minH: 1 },
+  performance: { minW: 6, minH: 2 },
+  accounts_list: { minW: 4, minH: 2 }
+};
+
+const sanitizeNumber = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const applyConstraints = (layout) =>
+  layout.map((item) => {
+    const defaults = DEFAULT_TILE_MAP[item.i] || DEFAULT_TILE_LAYOUT[0];
+    const meta = TILE_CONSTRAINTS[item.i] || {};
+
+    return {
+      ...defaults,
+      ...item,
+      x: sanitizeNumber(item.x, defaults.x),
+      y: sanitizeNumber(item.y, defaults.y),
+      w: sanitizeNumber(item.w, defaults.w),
+      h: sanitizeNumber(item.h, defaults.h),
+      minW: meta.minW || defaults.minW || 1,
+      minH: meta.minH || defaults.minH || 1
+    };
+  });
+
+const ensureCompleteLayout = (layout) => {
+  const seen = new Set(layout.map((item) => item.i));
+  const result = [...layout];
+
+  DEFAULT_TILE_LAYOUT.forEach((defaultTile) => {
+    if (!seen.has(defaultTile.i)) {
+      result.push({ ...defaultTile });
+    }
+  });
+
+  return applyConstraints(result);
+};
+
+const convertFromServerLayout = (serverLayout) => {
+  if (!Array.isArray(serverLayout)) {
+    return ensureCompleteLayout([]);
+  }
+
+  const parsed = [];
+  const seen = new Set();
+
+  serverLayout.forEach((tile) => {
+    if (!tile) return;
+    const id = tile.id || tile.i;
+    if (!id || seen.has(id) || !DEFAULT_TILE_MAP[id]) return;
+
+    parsed.push({
+      i: id,
+      x: sanitizeNumber(tile.x, DEFAULT_TILE_MAP[id].x),
+      y: sanitizeNumber(tile.y, DEFAULT_TILE_MAP[id].y),
+      w: sanitizeNumber(tile.w, DEFAULT_TILE_MAP[id].w),
+      h: sanitizeNumber(tile.h, DEFAULT_TILE_MAP[id].h)
+    });
+    seen.add(id);
+  });
+
+  return ensureCompleteLayout(parsed);
+};
+
+const serializeLayout = (layout) =>
+  layout.map(({ i, x, y, w, h, minW, minH }) => ({
+    id: i,
+    x,
+    y,
+    w,
+    h,
+    minW,
+    minH
+  }));
+
+const StatCard = ({ title, value, icon, color, subtitle }) => (
+  <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <CardContent sx={{ flexGrow: 1 }}>
+      <Typography
+        variant="caption"
+        color="textSecondary"
+        className="dashboard-tile-handle"
+        sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move' }}
+      >
+        {title}
+      </Typography>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mt={1}>
+        <Box>
+          <Typography variant="h4" sx={{ fontWeight: 600 }}>
+            {value}
+          </Typography>
+          {subtitle && (
+            <Typography variant="body2" color={color}>
+              {subtitle}
+            </Typography>
+          )}
+        </Box>
+        <Box sx={{ color: color || 'primary.main' }}>{icon}</Box>
+      </Box>
+    </CardContent>
+  </Card>
+);
 
 const Dashboard = () => {
   const [summary, setSummary] = useState(null);
@@ -43,41 +161,23 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [selectedDate, setSelectedDate] = useState('');
-  const [layout, setLayout] = useState(DEFAULT_LAYOUT);
+  const [gridLayout, setGridLayout] = useState(ensureCompleteLayout(DEFAULT_TILE_LAYOUT));
   const [layoutLoading, setLayoutLoading] = useState(true);
-  const [draggedId, setDraggedId] = useState(null);
-  const [overId, setOverId] = useState(null);
-  const placeholderCounter = useRef(0);
+  const isReadyToPersist = useRef(false);
 
   useEffect(() => {
     const loadLayout = async () => {
       try {
         const response = await dashboardAPI.getLayout();
         const serverLayout = response.data?.layout;
-        if (Array.isArray(serverLayout) && serverLayout.length > 0) {
-          const sanitized = serverLayout.filter((item) => {
-            return typeof item === 'string' && (DEFAULT_LAYOUT.includes(item) || isPlaceholder(item));
-          });
-          const deduped = [];
-          sanitized.forEach((item) => {
-            if (isPlaceholder(item) || !deduped.includes(item)) {
-              deduped.push(item);
-            }
-          });
-          if (deduped.length) {
-            setLayout(deduped);
-            placeholderCounter.current = deduped.filter(isPlaceholder).length;
-            return;
-          }
-        }
-        setLayout(DEFAULT_LAYOUT);
-        placeholderCounter.current = 0;
+        const converted = convertFromServerLayout(serverLayout);
+        setGridLayout(converted);
       } catch (error) {
         console.error('Error loading dashboard layout:', error);
-        setLayout(DEFAULT_LAYOUT);
-        placeholderCounter.current = 0;
+        setGridLayout(convertFromServerLayout(DEFAULT_TILE_LAYOUT));
       } finally {
         setLayoutLoading(false);
+        isReadyToPersist.current = true;
       }
     };
 
@@ -88,6 +188,7 @@ const Dashboard = () => {
     if (layoutLoading) {
       return;
     }
+
     const fetchData = async () => {
       setFetching(true);
       try {
@@ -104,20 +205,19 @@ const Dashboard = () => {
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
-        setLoading(false);
         setFetching(false);
+        setLoading(false);
       }
     };
 
     fetchData();
   }, [selectedDate, layoutLoading]);
 
-  const formatCurrency = (value) => {
-    return new Intl.NumberFormat('en-CA', {
+  const formatCurrency = (value) =>
+    new Intl.NumberFormat('en-CA', {
       style: 'currency',
       currency: 'CAD'
     }).format(value || 0);
-  };
 
   const capitalGains = useMemo(() => {
     try {
@@ -132,30 +232,32 @@ const Dashboard = () => {
   const totalDividends = dividendSummary?.total_dividends || 0;
   const totalGains = capitalGains + totalDividends;
 
-  const StatCard = ({ title, value, icon, color, subtitle }) => (
-    <Card>
-      <CardContent>
-        <Box display="flex" justifyContent="space-between" alignItems="center">
-          <Box>
-            <Typography color="textSecondary" gutterBottom>
-              {title}
-            </Typography>
-            <Typography variant="h4">
-              {value}
-            </Typography>
-            {subtitle && (
-              <Typography variant="body2" color={color}>
-                {subtitle}
-              </Typography>
-            )}
-          </Box>
-          <Box sx={{ color: color || 'primary.main' }}>
-            {icon}
-          </Box>
-        </Box>
-      </CardContent>
-    </Card>
-  );
+  const handleLayoutCommit = (nextLayout) => {
+    const constrained = applyConstraints(nextLayout);
+    setGridLayout(constrained);
+    if (isReadyToPersist.current) {
+      persistLayout(constrained);
+    }
+  };
+
+  const persistLayout = async (layout) => {
+    try {
+      await dashboardAPI.saveLayout(serializeLayout(layout));
+    } catch (error) {
+      console.error('Error saving dashboard layout:', error);
+    }
+  };
+
+  const handleResetLayout = async () => {
+    try {
+      const response = await dashboardAPI.resetLayout();
+      const converted = convertFromServerLayout(response.data?.layout);
+      setGridLayout(converted);
+    } catch (error) {
+      console.error('Error resetting dashboard layout:', error);
+      setGridLayout(convertFromServerLayout(DEFAULT_TILE_LAYOUT));
+    }
+  };
 
   if (loading || layoutLoading) {
     return (
@@ -172,301 +274,135 @@ const Dashboard = () => {
     ? new Date(selectedDate).toLocaleDateString()
     : new Date().toLocaleDateString();
 
-  const persistLayout = async (nextLayout) => {
-    setLayout(nextLayout);
-    placeholderCounter.current = Math.max(
-      placeholderCounter.current,
-      nextLayout.filter(isPlaceholder).length
-    );
-    try {
-      await dashboardAPI.saveLayout(nextLayout);
-    } catch (error) {
-      console.error('Error saving dashboard layout:', error);
-    }
-  };
-
-  const generatePlaceholderId = () => `${PLACEHOLDER_PREFIX}${placeholderCounter.current++}`;
-
-  const handleResetLayout = async () => {
-    try {
-      await dashboardAPI.resetLayout();
-    } catch (error) {
-      console.error('Error resetting dashboard layout:', error);
-    } finally {
-      setLayout(DEFAULT_LAYOUT);
-    }
-  };
-
-  const handleDragStart = (event, itemId) => {
-    event.dataTransfer.setData('text/plain', itemId);
-    event.dataTransfer.effectAllowed = 'move';
-    setDraggedId(itemId);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedId(null);
-    setOverId(null);
-  };
-
-  const handleDragOverItem = (event, targetId) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    if (overId !== targetId) {
-      setOverId(targetId);
-    }
-  };
-
-  const handleDragOverContainer = (event) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    if (overId !== 'container') {
-      setOverId('container');
-    }
-  };
-
-  const reorderLayout = (items, fromId, toId) => {
-    if (fromId === toId) {
-      return items;
-    }
-    const newItems = items.filter((item) => item !== fromId);
-    const targetIndex = newItems.indexOf(toId);
-    if (targetIndex === -1) {
-      return items;
-    }
-    newItems.splice(targetIndex, 0, fromId);
-    if (newItems.join(',') === items.join(',')) {
-      return items;
-    }
-    return newItems;
-  };
-
-  const handleDrop = (event, targetId) => {
-    event.preventDefault();
-    const dragged = event.dataTransfer.getData('text/plain');
-    if (!dragged) {
-      setDraggedId(null);
-      setOverId(null);
-      return;
-    }
-    if (dragged === targetId) {
-      setDraggedId(null);
-      setOverId(null);
-      return;
-    }
-
-    const sourceIndex = layout.indexOf(dragged);
-    if (sourceIndex === -1) {
-      setDraggedId(null);
-      setOverId(null);
-      return;
-    }
-
-    let nextLayout = layout;
-
-    if (isPlaceholder(targetId)) {
-      const targetIndex = layout.indexOf(targetId);
-      if (targetIndex !== -1) {
-        const placeholderId = isPlaceholder(layout[sourceIndex])
-          ? layout[sourceIndex]
-          : generatePlaceholderId();
-
-        nextLayout = [...layout];
-        nextLayout[targetIndex] = dragged;
-        if (sourceIndex !== targetIndex) {
-          nextLayout[sourceIndex] = placeholderId;
-        }
-      }
-    } else {
-      const reordered = reorderLayout(layout, dragged, targetId);
-      if (reordered !== layout) {
-        nextLayout = reordered;
-      }
-    }
-
-    if (nextLayout !== layout) {
-      persistLayout(nextLayout);
-    }
-
-    setDraggedId(null);
-    setOverId(null);
-  };
-
-  const handleDropOnContainer = (event) => {
-    event.preventDefault();
-    const dragged = event.dataTransfer.getData('text/plain');
-    if (!dragged) {
-      setDraggedId(null);
-      setOverId(null);
-      return;
-    }
-
-    const sourceIndex = layout.indexOf(dragged);
-    if (sourceIndex === -1) {
-      setDraggedId(null);
-      setOverId(null);
-      return;
-    }
-
-    const nextLayout = [...layout];
-    if (!isPlaceholder(nextLayout[sourceIndex])) {
-      nextLayout[sourceIndex] = generatePlaceholderId();
-    }
-    nextLayout.push(dragged);
-    persistLayout(nextLayout);
-    setDraggedId(null);
-    setOverId(null);
-  };
-
-  const layoutConfig = {
-    total_value: {
-      grid: { xs: 12, sm: 6, md: 3 },
-      render: () => (
-        <StatCard
-          title="Total Portfolio Value"
-          value={formatCurrency(summary?.total_market_value || 0)}
-          icon={<AccountBalance fontSize="large" />}
-          color="primary.main"
-        />
-      )
-    },
-    book_value: {
-      grid: { xs: 12, sm: 6, md: 3 },
-      render: () => (
-        <StatCard
-          title="Book Value"
-          value={formatCurrency(summary?.total_book_value || 0)}
-          icon={<AccountBalance fontSize="large" />}
-          color="info.main"
-        />
-      )
-    },
-    capital_gains: {
-      grid: { xs: 12, sm: 6, md: 3 },
-      render: () => (
-        <StatCard
-          title="Total Gain/Loss"
-          value={formatCurrency(capitalGains)}
-          icon={gainLossIcon}
-          color={gainLossColor}
-          subtitle={`${summary?.total_gain_loss_percent?.toFixed(2) || 0}%`}
-        />
-      )
-    },
-    dividends: {
-      grid: { xs: 12, sm: 6, md: 3 },
-      render: () => (
-        <StatCard
-          title="Total Dividends"
-          value={formatCurrency(totalDividends)}
-          icon={<AttachMoney fontSize="large" />}
-          color="success.main"
-        />
-      )
-    },
-    total_gains: {
-      grid: { xs: 12, sm: 6, md: 3 },
-      render: () => (
-        <StatCard
-          title="Total Gains"
-          value={formatCurrency(totalGains)}
-          icon={<TrendingUp fontSize="large" />}
-          color={totalGains >= 0 ? 'success.main' : 'error.main'}
-          subtitle="Capital gains + dividends"
-        />
-      )
-    },
-    accounts_summary: {
-      grid: { xs: 12, sm: 6, md: 3 },
-      render: () => (
-        <StatCard
-          title="Accounts"
-          value={summary?.accounts_count || 0}
-          icon={<AccountBalance fontSize="large" />}
-          color="info.main"
-          subtitle={`${summary?.positions_count || 0} positions`}
-        />
-      )
-    },
-    performance: {
-      grid: { xs: 12, md: 8 },
-      render: () => (
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Portfolio Performance
-          </Typography>
-          {fetching && (
-            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-              Updating metrics…
+  const renderTile = (id, layoutItem) => {
+    switch (id) {
+      case 'total_value':
+        return (
+          <StatCard
+            title="Total Portfolio Value"
+            value={formatCurrency(summary?.total_market_value || 0)}
+            icon={<AccountBalance fontSize="large" />}
+            color="primary.main"
+          />
+        );
+      case 'book_value':
+        return (
+          <StatCard
+            title="Book Value"
+            value={formatCurrency(summary?.total_book_value || 0)}
+            icon={<AccountBalance fontSize="large" />}
+            color="info.main"
+          />
+        );
+      case 'capital_gains':
+        return (
+          <StatCard
+            title="Total Gain/Loss"
+            value={formatCurrency(capitalGains)}
+            icon={gainLossIcon}
+            color={gainLossColor}
+            subtitle={`${summary?.total_gain_loss_percent?.toFixed(2) || 0}%`}
+          />
+        );
+      case 'dividends':
+        return (
+          <StatCard
+            title="Total Dividends"
+            value={formatCurrency(totalDividends)}
+            icon={<AttachMoney fontSize="large" />}
+            color="success.main"
+          />
+        );
+      case 'total_gains':
+        return (
+          <StatCard
+            title="Total Gains"
+            value={formatCurrency(totalGains)}
+            icon={<TrendingUp fontSize="large" />}
+            color={totalGains >= 0 ? 'success.main' : 'error.main'}
+            subtitle="Capital gains + dividends"
+          />
+        );
+      case 'accounts_summary':
+        return (
+          <StatCard
+            title="Accounts"
+            value={summary?.accounts_count || 0}
+            icon={<AccountBalance fontSize="large" />}
+            color="info.main"
+            subtitle={`${summary?.positions_count || 0} positions`}
+          />
+        );
+      case 'performance':
+        return (
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Typography
+              variant="caption"
+              color="textSecondary"
+              className="dashboard-tile-handle"
+              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
+            >
+              Portfolio Performance
             </Typography>
-          )}
-          <Box sx={{ height: 300 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={[]}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="value" stroke="#8884d8" name="Portfolio Value" />
-              </LineChart>
-            </ResponsiveContainer>
-          </Box>
-          <Typography variant="caption" color="textSecondary" sx={{ mt: 2 }}>
-            Import statements to see historical performance
-          </Typography>
-        </Paper>
-      )
-    },
-    accounts_list: {
-      grid: { xs: 12, md: 4 },
-      render: () => (
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Accounts
-          </Typography>
-          {accounts.length === 0 ? (
-            <Typography color="textSecondary">
-              No accounts yet. Import a statement to get started.
+            {fetching && (
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                Updating metrics…
+              </Typography>
+            )}
+            <Box sx={{ flexGrow: 1, minHeight: ROW_HEIGHT * layoutItem.h - 80 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={[]}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="value" stroke="#8884d8" name="Portfolio Value" />
+                </LineChart>
+              </ResponsiveContainer>
+            </Box>
+            <Typography variant="caption" color="textSecondary" sx={{ mt: 2 }}>
+              Import statements to see historical performance
             </Typography>
-          ) : (
-            accounts.map((account) => (
-              <Box key={account.id} sx={{ mb: 2, pb: 2, borderBottom: '1px solid #eee' }}>
-                <Typography variant="subtitle1">
-                  {account.institution}
+          </Paper>
+        );
+      case 'accounts_list':
+        return (
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Typography
+              variant="caption"
+              color="textSecondary"
+              className="dashboard-tile-handle"
+              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
+            >
+              Accounts
+            </Typography>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', pr: 1 }}>
+              {accounts.length === 0 ? (
+                <Typography color="textSecondary">
+                  No accounts yet. Import a statement to get started.
                 </Typography>
-                <Typography variant="body2" color="textSecondary">
-                  {account.account_type} - {account.account_number}
-                </Typography>
-                <Typography variant="h6" color="primary">
-                  {formatCurrency(account.balance)}
-                </Typography>
-              </Box>
-            ))
-          )}
-        </Paper>
-      )
-    }
-  };
-
-  const renderedItems = layout
-    .map((item) => {
-      if (isPlaceholder(item)) {
-        return { key: item, config: { grid: placeholderGrid }, placeholder: true };
-      }
-      if (!layoutConfig[item]) {
+              ) : (
+                accounts.map((account) => (
+                  <Box key={account.id} sx={{ mb: 2, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+                    <Typography variant="subtitle1">
+                      {account.institution}
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      {account.account_type} - {account.account_number}
+                    </Typography>
+                    <Typography variant="h6" color="primary">
+                      {formatCurrency(account.balance)}
+                    </Typography>
+                  </Box>
+                ))
+              )}
+            </Box>
+          </Paper>
+        );
+      default:
         return null;
-      }
-      return { key: item, config: layoutConfig[item], placeholder: false };
-    })
-    .filter(Boolean);
-
-  const placeholderStyles = {
-    border: '2px dashed',
-    borderColor: 'divider',
-    borderRadius: 2,
-    backgroundColor: 'transparent',
-    minHeight: 120,
-    transition: 'all 0.2s ease'
+    }
   };
 
   return (
@@ -495,82 +431,25 @@ const Dashboard = () => {
           </Button>
         </Stack>
       </Box>
-      <Grid
-        container
-        spacing={3}
-        onDragOver={handleDragOverContainer}
-        onDrop={handleDropOnContainer}
-        onDragLeave={() => overId === 'container' && setOverId(null)}
+
+      <GridLayout
+        className="dashboard-grid"
+        layout={gridLayout}
+        cols={GRID_COLS}
+        rowHeight={ROW_HEIGHT}
+        margin={GRID_MARGIN}
+        compactType={null}
+        preventCollision={false}
+        onDragStop={handleLayoutCommit}
+        onResizeStop={handleLayoutCommit}
+        draggableHandle=".dashboard-tile-handle"
       >
-        {renderedItems.flatMap(({ key, config, placeholder }) => {
-          const tiles = [];
-
-          if (!placeholder && draggedId && draggedId !== key && overId === key) {
-            tiles.push(
-              <Grid item key={`${key}-preview`} {...placeholderGrid}>
-                <Box
-                  sx={{
-                    ...placeholderStyles,
-                    borderColor: 'primary.main',
-                    backgroundColor: 'action.hover',
-                    opacity: 0.85
-                  }}
-                />
-              </Grid>
-            );
-          }
-
-          tiles.push(
-            <Grid item key={key} {...(config.grid || placeholderGrid)}>
-              {placeholder ? (
-                <Box
-                  onDragOver={(event) => handleDragOverItem(event, key)}
-                  onDrop={(event) => handleDrop(event, key)}
-                  onDragLeave={() => overId === key && setOverId(null)}
-                  sx={{
-                    ...placeholderStyles,
-                    borderColor: overId === key ? 'primary.main' : 'divider',
-                    backgroundColor: overId === key ? 'action.hover' : 'transparent',
-                    opacity: draggedId ? 0.75 : 0.5
-                  }}
-                />
-              ) : (
-                <Box
-                  draggable
-                  onDragStart={(event) => handleDragStart(event, key)}
-                  onDragOver={(event) => handleDragOverItem(event, key)}
-                  onDrop={(event) => handleDrop(event, key)}
-                  onDragLeave={() => overId === key && setOverId(null)}
-                  onDragEnd={handleDragEnd}
-                  sx={{
-                    cursor: 'grab',
-                    opacity: draggedId === key ? 0.5 : 1,
-                    transition: 'opacity 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease',
-                    boxShadow: draggedId === key ? 3 : overId === key ? 6 : 1,
-                    transform: overId === key ? 'translateY(-2px)' : 'none'
-                  }}
-                >
-                  {config.render()}
-                </Box>
-              )}
-            </Grid>
-          );
-
-          return tiles;
-        })}
-        {draggedId && overId === 'container' && (
-          <Grid item xs={12}>
-            <Box
-              sx={{
-                ...placeholderStyles,
-                borderColor: 'primary.main',
-                backgroundColor: 'action.hover',
-                opacity: 0.9
-              }}
-            />
-          </Grid>
-        )}
-      </Grid>
+        {gridLayout.map((item) => (
+          <div key={item.i}>
+            {renderTile(item.i, item)}
+          </div>
+        ))}
+      </GridLayout>
     </Container>
   );
 };

@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Any, List
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import List
 
 from app.api.auth import get_current_user
 from app.database.json_db import get_db
@@ -8,42 +9,76 @@ from app.models.schemas import User
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
-DEFAULT_LAYOUT = [
-    "total_value",
-    "book_value",
-    "capital_gains",
-    "dividends",
-    "total_gains",
-    "accounts_summary",
-    "performance",
-    "accounts_list"
+DEFAULT_LAYOUT: List[dict[str, int]] = [
+    {"id": "total_value", "x": 0, "y": 0, "w": 3, "h": 1},
+    {"id": "book_value", "x": 3, "y": 0, "w": 3, "h": 1},
+    {"id": "capital_gains", "x": 6, "y": 0, "w": 3, "h": 1},
+    {"id": "dividends", "x": 9, "y": 0, "w": 3, "h": 1},
+    {"id": "total_gains", "x": 0, "y": 1, "w": 3, "h": 1},
+    {"id": "accounts_summary", "x": 3, "y": 1, "w": 3, "h": 1},
+    {"id": "performance", "x": 0, "y": 2, "w": 8, "h": 3},
+    {"id": "accounts_list", "x": 8, "y": 2, "w": 4, "h": 3}
 ]
 
-PLACEHOLDER_PREFIX = "__EMPTY__"
+_ALLOWED_IDS = {item["id"] for item in DEFAULT_LAYOUT}
+_DEFAULT_TILE_MAP = {item["id"]: item for item in DEFAULT_LAYOUT}
 
 
 class DashboardLayoutUpdate(BaseModel):
-    layout: List[str]
+    layout: List[Any]
 
 
-def _sanitize_layout(layout: List[str]) -> List[str]:
-    cleaned: List[str] = []
-    seen_components = set()
-    components_found = False
+def _to_dict(item: Any) -> dict | None:
+    if item is None:
+        return None
+    if isinstance(item, dict):
+        return item
+    if isinstance(item, str):
+        return {"id": item}
+    if hasattr(item, "model_dump"):
+        return item.model_dump()
+    return None
 
-    for item in layout:
-        if not isinstance(item, str):
+
+def _coerce_tile(raw: Any) -> dict | None:
+    data = _to_dict(raw)
+    if not data:
+        return None
+
+    tile_id = data.get("id")
+    if tile_id not in _ALLOWED_IDS:
+        return None
+
+    base = _DEFAULT_TILE_MAP[tile_id].copy()
+    for key in ("x", "y", "w", "h", "minW", "minH"):
+        value = data.get(key)
+        if value is not None:
+            try:
+                base[key] = int(value)
+            except (TypeError, ValueError):
+                continue
+    return base
+
+
+def _sanitize_layout(layout: List[Any]) -> List[dict]:
+    sanitized: List[dict] = []
+    seen: set[str] = set()
+
+    for item in layout or []:
+        tile = _coerce_tile(item)
+        if not tile:
             continue
-        if item.startswith(PLACEHOLDER_PREFIX):
-            cleaned.append(item)
-        elif item in DEFAULT_LAYOUT and item not in seen_components:
-            cleaned.append(item)
-            seen_components.add(item)
-            components_found = True
+        tile_id = tile["id"]
+        if tile_id in seen:
+            continue
+        sanitized.append(tile)
+        seen.add(tile_id)
 
-    if not components_found:
-        return DEFAULT_LAYOUT.copy()
-    return cleaned
+    for tile in DEFAULT_LAYOUT:
+        if tile["id"] not in seen:
+            sanitized.append(tile.copy())
+
+    return sanitized
 
 
 @router.get("/layout")
