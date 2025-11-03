@@ -194,8 +194,13 @@ class WealthsimpleParser:
 
             quantity = float(row.get('Quantity', row.get('Shares', row.get('quantity', row.get('shares', 0))))) if pd.notna(row.get('Quantity', row.get('Shares', row.get('quantity', row.get('shares', 0))))) else None
 
-            if quantity is None or quantity == 0:
+            # Only extract quantity from description for buy/sell/transfer transactions
+            # Dividends, deposits, withdrawals, etc. should not have quantities extracted from descriptions
+            if (quantity is None or quantity == 0) and mapped_type in ['buy', 'sell', 'transfer']:
                 quantity = self._extract_quantity_from_description(description)
+            elif mapped_type not in ['buy', 'sell', 'transfer']:
+                # For non-trading transactions, set quantity to 0 or None
+                quantity = 0
 
             transaction = {
                 'date': self._parse_date(row.get(date_col, '')),
@@ -260,19 +265,47 @@ class WealthsimpleParser:
         if not description:
             return 0.0
 
-        match = re.search(r'(\d+(?:\.\d+)?)\s*shares?', str(description), re.IGNORECASE)
+        # First, try to match patterns with "shares" or "actions" keyword
+        # Handle both English and French formats
+        # English: "10.5 shares" or "10,000.5 shares" (dot = decimal, comma = thousands)
+        # French: "10,5 actions" or "10 000,5 actions" (comma = decimal, space = thousands)
+        match = re.search(r'(\d+(?:[\s,]\d{3})*(?:[.,]\d+)?)\s*(?:shares?|actions?)', str(description), re.IGNORECASE)
         if match:
             try:
-                return float(match.group(1).replace(',', ''))
+                num_str = match.group(1)
+                # French format: space or comma for thousands, comma for decimal
+                # English format: comma for thousands, dot for decimal
+                # If we have "10,0000" it's likely French "10.0000"
+                # If we have "10,000.5" it's English
+                # If we have "10 000,5" it's French
+
+                # Check if it looks like French format (comma followed by 4 digits or space separators)
+                if re.match(r'^\d+,\d{4}$', num_str) or ' ' in num_str:
+                    # French format: remove spaces, replace comma with dot
+                    num_str = num_str.replace(' ', '').replace(',', '.')
+                else:
+                    # English format: remove commas (thousands separator)
+                    num_str = num_str.replace(',', '')
+
+                return float(num_str)
             except:
                 return 0.0
-        # Fallback: look for any standalone number
-        match = re.search(r'([0-9]+(?:[.,][0-9]+)?)', str(description))
+
+        # For "Transfer of X shares" or "Bought X shares" or "Achat de X actions" patterns
+        match = re.search(r'(?:Transfer of|Bought|Sold|Achat de|Vente de)\s+(\d+(?:[\s,]\d{3})*(?:[.,]\d+)?)', str(description), re.IGNORECASE)
         if match:
             try:
-                return float(match.group(1).replace(',', ''))
+                num_str = match.group(1)
+                # Apply same logic as above
+                if re.match(r'^\d+,\d{4}$', num_str) or ' ' in num_str:
+                    num_str = num_str.replace(' ', '').replace(',', '.')
+                else:
+                    num_str = num_str.replace(',', '')
+                return float(num_str)
             except:
                 return 0.0
+
+        # Don't use fallback for other cases to avoid extracting dates or other numbers
         return 0.0
 
     def _extract_name_from_description(self, description: str) -> str:
