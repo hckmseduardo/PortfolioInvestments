@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -28,7 +28,7 @@ class DashboardLayoutUpdate(BaseModel):
     layout: List[Any]
 
 
-def _to_dict(item: Any) -> dict | None:
+def _to_dict(item: Any) -> Optional[dict]:
     if item is None:
         return None
     if isinstance(item, dict):
@@ -40,7 +40,7 @@ def _to_dict(item: Any) -> dict | None:
     return None
 
 
-def _coerce_tile(raw: Any) -> dict | None:
+def _coerce_tile(raw: Any) -> Optional[dict]:
     data = _to_dict(raw)
     if not data:
         return None
