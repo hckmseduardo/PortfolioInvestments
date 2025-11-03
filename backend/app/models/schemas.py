@@ -183,6 +183,8 @@ class DividendSummary(BaseModel):
     total_dividends: float
     dividends_by_month: dict
     dividends_by_ticker: dict
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
 
 class StatementBase(BaseModel):
     filename: str
