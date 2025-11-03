@@ -313,7 +313,7 @@ class WealthsimpleParser:
             return 'sell'
         elif transaction_type in ['DIV', 'DIVIDEND']:
             return 'dividend'
-        elif transaction_type in ['DEPOSIT', 'DEP', 'TRFINTF']:
+        elif transaction_type in ['DEPOSIT', 'DEP', 'TRFINTF', 'REFUND']:
             return 'deposit'
         elif transaction_type in ['WITHDRAWAL', 'WITHDRAW', 'WD']:
             return 'withdrawal'
@@ -323,7 +323,7 @@ class WealthsimpleParser:
             return 'bonus'
         elif transaction_type in ['TRFIN']:
             return 'transfer'
-        elif transaction_type in ['LOAN', 'RECALL', 'STKDIS']:
+        elif transaction_type in ['LOAN', 'RECALL', 'STKDIS', 'STKREORG']:
             return None
         else:
             return None
