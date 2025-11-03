@@ -23,13 +23,17 @@ import {
   Tooltip,
   Collapse,
   MenuItem,
-  TextField
+  TextField,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction
 } from '@mui/material';
-import { CloudUpload, Refresh, Delete, Description, PlayArrow, Error as ErrorIcon } from '@mui/icons-material';
+import { CloudUpload, Refresh, Delete, Description, PlayArrow, Error as ErrorIcon, Close, RefreshOutlined } from '@mui/icons-material';
 import { importAPI, accountsAPI } from '../services/api';
 
 const Import = () => {
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -40,6 +44,8 @@ const Import = () => {
   const [processingStatements, setProcessingStatements] = useState(new Set());
   const [accounts, setAccounts] = useState([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
+  const [dragActive, setDragActive] = useState(false);
+  const [reprocessingAll, setReprocessingAll] = useState(false);
 
   useEffect(() => {
     loadStatements();
@@ -68,31 +74,72 @@ const Import = () => {
     }
   };
 
-  const handleFileChange = (event) => {
-    const selectedFile = event.target.files[0];
-    if (selectedFile) {
-      const validTypes = [
-        'application/pdf',
-        'text/csv',
-        'application/vnd.ms-excel',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      ];
+  const validateFile = (file) => {
+    const validTypes = [
+      'application/pdf',
+      'text/csv',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
 
-      if (validTypes.includes(selectedFile.type) ||
-          selectedFile.name.match(/\.(pdf|csv|xlsx|xls)$/i)) {
-        setFile(selectedFile);
-        setError('');
-        setResult(null);
+    return validTypes.includes(file.type) || file.name.match(/\.(pdf|csv|xlsx|xls)$/i);
+  };
+
+  const handleFileChange = (event) => {
+    const selectedFiles = Array.from(event.target.files);
+    const validFiles = selectedFiles.filter(validateFile);
+
+    if (validFiles.length !== selectedFiles.length) {
+      setError('Some files were skipped. Only PDF, CSV, and Excel files are allowed.');
+    } else {
+      setError('');
+    }
+
+    if (validFiles.length > 0) {
+      setFiles(prevFiles => [...prevFiles, ...validFiles]);
+      setResult(null);
+    }
+  };
+
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      const validFiles = droppedFiles.filter(validateFile);
+
+      if (validFiles.length !== droppedFiles.length) {
+        setError('Some files were skipped. Only PDF, CSV, and Excel files are allowed.');
       } else {
-        setError('Invalid file type. Please upload PDF, CSV, or Excel files.');
-        setFile(null);
+        setError('');
+      }
+
+      if (validFiles.length > 0) {
+        setFiles(prevFiles => [...prevFiles, ...validFiles]);
+        setResult(null);
       }
     }
   };
 
+  const removeFile = (index) => {
+    setFiles(prevFiles => prevFiles.filter((_, i) => i !== index));
+  };
+
   const handleUpload = async () => {
-    if (!file) {
-      setError('Please select a file first');
+    if (files.length === 0) {
+      setError('Please select at least one file');
       return;
     }
 
@@ -106,14 +153,19 @@ const Import = () => {
     setResult(null);
 
     try {
-      const response = await importAPI.uploadStatement(file, selectedAccountId);
-      setResult({ message: 'File uploaded successfully. Click "Process" to import the data.' });
-      setFile(null);
+      const uploadPromises = files.map(file =>
+        importAPI.uploadStatement(file, selectedAccountId)
+      );
+
+      await Promise.all(uploadPromises);
+
+      setResult({ message: `${files.length} file(s) uploaded successfully. Click "Process" to import the data.` });
+      setFiles([]);
       setSelectedAccountId('');
       document.getElementById('file-input').value = '';
       loadStatements();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to upload file');
+      setError(err.response?.data?.detail || 'Failed to upload files');
     } finally {
       setUploading(false);
     }
@@ -162,6 +214,29 @@ const Import = () => {
         newSet.delete(statementId);
         return newSet;
       });
+    }
+  };
+
+  const handleReprocessAll = async () => {
+    if (!window.confirm('This will delete all existing transactions, dividends, and positions, then reprocess all statements from oldest to latest. Are you sure?')) {
+      return;
+    }
+
+    setReprocessingAll(true);
+    setError('');
+    setResult(null);
+
+    try {
+      const response = await importAPI.reprocessAllStatements();
+      setResult({
+        message: response.data.message,
+        details: `Successfully processed: ${response.data.successful}, Failed: ${response.data.failed}`
+      });
+      loadStatements();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to reprocess all statements');
+    } finally {
+      setReprocessingAll(false);
     }
   };
 
@@ -251,6 +326,9 @@ const Import = () => {
         {result && (
           <Alert severity="success" sx={{ mb: 2 }}>
             <Typography variant="subtitle2">{result.message}</Typography>
+            {result.details && (
+              <Typography variant="body2">{result.details}</Typography>
+            )}
             {result.account_id && (
               <>
                 <Typography variant="body2">
@@ -288,29 +366,66 @@ const Import = () => {
             ))}
           </TextField>
 
-          <input
-            accept=".pdf,.csv,.xlsx,.xls"
-            style={{ display: 'none' }}
-            id="file-input"
-            type="file"
-            onChange={handleFileChange}
-          />
-          <label htmlFor="file-input">
-            <Button
-              variant="outlined"
-              component="span"
-              startIcon={<CloudUpload />}
-              fullWidth
-              sx={{ mb: 2 }}
-            >
-              Choose File
-            </Button>
-          </label>
-
-          {file && (
-            <Typography variant="body2" color="textSecondary">
-              Selected: {file.name} ({(file.size / 1024).toFixed(2)} KB)
+          <Box
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+            sx={{
+              border: dragActive ? '2px dashed #1976d2' : '2px dashed #ccc',
+              borderRadius: 2,
+              p: 4,
+              textAlign: 'center',
+              backgroundColor: dragActive ? 'rgba(25, 118, 210, 0.08)' : 'transparent',
+              transition: 'all 0.3s ease',
+              mb: 2
+            }}
+          >
+            <CloudUpload sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+            <Typography variant="h6" gutterBottom>
+              Drag and drop files here
             </Typography>
+            <Typography variant="body2" color="textSecondary" paragraph>
+              or
+            </Typography>
+            <input
+              accept=".pdf,.csv,.xlsx,.xls"
+              style={{ display: 'none' }}
+              id="file-input"
+              type="file"
+              multiple
+              onChange={handleFileChange}
+            />
+            <label htmlFor="file-input">
+              <Button
+                variant="outlined"
+                component="span"
+                startIcon={<CloudUpload />}
+              >
+                Choose Files
+              </Button>
+            </label>
+          </Box>
+
+          {files.length > 0 && (
+            <Paper variant="outlined" sx={{ mb: 2 }}>
+              <List>
+                {files.map((file, index) => (
+                  <ListItem key={index}>
+                    <Description sx={{ mr: 2, color: 'text.secondary' }} />
+                    <ListItemText
+                      primary={file.name}
+                      secondary={`${(file.size / 1024).toFixed(2)} KB`}
+                    />
+                    <ListItemSecondaryAction>
+                      <IconButton edge="end" onClick={() => removeFile(index)}>
+                        <Close />
+                      </IconButton>
+                    </ListItemSecondaryAction>
+                  </ListItem>
+                ))}
+              </List>
+            </Paper>
           )}
         </Box>
 
@@ -320,10 +435,10 @@ const Import = () => {
           variant="contained"
           fullWidth
           onClick={handleUpload}
-          disabled={!file || uploading}
+          disabled={files.length === 0 || uploading || !selectedAccountId}
           size="large"
         >
-          {uploading ? 'Uploading...' : 'Upload Statement'}
+          {uploading ? 'Uploading...' : `Upload ${files.length} File(s)`}
         </Button>
       </Paper>
 
@@ -332,13 +447,24 @@ const Import = () => {
           <Typography variant="h5">
             Uploaded Statements
           </Typography>
-          <Button
-            startIcon={<Refresh />}
-            onClick={loadStatements}
-            disabled={loading}
-          >
-            Refresh
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              startIcon={<RefreshOutlined />}
+              onClick={handleReprocessAll}
+              disabled={loading || reprocessingAll || statements.length === 0}
+              variant="outlined"
+              color="warning"
+            >
+              {reprocessingAll ? 'Reprocessing All...' : 'Reprocess All'}
+            </Button>
+            <Button
+              startIcon={<Refresh />}
+              onClick={loadStatements}
+              disabled={loading}
+            >
+              Refresh
+            </Button>
+          </Box>
         </Box>
 
         <TableContainer>

@@ -102,6 +102,7 @@ export const importAPI = {
   getStatements: () => api.get('/import/statements'),
   processStatement: (statementId) => api.post(`/import/statements/${statementId}/process`),
   reprocessStatement: (statementId) => api.post(`/import/statements/${statementId}/reprocess`),
+  reprocessAllStatements: () => api.post('/import/statements/reprocess-all'),
   deleteStatement: (statementId) => api.delete(`/import/statements/${statementId}`),
 };
 
