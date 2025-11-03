@@ -46,6 +46,7 @@ class AccountBase(BaseModel):
     account_number: str
     institution: str
     balance: float
+    label: Optional[str] = None
 
 class AccountCreate(AccountBase):
     pass

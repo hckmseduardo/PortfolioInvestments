@@ -1,21 +1,22 @@
 import React from 'react';
-import { 
-  AppBar, 
-  Toolbar, 
-  Typography, 
-  Button, 
-  Box, 
+import {
+  AppBar,
+  Toolbar,
+  Typography,
+  Button,
+  Box,
   IconButton,
   Menu,
   MenuItem
 } from '@mui/material';
-import { 
-  AccountCircle, 
+import {
+  AccountCircle,
   Dashboard as DashboardIcon,
   TrendingUp,
   AttachMoney,
   Receipt,
-  Upload
+  Upload,
+  AccountBalance
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -45,6 +46,7 @@ const Navbar = () => {
     { label: 'Portfolio', path: '/portfolio', icon: <TrendingUp /> },
     { label: 'Dividends', path: '/dividends', icon: <AttachMoney /> },
     { label: 'Expenses', path: '/expenses', icon: <Receipt /> },
+    { label: 'Accounts', path: '/accounts', icon: <AccountBalance /> },
     { label: 'Import', path: '/import', icon: <Upload /> },
   ];
 
@@ -54,7 +56,7 @@ const Navbar = () => {
         <Typography variant="h6" component="div" sx={{ flexGrow: 0, mr: 4 }}>
           Portfolio Manager
         </Typography>
-        
+
         <Box sx={{ flexGrow: 1, display: 'flex', gap: 1 }}>
           {navItems.map((item) => (
             <Button

@@ -12,6 +12,7 @@ import Portfolio from './pages/Portfolio';
 import Dividends from './pages/Dividends';
 import Expenses from './pages/Expenses';
 import Import from './pages/Import';
+import AccountManagement from './pages/AccountManagement';
 
 const theme = createTheme({
   palette: {
@@ -43,6 +44,7 @@ function App() {
                       <Route path="/portfolio" element={<Portfolio />} />
                       <Route path="/dividends" element={<Dividends />} />
                       <Route path="/expenses" element={<Expenses />} />
+                      <Route path="/accounts" element={<AccountManagement />} />
                       <Route path="/import" element={<Import />} />
                       <Route path="*" element={<Navigate to="/" />} />
                     </Routes>

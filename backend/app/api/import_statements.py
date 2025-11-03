@@ -36,16 +36,10 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
         )
 
     if not account_id:
-        account_info = parsed_data.get('account_info', {})
-        account_doc = {
-            "account_type": "investment",
-            "account_number": account_info.get('account_number', 'Unknown'),
-            "institution": "Wealthsimple",
-            "balance": account_info.get('balance', 0.0),
-            "user_id": current_user.id
-        }
-        account = db.insert("accounts", account_doc)
-        account_id = account['id']
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account ID is required"
+        )
 
     positions_created = 0
     for position_data in parsed_data.get('positions', []):
@@ -87,7 +81,7 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
 @router.post("/statement")
 async def import_statement(
     file: UploadFile = File(...),
-    account_id: str = None,
+    account_id: str = Form(...),
     current_user: User = Depends(get_current_user)
 ):
     if not allowed_file(file.filename):

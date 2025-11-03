@@ -21,10 +21,12 @@ import {
   DialogContentText,
   DialogActions,
   Tooltip,
-  Collapse
+  Collapse,
+  MenuItem,
+  TextField
 } from '@mui/material';
 import { CloudUpload, Refresh, Delete, Description, PlayArrow, Error as ErrorIcon } from '@mui/icons-material';
-import { importAPI } from '../services/api';
+import { importAPI, accountsAPI } from '../services/api';
 
 const Import = () => {
   const [file, setFile] = useState(null);
@@ -36,14 +38,26 @@ const Import = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [statementToDelete, setStatementToDelete] = useState(null);
   const [processingStatements, setProcessingStatements] = useState(new Set());
+  const [accounts, setAccounts] = useState([]);
+  const [selectedAccountId, setSelectedAccountId] = useState('');
 
   useEffect(() => {
     loadStatements();
+    loadAccounts();
     const interval = setInterval(() => {
       loadStatements();
     }, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  const loadAccounts = async () => {
+    try {
+      const response = await accountsAPI.getAll();
+      setAccounts(response.data);
+    } catch (err) {
+      console.error('Failed to load accounts:', err);
+    }
+  };
 
   const loadStatements = async () => {
     try {
@@ -82,14 +96,20 @@ const Import = () => {
       return;
     }
 
+    if (!selectedAccountId) {
+      setError('Please select an account');
+      return;
+    }
+
     setUploading(true);
     setError('');
     setResult(null);
 
     try {
-      const response = await importAPI.uploadStatement(file);
+      const response = await importAPI.uploadStatement(file, selectedAccountId);
       setResult({ message: 'File uploaded successfully. Click "Process" to import the data.' });
       setFile(null);
+      setSelectedAccountId('');
       document.getElementById('file-input').value = '';
       loadStatements();
     } catch (err) {
@@ -251,6 +271,23 @@ const Import = () => {
         )}
 
         <Box sx={{ mb: 3 }}>
+          <TextField
+            select
+            label="Select Account"
+            value={selectedAccountId}
+            onChange={(e) => setSelectedAccountId(e.target.value)}
+            fullWidth
+            required
+            sx={{ mb: 2 }}
+            helperText={accounts.length === 0 ? "No accounts found. Please create an account first." : "Choose which account to import this statement into"}
+          >
+            {accounts.map((account) => (
+              <MenuItem key={account.id} value={account.id}>
+                {account.label || `${account.institution} - ${account.account_number}`} ({account.account_type})
+              </MenuItem>
+            ))}
+          </TextField>
+
           <input
             accept=".pdf,.csv,.xlsx,.xls"
             style={{ display: 'none' }}
