@@ -109,7 +109,7 @@ def recalculate_positions_from_transactions(account_id: str, db):
 
     return positions_created
 
-def process_statement_file(file_path: str, account_id: str, db, current_user: User):
+def process_statement_file(file_path: str, account_id: str, db, current_user: User, statement_id: str = None):
     parser = WealthsimpleParser()
     file_ext = Path(file_path).suffix.lower()
 
@@ -139,6 +139,8 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
             **transaction_data,
             "account_id": account_id
         }
+        if statement_id:
+            transaction_doc["statement_id"] = statement_id
         db.insert("transactions", transaction_doc)
         transactions_created += 1
 
@@ -148,6 +150,8 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
             **dividend_data,
             "account_id": account_id
         }
+        if statement_id:
+            dividend_doc["statement_id"] = statement_id
         db.insert("dividends", dividend_doc)
         dividends_created += 1
 
@@ -250,7 +254,8 @@ async def process_statement(
             statement['file_path'],
             statement.get('account_id'),
             db,
-            current_user
+            current_user,
+            statement_id
         )
 
         db.update("statements", statement_id, {
@@ -313,16 +318,18 @@ async def reprocess_statement(
     })
 
     try:
+        # Only delete transactions and dividends that belong to this specific statement
         if statement.get('account_id'):
-            db.delete_many("positions", {"account_id": statement['account_id']})
-            db.delete_many("transactions", {"account_id": statement['account_id']})
-            db.delete_many("dividends", {"account_id": statement['account_id']})
+            db.delete_many("transactions", {"statement_id": statement_id})
+            db.delete_many("dividends", {"statement_id": statement_id})
+            # Don't delete positions - they will be recalculated from all transactions
 
         result = process_statement_file(
             statement['file_path'],
             statement.get('account_id'),
             db,
-            current_user
+            current_user,
+            statement_id
         )
 
         db.update("statements", statement_id, {
