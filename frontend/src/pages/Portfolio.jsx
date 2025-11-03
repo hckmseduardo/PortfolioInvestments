@@ -195,6 +195,7 @@ const Portfolio = () => {
               <TableRow>
                 <TableCell><strong>Ticker</strong></TableCell>
                 <TableCell><strong>Name</strong></TableCell>
+                <TableCell align="right"><strong>Price</strong></TableCell>
                 <TableCell align="right"><strong>Quantity</strong></TableCell>
                 <TableCell align="right"><strong>Book Value</strong></TableCell>
                 <TableCell align="right"><strong>Market Value</strong></TableCell>
@@ -219,6 +220,11 @@ const Portfolio = () => {
                       />
                     </TableCell>
                     <TableCell>{position.name}</TableCell>
+                    <TableCell align="right">
+                      {position.ticker === 'CASH'
+                        ? '—'
+                        : (position.price != null ? formatCurrency(position.price) : '—')}
+                    </TableCell>
                     <TableCell align="right">
                       {formatNumber(position.quantity, position.ticker === 'CASH' ? 2 : 4)}
                     </TableCell>

@@ -96,6 +96,7 @@ class AggregatedPosition(BaseModel):
     quantity: float
     book_value: float
     market_value: float
+    price: Optional[float] = None
 
 class TransactionBase(BaseModel):
     date: datetime

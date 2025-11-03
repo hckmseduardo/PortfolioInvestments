@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Optional, Dict
+import logging
 from datetime import datetime
+from typing import List, Optional, Dict
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from app.models.schemas import (
     Position,
     PositionCreate,
@@ -13,6 +15,7 @@ from app.database.json_db import get_db
 from app.services.market_data import market_service
 
 router = APIRouter(prefix="/positions", tags=["positions"])
+logger = logging.getLogger(__name__)
 
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
@@ -166,11 +169,7 @@ def _compute_account_positions_from_transactions(
         data['quantity'] = float(data.get('quantity', 0.0))
         data['book_value'] = float(data.get('book_value', 0.0))
         if data['ticker'] != 'CASH':
-            if data['quantity'] > 0:
-                avg_cost = data['book_value'] / data['quantity'] if data['quantity'] else 0.0
-                data['market_value'] = data['quantity'] * avg_cost
-            else:
-                data['market_value'] = 0.0
+            data['market_value'] = float(data.get('market_value', 0.0) or 0.0)
         else:
             data['market_value'] = float(data.get('market_value', 0.0))
 
@@ -193,7 +192,6 @@ def _aggregate_position_maps(position_maps: List[Dict[str, Dict[str, float]]]) -
             )
             entry['quantity'] += _safe_float(data.get('quantity'))
             entry['book_value'] += _safe_float(data.get('book_value'))
-            entry['market_value'] += _safe_float(data.get('market_value'))
             if entry['name'] == ticker and data.get('name'):
                 entry['name'] = data['name']
 
@@ -265,7 +263,6 @@ async def get_aggregated_positions(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
             )
-
         name_lookup: Dict[str, str] = {}
         for acc_id in account_ids:
             for pos in db.find("positions", {"account_id": acc_id}):
@@ -279,6 +276,7 @@ async def get_aggregated_positions(
                 _compute_account_positions_from_transactions(db, acc_id, as_of, name_lookup)
             )
     else:
+        as_of = None
         for acc_id in account_ids:
             account_positions = db.find("positions", {"account_id": acc_id})
             position_map: Dict[str, Dict[str, float]] = {}
@@ -296,10 +294,46 @@ async def get_aggregated_positions(
             if position_map:
                 position_maps.append(position_map)
 
-        if not position_maps:
-            return []
+    if not position_maps:
+        return []
 
     aggregated = _aggregate_position_maps(position_maps)
+
+    price_cache: Dict[str, Optional[float]] = {}
+
+    for position in aggregated:
+        ticker = position['ticker']
+        if ticker == 'CASH':
+            position['price'] = 1.0
+            position['market_value'] = float(position['quantity'])
+            continue
+
+        if ticker in price_cache:
+            price = price_cache[ticker]
+        else:
+            price = None
+            try:
+                if as_of:
+                    price = market_service.get_historical_price(ticker, as_of)
+                else:
+                    price = market_service.get_current_price(ticker)
+                price_cache[ticker] = price
+            except Exception as exc:
+                logger.warning("Failed to fetch market price for %s: %s", ticker, exc)
+                price_cache[ticker] = None
+
+        if price is not None:
+            position['price'] = float(price)
+            position['market_value'] = float(price) * float(position['quantity'])
+        else:
+            fallback_price = (
+                (position['book_value'] / position['quantity'])
+                if position['quantity']
+                else 0.0
+            )
+            position['price'] = fallback_price
+            position['market_value'] = fallback_price * float(position['quantity'])
+
     return [AggregatedPosition(**position) for position in aggregated]
 
 @router.get("", response_model=List[Position])
