@@ -102,7 +102,8 @@ export const importAPI = {
   getStatements: () => api.get('/import/statements'),
   processStatement: (statementId) => api.post(`/import/statements/${statementId}/process`),
   reprocessStatement: (statementId) => api.post(`/import/statements/${statementId}/reprocess`),
-  reprocessAllStatements: () => api.post('/import/statements/reprocess-all'),
+  reprocessAllStatements: (accountId) =>
+    api.post('/import/statements/reprocess-all', accountId ? { account_id: accountId } : {}),
   deleteStatement: (statementId) => api.delete(`/import/statements/${statementId}`),
 };
 

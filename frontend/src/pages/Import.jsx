@@ -161,7 +161,6 @@ const Import = () => {
 
       setResult({ message: `${files.length} file(s) uploaded successfully. Click "Process" to import the data.` });
       setFiles([]);
-      setSelectedAccountId('');
       document.getElementById('file-input').value = '';
       loadStatements();
     } catch (err) {
@@ -305,6 +304,10 @@ const Import = () => {
     }
   };
 
+  const filteredStatements = selectedAccountId
+    ? statements.filter(statement => statement.account_id === selectedAccountId)
+    : statements;
+
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Typography variant="h4" gutterBottom>
@@ -359,6 +362,9 @@ const Import = () => {
             sx={{ mb: 2 }}
             helperText={accounts.length === 0 ? "No accounts found. Please create an account first." : "Choose which account to import this statement into"}
           >
+            <MenuItem value="">
+              All accounts
+            </MenuItem>
             {accounts.map((account) => (
               <MenuItem key={account.id} value={account.id}>
                 {account.label || `${account.institution} - ${account.account_number}`} ({account.account_type})
@@ -490,8 +496,16 @@ const Import = () => {
                     </Typography>
                   </TableCell>
                 </TableRow>
+              ) : filteredStatements.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} align="center">
+                    <Typography variant="body2" color="textSecondary">
+                      No statements for the selected account
+                    </Typography>
+                  </TableCell>
+                </TableRow>
               ) : (
-                statements.map((statement) => (
+                filteredStatements.map((statement) => (
                   <React.Fragment key={statement.id}>
                     <TableRow>
                       <TableCell>
