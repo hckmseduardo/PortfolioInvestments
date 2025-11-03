@@ -1,0 +1,9 @@
+Date,Type,Symbol,Quantity,Price,Fees,Amount,Description
+2024-01-15,buy,AAPL,10,150.00,0.00,1500.00,Purchase of Apple shares
+2024-01-20,buy,MSFT,5,240.00,0.00,1200.00,Purchase of Microsoft shares
+2024-02-01,dividend,AAPL,,,0.00,25.00,Quarterly dividend payment
+2024-02-05,buy,GOOGL,3,300.00,0.00,900.00,Purchase of Alphabet shares
+2024-02-15,dividend,MSFT,,,0.00,15.00,Quarterly dividend payment
+2024-03-01,buy,AMZN,2,300.00,0.00,600.00,Purchase of Amazon shares
+2024-03-10,sell,AAPL,2,180.00,0.00,360.00,Partial sale of Apple shares
+2024-03-15,buy,TSLA,4,200.00,0.00,800.00,Purchase of Tesla shares
