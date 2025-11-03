@@ -5,6 +5,8 @@ A comprehensive investment portfolio management platform that allows users to im
 ## Features
 
 - **Statement Import & Processing**: Upload Wealthsimple statements (PDF/CSV/Excel) and automatically extract portfolio data
+- **Transaction Statements**: View and filter all imported transactions with date range filters (last 7 days, month to date, last month, year to date, last year, all time, or custom period)
+- **Account Balance Tracking**: Real-time balance calculation based on transaction history
 - **Portfolio Dashboard**: View all accounts, positions, and real-time performance metrics
 - **Performance Analytics**: Track portfolio value, book value vs market value, and gain/loss over time
 - **Dividend Tracking**: Monitor dividend income by month and security with interactive charts
@@ -131,7 +133,22 @@ npm run dev
   - Transaction history
   - Dividend payments
 
-### 3. View Portfolio
+### 3. View Transactions
+- Navigate to the "Transactions" page
+- View all imported transactions from statements
+- Filter by account (all accounts or specific account)
+- Filter by date range:
+  - Last 7 Days
+  - Month to Date
+  - Last Month
+  - Year to Date
+  - Last Year
+  - All Time
+  - Custom Period (select start and end dates)
+- View account balance calculated from transactions
+- See total transaction count and imported statements count
+
+### 4. View Portfolio
 - Dashboard shows overview of all accounts and total portfolio value
 - Portfolio page displays detailed position table with:
   - Current holdings
@@ -139,18 +156,18 @@ npm run dev
   - Unrealized gains/losses
   - Percentage returns
 
-### 4. Track Dividends
+### 5. Track Dividends
 - View total dividend income
 - Bar chart showing dividends by month
 - Pie chart showing dividend distribution by ticker
 
-### 5. Manage Expenses
+### 6. Manage Expenses
 - Track checking account transactions
 - Categorize expenses
 - View spending by category (pie chart)
 - Monitor monthly spending trends (bar chart)
 
-### 6. Refresh Market Prices
+### 7. Refresh Market Prices
 - Click "Refresh Prices" on Portfolio page
 - System fetches current market prices from Yahoo Finance
 - Updates all position values automatically
@@ -176,6 +193,12 @@ npm run dev
 - `PUT /positions/{id}` - Update position
 - `POST /positions/refresh-prices` - Refresh market prices
 - `DELETE /positions/{id}` - Delete position
+
+### Transactions
+- `GET /transactions` - List transactions with optional filters (account_id, start_date, end_date)
+- `GET /transactions/balance` - Calculate account balance (with optional account_id and as_of_date)
+- `POST /transactions` - Create transaction
+- `DELETE /transactions/{id}` - Delete transaction
 
 ### Dividends
 - `GET /dividends` - List dividends
@@ -223,11 +246,13 @@ npm run dev
 {
   "id": "uuid",
   "account_id": "uuid",
+  "type": "buy|sell|dividend|deposit|withdrawal|fee|bonus|transfer",
   "ticker": "AAPL",
-  "name": "Apple Inc.",
   "quantity": 10,
-  "book_value": 1500.00,
-  "market_value": 1800.00
+  "price": 150.00,
+  "fees": 0.00,
+  "total": 1500.00,
+  "description": "Transaction description"
 }
 ```
 
