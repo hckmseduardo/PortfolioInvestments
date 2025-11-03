@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Container,
   Grid,
@@ -7,7 +7,8 @@ import {
   Box,
   Card,
   CardContent,
-  Button
+  TextField,
+  Stack
 } from '@mui/material';
 import {
   TrendingUp,
@@ -23,35 +24,53 @@ const Dashboard = () => {
   const [accounts, setAccounts] = useState([]);
   const [dividendSummary, setDividendSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(false);
+  const [selectedDate, setSelectedDate] = useState('');
 
   useEffect(() => {
+    const fetchData = async () => {
+      setFetching(true);
+      try {
+        const asOfParam = selectedDate || undefined;
+        const [summaryRes, accountsRes, dividendsRes] = await Promise.all([
+          positionsAPI.getSummary(asOfParam),
+          accountsAPI.getAll(),
+          dividendsAPI.getSummary(undefined, undefined, asOfParam)
+        ]);
+
+        setSummary(summaryRes.data);
+        setAccounts(accountsRes.data);
+        setDividendSummary(dividendsRes.data);
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      } finally {
+        setLoading(false);
+        setFetching(false);
+      }
+    };
+
     fetchData();
-  }, []);
-
-  const fetchData = async () => {
-    try {
-      const [summaryRes, accountsRes, dividendsRes] = await Promise.all([
-        positionsAPI.getSummary(),
-        accountsAPI.getAll(),
-        dividendsAPI.getSummary()
-      ]);
-
-      setSummary(summaryRes.data);
-      setAccounts(accountsRes.data);
-      setDividendSummary(dividendsRes.data);
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [selectedDate]);
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('en-CA', {
       style: 'currency',
       currency: 'CAD'
-    }).format(value);
+    }).format(value || 0);
   };
+
+  const capitalGains = useMemo(() => {
+    try {
+      const totalMarket = summary?.total_market_value || 0;
+      const totalBook = summary?.total_book_value || 0;
+      return totalMarket - totalBook;
+    } catch {
+      return 0;
+    }
+  }, [summary]);
+
+  const totalDividends = dividendSummary?.total_dividends || 0;
+  const totalGains = capitalGains + totalDividends;
 
   const StatCard = ({ title, value, icon, color, subtitle }) => (
     <Card>
@@ -86,14 +105,36 @@ const Dashboard = () => {
     );
   }
 
-  const gainLossColor = summary?.total_gain_loss >= 0 ? 'success.main' : 'error.main';
-  const gainLossIcon = summary?.total_gain_loss >= 0 ? <TrendingUp fontSize="large" /> : <TrendingDown fontSize="large" />;
+  const gainLossColor = capitalGains >= 0 ? 'success.main' : 'error.main';
+  const gainLossIcon = capitalGains >= 0 ? <TrendingUp fontSize="large" /> : <TrendingDown fontSize="large" />;
+
+  const asOfLabel = selectedDate
+    ? new Date(selectedDate).toLocaleDateString()
+    : new Date().toLocaleDateString();
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" gutterBottom>
-        Dashboard
-      </Typography>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Box>
+          <Typography variant="h4" gutterBottom>
+            Dashboard
+          </Typography>
+          <Typography variant="body2" color="textSecondary">
+            As of {asOfLabel}
+          </Typography>
+        </Box>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+          <TextField
+            label="As of date"
+            type="date"
+            size="small"
+            value={selectedDate}
+            onChange={(event) => setSelectedDate(event.target.value)}
+            InputLabelProps={{ shrink: true }}
+            helperText="Select a past date to view historical metrics"
+          />
+        </Stack>
+      </Box>
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
@@ -106,8 +147,16 @@ const Dashboard = () => {
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
+            title="Book Value"
+            value={formatCurrency(summary?.total_book_value || 0)}
+            icon={<AccountBalance fontSize="large" />}
+            color="info.main"
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
             title="Total Gain/Loss"
-            value={formatCurrency(summary?.total_gain_loss || 0)}
+            value={formatCurrency(capitalGains)}
             icon={gainLossIcon}
             color={gainLossColor}
             subtitle={`${summary?.total_gain_loss_percent?.toFixed(2) || 0}%`}
@@ -116,9 +165,18 @@ const Dashboard = () => {
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
             title="Total Dividends"
-            value={formatCurrency(dividendSummary?.total_dividends || 0)}
+            value={formatCurrency(totalDividends)}
             icon={<AttachMoney fontSize="large" />}
             color="success.main"
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="Total Gains"
+            value={formatCurrency(totalGains)}
+            icon={<TrendingUp fontSize="large" />}
+            color={totalGains >= 0 ? 'success.main' : 'error.main'}
+            subtitle={`Capital gains + dividends`}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
@@ -138,6 +196,11 @@ const Dashboard = () => {
             <Typography variant="h6" gutterBottom>
               Portfolio Performance
             </Typography>
+            {fetching && (
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                Updating metrics…
+              </Typography>
+            )}
             <Box sx={{ height: 300 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={[]}>

@@ -67,7 +67,10 @@ export const positionsAPI = {
         ...(asOfDate ? { as_of_date: asOfDate } : {})
       }
     }),
-  getSummary: () => api.get('/positions/summary'),
+  getSummary: (asOfDate) =>
+    api.get('/positions/summary', {
+      params: asOfDate ? { as_of_date: asOfDate } : {}
+    }),
   create: (data) => api.post('/positions', data),
   update: (id, data) => api.put(`/positions/${id}`, data),
   delete: (id) => api.delete(`/positions/${id}`),

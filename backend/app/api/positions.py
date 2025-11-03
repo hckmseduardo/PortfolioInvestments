@@ -212,57 +212,11 @@ def _aggregate_position_maps(position_maps: List[Dict[str, Dict[str, float]]]) -
     result.sort(key=lambda item: (item['ticker'] != 'CASH', item['ticker']))
     return result
 
-@router.post("", response_model=Position)
-async def create_position(
-    position: PositionCreate,
-    current_user: User = Depends(get_current_user)
-):
-    db = get_db()
-    
-    account = db.find_one("accounts", {"id": position.account_id, "user_id": current_user.id})
-    if not account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found"
-        )
-    
-    position_doc = position.model_dump()
-    created_position = db.insert("positions", position_doc)
-    
-    return Position(**created_position)
 
-@router.get("/aggregated", response_model=List[AggregatedPosition])
-async def get_aggregated_positions(
-    account_id: Optional[str] = None,
-    as_of_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    db = get_db()
-
-    if account_id:
-        account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
-        if not account:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Account not found"
-            )
-        account_ids = [account_id]
-    else:
-        user_accounts = db.find("accounts", {"user_id": current_user.id})
-        account_ids = [acc["id"] for acc in user_accounts]
-
-    if not account_ids:
-        return []
-
+def _build_aggregated_positions(db, account_ids: List[str], as_of: Optional[datetime]) -> List[Dict[str, float]]:
     position_maps: List[Dict[str, Dict[str, float]]] = []
 
-    if as_of_date:
-        as_of = _parse_iso_datetime(as_of_date)
-        if not as_of:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
-            )
+    if as_of:
         name_lookup: Dict[str, str] = {}
         for acc_id in account_ids:
             for pos in db.find("positions", {"account_id": acc_id}):
@@ -276,7 +230,6 @@ async def get_aggregated_positions(
                 _compute_account_positions_from_transactions(db, acc_id, as_of, name_lookup)
             )
     else:
-        as_of = None
         for acc_id in account_ids:
             account_positions = db.find("positions", {"account_id": acc_id})
             position_map: Dict[str, Dict[str, float]] = {}
@@ -334,6 +287,60 @@ async def get_aggregated_positions(
             position['price'] = fallback_price
             position['market_value'] = fallback_price * float(position['quantity'])
 
+    return aggregated
+
+@router.post("", response_model=Position)
+async def create_position(
+    position: PositionCreate,
+    current_user: User = Depends(get_current_user)
+):
+    db = get_db()
+    
+    account = db.find_one("accounts", {"id": position.account_id, "user_id": current_user.id})
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found"
+        )
+    
+    position_doc = position.model_dump()
+    created_position = db.insert("positions", position_doc)
+    
+    return Position(**created_position)
+
+@router.get("/aggregated", response_model=List[AggregatedPosition])
+async def get_aggregated_positions(
+    account_id: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    db = get_db()
+
+    if account_id:
+        account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+        if not account:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Account not found"
+            )
+        account_ids = [account_id]
+    else:
+        user_accounts = db.find("accounts", {"user_id": current_user.id})
+        account_ids = [acc["id"] for acc in user_accounts]
+
+    if not account_ids:
+        return []
+
+    as_of: Optional[datetime] = None
+    if as_of_date:
+        as_of = _parse_iso_datetime(as_of_date)
+        if not as_of:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
+            )
+
+    aggregated = _build_aggregated_positions(db, account_ids, as_of)
     return [AggregatedPosition(**position) for position in aggregated]
 
 @router.get("", response_model=List[Position])
@@ -362,27 +369,49 @@ async def get_positions(
     return [Position(**pos) for pos in positions]
 
 @router.get("/summary", response_model=PortfolioSummary)
-async def get_portfolio_summary(current_user: User = Depends(get_current_user)):
+async def get_portfolio_summary(
+    as_of_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
     db = get_db()
     
     user_accounts = db.find("accounts", {"user_id": current_user.id})
     account_ids = [acc["id"] for acc in user_accounts]
     
-    all_positions = []
-    for acc_id in account_ids:
-        all_positions.extend(db.find("positions", {"account_id": acc_id}))
-    
-    total_market_value = sum(pos.get("market_value", 0) for pos in all_positions)
-    total_book_value = sum(pos.get("book_value", 0) for pos in all_positions)
+    if not account_ids:
+        return PortfolioSummary(
+            total_market_value=0.0,
+            total_book_value=0.0,
+            total_gain_loss=0.0,
+            total_gain_loss_percent=0.0,
+            positions_count=0,
+            accounts_count=0
+        )
+
+    as_of: Optional[datetime] = None
+    if as_of_date:
+        as_of = _parse_iso_datetime(as_of_date)
+        if not as_of:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
+            )
+
+    aggregated = _build_aggregated_positions(db, account_ids, as_of)
+
+    total_market_value = sum(pos.get("market_value", 0) for pos in aggregated)
+    total_book_value = sum(pos.get("book_value", 0) for pos in aggregated)
     total_gain_loss = total_market_value - total_book_value
     total_gain_loss_percent = (total_gain_loss / total_book_value * 100) if total_book_value > 0 else 0
+    positions_count = len([pos for pos in aggregated if pos.get("ticker") != "CASH"])
+    
     
     return PortfolioSummary(
         total_market_value=total_market_value,
         total_book_value=total_book_value,
         total_gain_loss=total_gain_loss,
         total_gain_loss_percent=total_gain_loss_percent,
-        positions_count=len(all_positions),
+        positions_count=positions_count,
         accounts_count=len(user_accounts)
     )
 
