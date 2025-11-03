@@ -41,7 +41,13 @@ def recalculate_positions_from_transactions(account_id: str, db):
         total = txn.get('total', 0)
 
         # Handle cash-only transactions first
-        if txn_type in ['deposit', 'withdrawal']:
+        if txn_type in ['deposit', 'bonus']:
+            cash_position['quantity'] += total
+            cash_position['book_value'] += total
+            cash_position['market_value'] += total
+            continue
+
+        if txn_type in ['withdrawal', 'fee', 'tax']:
             # total should reflect the cash change (positive for deposit, negative for withdrawal)
             cash_position['quantity'] += total
             cash_position['book_value'] += total

@@ -348,16 +348,18 @@ class WealthsimpleParser:
             return 'dividend'
         elif transaction_type in ['DEPOSIT', 'DEP', 'TRFINTF', 'REFUND', 'CONT']:
             return 'deposit'
-        elif transaction_type in ['WITHDRAWAL', 'WITHDRAW', 'WD']:
+        elif transaction_type in ['WITHDRAWAL', 'WITHDRAW', 'WD', 'TRFOUT']:
             return 'withdrawal'
         elif transaction_type in ['FEE', 'FEES']:
             return 'fee'
-        elif transaction_type in ['BONUS', 'REWARD', 'FPLINT']:
+        elif transaction_type in ['BONUS', 'REWARD']:
             return 'bonus'
         elif transaction_type in ['NRT', 'TAX', 'WHT']:
             return 'tax'
+        elif transaction_type in ['FPLINT']:
+            return 'deposit'
         elif transaction_type in ['TRFIN']:
-            return 'transfer'
+            return 'deposit'
         elif transaction_type in ['LOAN', 'RECALL', 'STKDIS', 'STKREORG']:
             return None
         else:
