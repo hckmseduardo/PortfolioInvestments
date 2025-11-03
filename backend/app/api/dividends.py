@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from collections import defaultdict
 from app.models.schemas import Dividend, DividendCreate, DividendSummary, User
@@ -7,6 +7,51 @@ from app.api.auth import get_current_user
 from app.database.json_db import get_db
 
 router = APIRouter(prefix="/dividends", tags=["dividends"])
+
+def _parse_date(value: Optional[str], *, end_of_day: bool = False) -> Optional[datetime]:
+    if not value:
+        return None
+
+    try:
+        if len(value) == 10:
+            suffix = "T23:59:59.999999" if end_of_day else "T00:00:00"
+            return datetime.fromisoformat(f"{value}{suffix}")
+        return datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            if value.endswith("Z"):
+                adjusted = value[:-1] + "+00:00"
+                dt = datetime.fromisoformat(adjusted)
+            else:
+                dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return dt
+        except ValueError:
+            return None
+
+def _filter_dividends_by_date(dividends, start_dt: Optional[datetime], end_dt: Optional[datetime]):
+    if not start_dt and not end_dt:
+        return dividends
+
+    filtered = []
+    for div in dividends:
+        date_raw = div.get("date")
+        if not date_raw:
+            continue
+        try:
+            date_obj = datetime.fromisoformat(str(date_raw).replace('Z', '+00:00'))
+        except ValueError:
+            if isinstance(date_raw, datetime):
+                date_obj = date_raw
+            else:
+                continue
+
+        if start_dt and date_obj < start_dt:
+            continue
+        if end_dt and date_obj > end_dt:
+            continue
+        filtered.append(div)
+
+    return filtered
 
 @router.post("", response_model=Dividend)
 async def create_dividend(
@@ -31,9 +76,13 @@ async def create_dividend(
 async def get_dividends(
     account_id: str = None,
     ticker: str = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
     db = get_db()
+    start_dt = _parse_date(start_date, end_of_day=False)
+    end_dt = _parse_date(end_date, end_of_day=True)
     
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
@@ -58,15 +107,22 @@ async def get_dividends(
             if ticker:
                 query["ticker"] = ticker
             dividends.extend(db.find("dividends", query))
+
+    dividends = _filter_dividends_by_date(dividends, start_dt, end_dt)
+    dividends = sorted(dividends, key=lambda item: item.get("date", ""), reverse=True)
     
     return [Dividend(**div) for div in dividends]
 
 @router.get("/summary", response_model=DividendSummary)
 async def get_dividend_summary(
     account_id: str = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
     db = get_db()
+    start_dt = _parse_date(start_date, end_of_day=False)
+    end_dt = _parse_date(end_date, end_of_day=True)
     
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
@@ -83,6 +139,8 @@ async def get_dividend_summary(
         dividends = []
         for acc_id in account_ids:
             dividends.extend(db.find("dividends", {"account_id": acc_id}))
+
+    dividends = _filter_dividends_by_date(dividends, start_dt, end_dt)
     
     total_dividends = sum(div.get("amount", 0) for div in dividends)
     
@@ -105,7 +163,9 @@ async def get_dividend_summary(
     return DividendSummary(
         total_dividends=total_dividends,
         dividends_by_month=dict(by_month),
-        dividends_by_ticker=dict(by_ticker)
+        dividends_by_ticker=dict(by_ticker),
+        period_start=start_dt.isoformat() if start_dt else None,
+        period_end=end_dt.isoformat() if end_dt else None
     )
 
 @router.delete("/{dividend_id}")

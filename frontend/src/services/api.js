@@ -75,10 +75,23 @@ export const positionsAPI = {
 };
 
 export const dividendsAPI = {
-  getAll: (accountId, ticker) =>
-    api.get('/dividends', { params: { account_id: accountId, ticker } }),
-  getSummary: (accountId) =>
-    api.get('/dividends/summary', { params: accountId ? { account_id: accountId } : {} }),
+  getAll: (accountId, ticker, startDate, endDate) =>
+    api.get('/dividends', {
+      params: {
+        ...(accountId ? { account_id: accountId } : {}),
+        ...(ticker ? { ticker } : {}),
+        ...(startDate ? { start_date: startDate } : {}),
+        ...(endDate ? { end_date: endDate } : {})
+      }
+    }),
+  getSummary: (accountId, startDate, endDate) =>
+    api.get('/dividends/summary', {
+      params: {
+        ...(accountId ? { account_id: accountId } : {}),
+        ...(startDate ? { start_date: startDate } : {}),
+        ...(endDate ? { end_date: endDate } : {})
+      }
+    }),
   create: (data) => api.post('/dividends', data),
   delete: (id) => api.delete(`/dividends/${id}`),
 };
