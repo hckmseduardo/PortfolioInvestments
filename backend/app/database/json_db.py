@@ -18,6 +18,7 @@ class JSONDatabase:
             'dividends': self.db_path / 'dividends.json',
             'expenses': self.db_path / 'expenses.json',
             'categories': self.db_path / 'categories.json',
+            'statements': self.db_path / 'statements.json',
         }
         
         for collection_file in self.collections.values():
@@ -79,9 +80,17 @@ class JSONDatabase:
         results = self.find(collection, query)
         return results[0] if results else None
     
-    def update(self, collection: str, query: Dict[str, Any], update_data: Dict[str, Any]) -> int:
+    def update(self, collection: str, document_id_or_query, update_data: Dict[str, Any] = None) -> int:
         if collection not in self.collections:
             raise ValueError(f"Collection {collection} not found")
+        
+        if update_data is None:
+            raise ValueError("update_data is required")
+        
+        if isinstance(document_id_or_query, str):
+            query = {"id": document_id_or_query}
+        else:
+            query = document_id_or_query
         
         file_path = self.collections[collection]
         data = self._read_file(file_path)
@@ -104,9 +113,14 @@ class JSONDatabase:
         
         return updated_count
     
-    def delete(self, collection: str, query: Dict[str, Any]) -> int:
+    def delete(self, collection: str, document_id_or_query) -> int:
         if collection not in self.collections:
             raise ValueError(f"Collection {collection} not found")
+        
+        if isinstance(document_id_or_query, str):
+            query = {"id": document_id_or_query}
+        else:
+            query = document_id_or_query
         
         file_path = self.collections[collection]
         data = self._read_file(file_path)
@@ -130,6 +144,9 @@ class JSONDatabase:
             self._write_file(file_path, filtered_data)
         
         return deleted_count
+    
+    def delete_many(self, collection: str, query: Dict[str, Any]) -> int:
+        return self.delete(collection, query)
     
     def count(self, collection: str, query: Optional[Dict[str, Any]] = None) -> int:
         return len(self.find(collection, query))
