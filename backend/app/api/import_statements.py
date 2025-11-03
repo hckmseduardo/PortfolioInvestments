@@ -359,6 +359,98 @@ async def reprocess_statement(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error reprocessing file: {str(e)}"
         )
+@router.post("/statements/reprocess-all")
+async def reprocess_all_statements(
+    current_user: User = Depends(get_current_user)
+):
+    db = get_db()
+    statements = db.find("statements", {"user_id": current_user.id})
+
+    if not statements:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No statements found"
+        )
+
+    # Sort statements by uploaded_at date (oldest first)
+    statements = sorted(statements, key=lambda x: x.get('uploaded_at', ''))
+
+    # Delete all transactions, dividends, and positions for this user's accounts
+    user_accounts = db.find("accounts", {"user_id": current_user.id})
+    for account in user_accounts:
+        db.delete_many("transactions", {"account_id": account['id']})
+        db.delete_many("dividends", {"account_id": account['id']})
+        db.delete_many("positions", {"account_id": account['id']})
+
+    results = []
+    failed_statements = []
+
+    for statement in statements:
+        if not os.path.exists(statement['file_path']):
+            failed_statements.append({
+                "statement_id": statement['id'],
+                "filename": statement['filename'],
+                "error": "File not found on disk"
+            })
+            db.update("statements", statement['id'], {
+                "status": "failed",
+                "error_message": "File not found on disk"
+            })
+            continue
+
+        db.update("statements", statement['id'], {
+            "status": "processing",
+            "processed_at": None,
+            "error_message": None
+        })
+
+        try:
+            result = process_statement_file(
+                statement['file_path'],
+                statement.get('account_id'),
+                db,
+                current_user,
+                statement['id']
+            )
+
+            db.update("statements", statement['id'], {
+                "status": "completed",
+                "processed_at": datetime.now().isoformat(),
+                "account_id": result.get("account_id"),
+                "positions_count": result.get("positions_created"),
+                "transactions_count": result.get("transactions_created"),
+                "dividends_count": result.get("dividends_created"),
+                "error_message": None
+            })
+
+            results.append({
+                "statement_id": statement['id'],
+                "filename": statement['filename'],
+                "status": "success",
+                **result
+            })
+
+        except Exception as e:
+            logger.error(f"Error reprocessing statement {statement['id']}: {str(e)}", exc_info=True)
+            db.update("statements", statement['id'], {
+                "status": "failed",
+                "processed_at": datetime.now().isoformat(),
+                "error_message": str(e)
+            })
+            failed_statements.append({
+                "statement_id": statement['id'],
+                "filename": statement['filename'],
+                "error": str(e)
+            })
+
+    return {
+        "message": f"Reprocessed {len(results)} statements successfully",
+        "total_statements": len(statements),
+        "successful": len(results),
+        "failed": len(failed_statements),
+        "results": results,
+        "failed_statements": failed_statements
+    }
 
 @router.delete("/statements/{statement_id}")
 async def delete_statement(
