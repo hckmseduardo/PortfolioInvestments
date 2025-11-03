@@ -142,7 +142,8 @@ const Transactions = () => {
       withdrawal: 'warning',
       fee: 'error',
       bonus: 'success',
-      transfer: 'info'
+      transfer: 'info',
+      tax: 'error'
     };
     return colors[type] || 'default';
   };

@@ -321,6 +321,8 @@ class WealthsimpleParser:
             return 'fee'
         elif transaction_type in ['BONUS', 'REWARD', 'FPLINT']:
             return 'bonus'
+        elif transaction_type in ['NRT', 'TAX', 'WHT']:
+            return 'tax'
         elif transaction_type in ['TRFIN']:
             return 'transfer'
         elif transaction_type in ['LOAN', 'RECALL', 'STKDIS', 'STKREORG']:

@@ -17,6 +17,7 @@ class TransactionType(str, Enum):
     FEE = "fee"
     BONUS = "bonus"
     TRANSFER = "transfer"
+    TAX = "tax"
 
 class UserBase(BaseModel):
     email: EmailStr

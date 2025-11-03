@@ -101,8 +101,8 @@ async def get_account_balance(
 
         if txn_type in ['deposit', 'dividend', 'bonus']:
             balance += total
-        elif txn_type in ['withdrawal', 'fee']:
-            balance -= total
+        elif txn_type in ['withdrawal', 'fee', 'tax']:
+            balance -= abs(total)
         elif txn_type == 'buy':
             balance += total
         elif txn_type == 'sell':
