@@ -155,10 +155,36 @@ class WealthsimpleParser:
         if not date_col or not type_col:
             return
 
+        # Ensure helper methods exist on self (provide sensible fallbacks if not defined elsewhere)
+        if not hasattr(self, '_extract_quantity_from_description'):
+            def _extract_quantity_from_description(description):
+                if not description:
+                    return None
+                # Look for patterns like "50", "50.0", "50 shares", "50 x", "(50)"
+                m = re.search(r'([0-9]+(?:[.,][0-9]+)?)', str(description))
+                if not m:
+                    return None
+                try:
+                    return float(m.group(1).replace(',', ''))
+                except:
+                    return None
+            self._extract_quantity_from_description = _extract_quantity_from_description
+
+        if not hasattr(self, '_extract_name_from_description'):
+            def _extract_name_from_description(description):
+                if not description:
+                    return ''
+                parts = re.split(r'\s*-\s*', str(description), maxsplit=1)
+                if len(parts) > 1:
+                    return parts[1].strip()
+                return str(description).strip()
+            self._extract_name_from_description = _extract_name_from_description
+
         for _, row in df.iterrows():
             transaction_type = str(row.get(type_col, '')).upper()
+            description = row.get('description', row.get('Description', ''))
 
-            ticker = self._extract_ticker_from_description(row.get('description', row.get('Description', '')))
+            ticker = self._extract_ticker_from_description(description)
             amount = float(row.get('amount', row.get('Amount', 0))) if pd.notna(row.get('amount', row.get('Amount', 0))) else 0.0
 
             mapped_type = self._map_transaction_type(transaction_type)
@@ -166,18 +192,36 @@ class WealthsimpleParser:
             if mapped_type is None:
                 continue
 
+            quantity = float(row.get('Quantity', row.get('Shares', row.get('quantity', row.get('shares', 0))))) if pd.notna(row.get('Quantity', row.get('Shares', row.get('quantity', row.get('shares', 0))))) else None
+
+            if quantity is None or quantity == 0:
+                quantity = self._extract_quantity_from_description(description)
+
             transaction = {
                 'date': self._parse_date(row.get(date_col, '')),
                 'type': mapped_type,
                 'ticker': ticker or row.get('Symbol', row.get('Ticker', row.get('symbol', row.get('ticker', '')))),
-                'quantity': float(row.get('Quantity', row.get('Shares', row.get('quantity', row.get('shares', 0))))) if pd.notna(row.get('Quantity', row.get('Shares', row.get('quantity', row.get('shares', 0))))) else None,
+                'quantity': quantity,
                 'price': float(row.get('Price', row.get('price', 0))) if pd.notna(row.get('Price', row.get('price', 0))) else None,
                 'fees': float(row.get('Fees', row.get('Commission', row.get('fees', row.get('commission', 0))))),
                 'total': amount,
-                'description': row.get('description', row.get('Description', ''))
+                'description': description
             }
 
             self.transactions.append(transaction)
+
+            if mapped_type == 'transfer' and ticker and quantity and quantity > 0:
+                existing_position = next((p for p in self.positions if p['ticker'] == ticker), None)
+                if existing_position:
+                    existing_position['quantity'] += quantity
+                else:
+                    self.positions.append({
+                        'ticker': ticker,
+                        'name': self._extract_name_from_description(description),
+                        'quantity': quantity,
+                        'book_value': 0.0,
+                        'market_value': 0.0
+                    })
 
             if transaction['type'] == 'dividend' and amount > 0:
                 dividend = {
@@ -196,6 +240,38 @@ class WealthsimpleParser:
         if match:
             return match.group(1)
         return ''
+
+    def _extract_quantity_from_description(self, description: str) -> float:
+        if not description:
+            return 0.0
+
+        match = re.search(r'(\d+(?:\.\d+)?)\s*shares?', str(description), re.IGNORECASE)
+        if match:
+            try:
+                return float(match.group(1).replace(',', ''))
+            except:
+                return 0.0
+        # Fallback: look for any standalone number
+        match = re.search(r'([0-9]+(?:[.,][0-9]+)?)', str(description))
+        if match:
+            try:
+                return float(match.group(1).replace(',', ''))
+            except:
+                return 0.0
+        return 0.0
+
+    def _extract_name_from_description(self, description: str) -> str:
+        if not description:
+            return ''
+
+        match = re.match(r'^[A-Z][A-Z0-9.]*\s*-\s*([^:]+)', str(description))
+        if match:
+            return match.group(1).strip()
+        # Fallback: split on hyphen or colon and return the latter part
+        parts = re.split(r'\s*[-:]\s*', str(description), maxsplit=1)
+        if len(parts) > 1:
+            return parts[1].strip()
+        return str(description).strip()
 
     def _parse_date(self, date_str: str) -> str:
         try:
