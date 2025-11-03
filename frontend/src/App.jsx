@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -14,19 +14,40 @@ import Expenses from './pages/Expenses';
 import Import from './pages/Import';
 import AccountManagement from './pages/AccountManagement';
 import Transactions from './pages/Transactions';
+import { ThemeModeProvider, useThemeMode } from './context/ThemeContext';
 
-const theme = createTheme({
-  palette: {
-    primary: {
-      main: '#1976d2',
-    },
-    secondary: {
-      main: '#dc004e',
-    },
-  },
-});
+const AppShell = () => {
+  const { mode } = useThemeMode();
 
-function App() {
+  const theme = useMemo(() => createTheme({
+    palette: {
+      mode,
+      primary: {
+        main: '#1976d2'
+      },
+      secondary: {
+        main: '#dc004e'
+      },
+      background: {
+        default: mode === 'dark' ? '#101418' : '#f4f6f8',
+        paper: mode === 'dark' ? '#161b21' : '#ffffff'
+      }
+    },
+    components: {
+      MuiCard: {
+        styleOverrides: {
+          root: {
+            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+            '&:hover': {
+              transform: 'translateY(-2px)',
+              boxShadow: mode === 'dark' ? '0 8px 16px rgba(0,0,0,0.35)' : '0 8px 24px rgba(0,0,0,0.15)'
+            }
+          }
+        }
+      }
+    }
+  }), [mode]);
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -58,6 +79,14 @@ function App() {
         </Router>
       </AuthProvider>
     </ThemeProvider>
+  );
+};
+
+function App() {
+  return (
+    <ThemeModeProvider>
+      <AppShell />
+    </ThemeModeProvider>
   );
 }
 

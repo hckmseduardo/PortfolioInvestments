@@ -7,7 +7,8 @@ import {
   Box,
   IconButton,
   Menu,
-  MenuItem
+  MenuItem,
+  Tooltip
 } from '@mui/material';
 import {
   AccountCircle,
@@ -17,16 +18,22 @@ import {
   Receipt,
   Upload,
   AccountBalance,
-  SwapHoriz
+  SwapHoriz,
+  Brightness4,
+  Brightness7
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '@mui/material/styles';
+import { useThemeMode } from '../context/ThemeContext';
 
 const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
   const [anchorEl, setAnchorEl] = React.useState(null);
+  const theme = useTheme();
+  const { toggleMode, mode } = useThemeMode();
 
   const handleMenu = (event) => {
     setAnchorEl(event.currentTarget);
@@ -53,7 +60,7 @@ const Navbar = () => {
   ];
 
   return (
-    <AppBar position="static">
+    <AppBar position="static" color="primary" enableColorOnDark>
       <Toolbar>
         <Typography variant="h6" component="div" sx={{ flexGrow: 0, mr: 4 }}>
           Portfolio Manager
@@ -75,7 +82,13 @@ const Navbar = () => {
           ))}
         </Box>
 
-        <Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Tooltip title={`Switch to ${mode === 'dark' ? 'light' : 'dark'} mode`}>
+            <IconButton color="inherit" onClick={toggleMode}>
+              {theme.palette.mode === 'dark' ? <Brightness7 /> : <Brightness4 />}
+            </IconButton>
+          </Tooltip>
+
           <IconButton
             size="large"
             onClick={handleMenu}
