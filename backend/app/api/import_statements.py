@@ -51,7 +51,8 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
     for position_data in parsed_data.get('positions', []):
         position_doc = {
             **position_data,
-            "account_id": account_id
+            "account_id": account_id,
+            "last_updated": datetime.now().isoformat()
         }
         db.insert("positions", position_doc)
         positions_created += 1

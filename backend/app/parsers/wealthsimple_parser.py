@@ -223,6 +223,21 @@ class WealthsimpleParser:
                         'market_value': 0.0
                     })
 
+            if mapped_type == 'deposit' and amount > 0:
+                cash_position = next((p for p in self.positions if p['ticker'] == 'CASH'), None)
+                if cash_position:
+                    cash_position['quantity'] += amount
+                    cash_position['book_value'] += amount
+                    cash_position['market_value'] += amount
+                else:
+                    self.positions.append({
+                        'ticker': 'CASH',
+                        'name': 'Cash',
+                        'quantity': amount,
+                        'book_value': amount,
+                        'market_value': amount
+                    })
+
             if transaction['type'] == 'dividend' and amount > 0:
                 dividend = {
                     'ticker': transaction['ticker'],
