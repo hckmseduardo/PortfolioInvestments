@@ -142,21 +142,44 @@ async def delete_position(
     current_user: User = Depends(get_current_user)
 ):
     db = get_db()
-    
+
     existing_position = db.find_one("positions", {"id": position_id})
     if not existing_position:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Position not found"
         )
-    
+
     account = db.find_one("accounts", {"id": existing_position["account_id"], "user_id": current_user.id})
     if not account:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to delete this position"
         )
-    
+
     db.delete("positions", {"id": position_id})
-    
+
     return {"message": "Position deleted successfully"}
+
+@router.post("/recalculate")
+async def recalculate_positions(
+    account_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    from app.api.import_statements import recalculate_positions_from_transactions
+
+    db = get_db()
+
+    account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found"
+        )
+
+    positions_created = recalculate_positions_from_transactions(account_id, db)
+
+    return {
+        "message": "Positions recalculated successfully",
+        "positions_created": positions_created
+    }

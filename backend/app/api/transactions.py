@@ -104,7 +104,7 @@ async def get_account_balance(
         elif txn_type in ['withdrawal', 'fee']:
             balance -= total
         elif txn_type == 'buy':
-            balance -= total
+            balance += total
         elif txn_type == 'sell':
             balance += total
 

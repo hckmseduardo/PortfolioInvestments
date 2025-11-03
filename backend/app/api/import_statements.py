@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from typing import List, Optional
+from typing import List, Optional, Dict
 import os
 import aiofiles
 from pathlib import Path
@@ -18,6 +18,96 @@ ALLOWED_EXTENSIONS = {'.pdf', '.csv', '.xlsx', '.xls'}
 
 def allowed_file(filename: str) -> bool:
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
+
+def recalculate_positions_from_transactions(account_id: str, db):
+    transactions = db.find("transactions", {"account_id": account_id})
+    transactions = sorted(transactions, key=lambda x: x.get('date', ''))
+
+    positions_map: Dict[str, Dict] = {}
+
+    cash_position = {
+        'ticker': 'CASH',
+        'name': 'Cash',
+        'quantity': 0,
+        'book_value': 0,
+        'market_value': 0,
+        'account_id': account_id
+    }
+
+    for txn in transactions:
+        txn_type = txn.get('type')
+        ticker = txn.get('ticker', '').strip()
+        quantity = txn.get('quantity', 0)
+        total = txn.get('total', 0)
+
+        # Handle cash-only transactions first
+        if txn_type in ['deposit', 'withdrawal']:
+            # total should reflect the cash change (positive for deposit, negative for withdrawal)
+            cash_position['quantity'] += total
+            cash_position['book_value'] += total
+            cash_position['market_value'] += total
+            continue
+
+        if not ticker:
+            # Non-cash transaction without a ticker: skip
+            continue
+
+        if ticker not in positions_map:
+            positions_map[ticker] = {
+                'ticker': ticker,
+                'name': txn.get('description', '').split(':')[0].split('-', 1)[-1].strip() if '-' in txn.get('description', '') else ticker,
+                'quantity': 0,
+                'book_value': 0,
+                'market_value': 0,
+                'account_id': account_id
+            }
+
+        position = positions_map[ticker]
+
+        if txn_type == 'buy':
+            # Increase holding and book value; cash decreases by the cash spent
+            position['quantity'] += quantity
+            position['book_value'] += abs(total)
+            cash_position['quantity'] -= abs(total)
+            cash_position['book_value'] -= abs(total)
+            cash_position['market_value'] -= abs(total)
+        elif txn_type == 'sell':
+            # Decrease holding using average cost if possible; cash increases by proceeds
+            if position['quantity'] > 0:
+                avg_cost = position['book_value'] / position['quantity']
+                position['quantity'] -= quantity
+                position['book_value'] -= quantity * avg_cost
+            else:
+                position['quantity'] -= quantity
+            cash_position['quantity'] += abs(total)
+            cash_position['book_value'] += abs(total)
+            cash_position['market_value'] += abs(total)
+        elif txn_type == 'transfer':
+            # Transfers change quantity but typically don't affect cash
+            position['quantity'] += quantity
+        elif txn_type == 'dividend':
+            # Dividends increase cash
+            cash_position['quantity'] += total
+            cash_position['book_value'] += total
+            cash_position['market_value'] += total
+
+    # Ensure CASH is included in the positions map so it's persisted
+    positions_map['CASH'] = cash_position
+
+    db.delete_many("positions", {"account_id": account_id})
+
+    positions_created = 0
+    for ticker, position_data in positions_map.items():
+        # Persist positions with positive quantity or the CASH position
+        if position_data.get('quantity', 0) > 0 or ticker == 'CASH':
+            position_doc = {
+                **position_data,
+                "last_updated": datetime.now().isoformat()
+            }
+            db.insert("positions", position_doc)
+            positions_created += 1
+
+    return positions_created
 
 def process_statement_file(file_path: str, account_id: str, db, current_user: User):
     parser = WealthsimpleParser()
@@ -41,16 +131,6 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
             detail="Account ID is required"
         )
 
-    positions_created = 0
-    for position_data in parsed_data.get('positions', []):
-        position_doc = {
-            **position_data,
-            "account_id": account_id,
-            "last_updated": datetime.now().isoformat()
-        }
-        db.insert("positions", position_doc)
-        positions_created += 1
-
     transactions_created = 0
     for transaction_data in parsed_data.get('transactions', []):
         if transaction_data.get('type') is None:
@@ -70,6 +150,8 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
         }
         db.insert("dividends", dividend_doc)
         dividends_created += 1
+
+    positions_created = recalculate_positions_from_transactions(account_id, db)
 
     return {
         "account_id": account_id,
