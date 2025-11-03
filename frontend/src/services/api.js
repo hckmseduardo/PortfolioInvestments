@@ -77,6 +77,12 @@ export const positionsAPI = {
   refreshPrices: () => api.post('/positions/refresh-prices'),
 };
 
+export const dashboardAPI = {
+  getLayout: () => api.get('/dashboard/layout'),
+  saveLayout: (layout) => api.put('/dashboard/layout', { layout }),
+  resetLayout: () => api.delete('/dashboard/layout')
+};
+
 export const dividendsAPI = {
   getAll: (accountId, ticker, startDate, endDate) =>
     api.get('/dividends', {
