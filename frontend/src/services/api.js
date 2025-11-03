@@ -105,4 +105,24 @@ export const importAPI = {
   deleteStatement: (statementId) => api.delete(`/import/statements/${statementId}`),
 };
 
+export const transactionsAPI = {
+  getAll: (accountId, startDate, endDate) =>
+    api.get('/transactions', {
+      params: {
+        account_id: accountId,
+        start_date: startDate,
+        end_date: endDate
+      }
+    }),
+  getBalance: (accountId, asOfDate) =>
+    api.get('/transactions/balance', {
+      params: {
+        account_id: accountId,
+        as_of_date: asOfDate
+      }
+    }),
+  create: (data) => api.post('/transactions', data),
+  delete: (id) => api.delete(`/transactions/${id}`),
+};
+
 export default api;

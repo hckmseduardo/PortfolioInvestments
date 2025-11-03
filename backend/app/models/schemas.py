@@ -16,6 +16,7 @@ class TransactionType(str, Enum):
     WITHDRAWAL = "withdrawal"
     FEE = "fee"
     BONUS = "bonus"
+    TRANSFER = "transfer"
 
 class UserBase(BaseModel):
     email: EmailStr

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.api import auth, accounts, positions, import_statements, expenses, dividends
+from app.api import auth, accounts, positions, import_statements, expenses, dividends, transactions
 
 app = FastAPI(
     title="Investment Portfolio Management API",
@@ -23,6 +23,7 @@ app.include_router(positions.router)
 app.include_router(import_statements.router)
 app.include_router(expenses.router)
 app.include_router(dividends.router)
+app.include_router(transactions.router)
 
 @app.get("/")
 async def root():
