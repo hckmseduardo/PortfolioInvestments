@@ -90,6 +90,13 @@ class Position(PositionBase):
     class Config:
         from_attributes = True
 
+class AggregatedPosition(BaseModel):
+    ticker: str
+    name: str
+    quantity: float
+    book_value: float
+    market_value: float
+
 class TransactionBase(BaseModel):
     date: datetime
     type: TransactionType

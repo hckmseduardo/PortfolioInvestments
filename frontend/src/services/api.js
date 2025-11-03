@@ -60,6 +60,13 @@ export const accountsAPI = {
 export const positionsAPI = {
   getAll: (accountId) =>
     api.get('/positions', { params: accountId ? { account_id: accountId } : {} }),
+  getAggregated: (accountId, asOfDate) =>
+    api.get('/positions/aggregated', {
+      params: {
+        ...(accountId ? { account_id: accountId } : {}),
+        ...(asOfDate ? { as_of_date: asOfDate } : {})
+      }
+    }),
   getSummary: () => api.get('/positions/summary'),
   create: (data) => api.post('/positions', data),
   update: (id, data) => api.put(`/positions/${id}`, data),
