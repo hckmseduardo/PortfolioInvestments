@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Container,
   Grid,
@@ -31,6 +31,11 @@ const DEFAULT_LAYOUT = [
   'accounts_list'
 ];
 
+const PLACEHOLDER_PREFIX = '__EMPTY__';
+const placeholderGrid = { xs: 12, sm: 6, md: 3 };
+
+const isPlaceholder = (id) => typeof id === 'string' && id.startsWith(PLACEHOLDER_PREFIX);
+
 const Dashboard = () => {
   const [summary, setSummary] = useState(null);
   const [accounts, setAccounts] = useState([]);
@@ -42,6 +47,7 @@ const Dashboard = () => {
   const [layoutLoading, setLayoutLoading] = useState(true);
   const [draggedId, setDraggedId] = useState(null);
   const [overId, setOverId] = useState(null);
+  const placeholderCounter = useRef(0);
 
   useEffect(() => {
     const loadLayout = async () => {
@@ -49,15 +55,27 @@ const Dashboard = () => {
         const response = await dashboardAPI.getLayout();
         const serverLayout = response.data?.layout;
         if (Array.isArray(serverLayout) && serverLayout.length > 0) {
-          const sanitized = serverLayout.filter((item) => DEFAULT_LAYOUT.includes(item));
-          const unique = [...new Set(sanitized)];
-          setLayout(unique.length ? unique : DEFAULT_LAYOUT);
-        } else {
-          setLayout(DEFAULT_LAYOUT);
+          const sanitized = serverLayout.filter((item) => {
+            return typeof item === 'string' && (DEFAULT_LAYOUT.includes(item) || isPlaceholder(item));
+          });
+          const deduped = [];
+          sanitized.forEach((item) => {
+            if (isPlaceholder(item) || !deduped.includes(item)) {
+              deduped.push(item);
+            }
+          });
+          if (deduped.length) {
+            setLayout(deduped);
+            placeholderCounter.current = deduped.filter(isPlaceholder).length;
+            return;
+          }
         }
+        setLayout(DEFAULT_LAYOUT);
+        placeholderCounter.current = 0;
       } catch (error) {
         console.error('Error loading dashboard layout:', error);
         setLayout(DEFAULT_LAYOUT);
+        placeholderCounter.current = 0;
       } finally {
         setLayoutLoading(false);
       }
@@ -156,12 +174,18 @@ const Dashboard = () => {
 
   const persistLayout = async (nextLayout) => {
     setLayout(nextLayout);
+    placeholderCounter.current = Math.max(
+      placeholderCounter.current,
+      nextLayout.filter(isPlaceholder).length
+    );
     try {
       await dashboardAPI.saveLayout(nextLayout);
     } catch (error) {
       console.error('Error saving dashboard layout:', error);
     }
   };
+
+  const generatePlaceholderId = () => `${PLACEHOLDER_PREFIX}${placeholderCounter.current++}`;
 
   const handleResetLayout = async () => {
     try {
@@ -221,28 +245,73 @@ const Dashboard = () => {
     const dragged = event.dataTransfer.getData('text/plain');
     if (!dragged) {
       setDraggedId(null);
+      setOverId(null);
       return;
     }
-    const nextLayout = reorderLayout(layout, dragged, targetId);
+    if (dragged === targetId) {
+      setDraggedId(null);
+      setOverId(null);
+      return;
+    }
+
+    const sourceIndex = layout.indexOf(dragged);
+    if (sourceIndex === -1) {
+      setDraggedId(null);
+      setOverId(null);
+      return;
+    }
+
+    let nextLayout = layout;
+
+    if (isPlaceholder(targetId)) {
+      const targetIndex = layout.indexOf(targetId);
+      if (targetIndex !== -1) {
+        const placeholderId = isPlaceholder(layout[sourceIndex])
+          ? layout[sourceIndex]
+          : generatePlaceholderId();
+
+        nextLayout = [...layout];
+        nextLayout[targetIndex] = dragged;
+        if (sourceIndex !== targetIndex) {
+          nextLayout[sourceIndex] = placeholderId;
+        }
+      }
+    } else {
+      const reordered = reorderLayout(layout, dragged, targetId);
+      if (reordered !== layout) {
+        nextLayout = reordered;
+      }
+    }
+
     if (nextLayout !== layout) {
       persistLayout(nextLayout);
     }
+
     setDraggedId(null);
+    setOverId(null);
   };
 
   const handleDropOnContainer = (event) => {
     event.preventDefault();
     const dragged = event.dataTransfer.getData('text/plain');
     if (!dragged) {
-      return;
-    }
-    if (layout[layout.length - 1] === dragged) {
       setDraggedId(null);
       setOverId(null);
       return;
     }
-    const filtered = layout.filter((item) => item !== dragged);
-    const nextLayout = [...filtered, dragged];
+
+    const sourceIndex = layout.indexOf(dragged);
+    if (sourceIndex === -1) {
+      setDraggedId(null);
+      setOverId(null);
+      return;
+    }
+
+    const nextLayout = [...layout];
+    if (!isPlaceholder(nextLayout[sourceIndex])) {
+      nextLayout[sourceIndex] = generatePlaceholderId();
+    }
+    nextLayout.push(dragged);
     persistLayout(nextLayout);
     setDraggedId(null);
     setOverId(null);
@@ -380,15 +449,23 @@ const Dashboard = () => {
   };
 
   const renderedItems = layout
-    .map((item) => ({ key: item, config: layoutConfig[item] }))
-    .filter((entry) => entry.config);
+    .map((item) => {
+      if (isPlaceholder(item)) {
+        return { key: item, config: { grid: placeholderGrid }, placeholder: true };
+      }
+      if (!layoutConfig[item]) {
+        return null;
+      }
+      return { key: item, config: layoutConfig[item], placeholder: false };
+    })
+    .filter(Boolean);
 
   const placeholderStyles = {
     border: '2px dashed',
-    borderColor: 'primary.main',
+    borderColor: 'divider',
     borderRadius: 2,
-    backgroundColor: 'action.hover',
-    height: '100%',
+    backgroundColor: 'transparent',
+    minHeight: 120,
     transition: 'all 0.2s ease'
   };
 
@@ -423,47 +500,74 @@ const Dashboard = () => {
         spacing={3}
         onDragOver={handleDragOverContainer}
         onDrop={handleDropOnContainer}
+        onDragLeave={() => overId === 'container' && setOverId(null)}
       >
-        {renderedItems.flatMap(({ key, config }) => {
-          const items = [];
-          const shouldShowPlaceholder = draggedId && draggedId !== key && overId === key;
+        {renderedItems.flatMap(({ key, config, placeholder }) => {
+          const tiles = [];
 
-          if (shouldShowPlaceholder) {
-            items.push(
-              <Grid item key={`${key}-placeholder`} {...config.grid}>
-                <Box sx={placeholderStyles} />
+          if (!placeholder && draggedId && draggedId !== key && overId === key) {
+            tiles.push(
+              <Grid item key={`${key}-preview`} {...placeholderGrid}>
+                <Box
+                  sx={{
+                    ...placeholderStyles,
+                    borderColor: 'primary.main',
+                    backgroundColor: 'action.hover',
+                    opacity: 0.85
+                  }}
+                />
               </Grid>
             );
           }
 
-          items.push(
-            <Grid item key={key} {...config.grid}>
-              <Box
-                draggable
-                onDragStart={(event) => handleDragStart(event, key)}
-                onDragOver={(event) => handleDragOverItem(event, key)}
-                onDrop={(event) => handleDrop(event, key)}
-                onDragEnd={handleDragEnd}
-                sx={{
-                  cursor: 'grab',
-                  opacity: draggedId === key ? 0.55 : 1,
-                  transition: 'opacity 0.25s ease, box-shadow 0.25s ease',
-                  boxShadow: draggedId === key ? 3 : 1,
-                  '&:hover': {
-                    boxShadow: 4
-                  }
-                }}
-              >
-                {config.render()}
-              </Box>
+          tiles.push(
+            <Grid item key={key} {...(config.grid || placeholderGrid)}>
+              {placeholder ? (
+                <Box
+                  onDragOver={(event) => handleDragOverItem(event, key)}
+                  onDrop={(event) => handleDrop(event, key)}
+                  onDragLeave={() => overId === key && setOverId(null)}
+                  sx={{
+                    ...placeholderStyles,
+                    borderColor: overId === key ? 'primary.main' : 'divider',
+                    backgroundColor: overId === key ? 'action.hover' : 'transparent',
+                    opacity: draggedId ? 0.75 : 0.5
+                  }}
+                />
+              ) : (
+                <Box
+                  draggable
+                  onDragStart={(event) => handleDragStart(event, key)}
+                  onDragOver={(event) => handleDragOverItem(event, key)}
+                  onDrop={(event) => handleDrop(event, key)}
+                  onDragLeave={() => overId === key && setOverId(null)}
+                  onDragEnd={handleDragEnd}
+                  sx={{
+                    cursor: 'grab',
+                    opacity: draggedId === key ? 0.5 : 1,
+                    transition: 'opacity 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease',
+                    boxShadow: draggedId === key ? 3 : overId === key ? 6 : 1,
+                    transform: overId === key ? 'translateY(-2px)' : 'none'
+                  }}
+                >
+                  {config.render()}
+                </Box>
+              )}
             </Grid>
           );
 
-          return items;
+          return tiles;
         })}
         {draggedId && overId === 'container' && (
           <Grid item xs={12}>
-            <Box sx={{ ...placeholderStyles, minHeight: 80 }} />
+            <Box
+              sx={{
+                ...placeholderStyles,
+                borderColor: 'primary.main',
+                backgroundColor: 'action.hover',
+                opacity: 0.9
+              }}
+            />
           </Grid>
         )}
       </Grid>

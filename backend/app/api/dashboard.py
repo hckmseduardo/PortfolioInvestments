@@ -19,6 +19,8 @@ DEFAULT_LAYOUT = [
     "accounts_list"
 ]
 
+PLACEHOLDER_PREFIX = "__EMPTY__"
+
 
 class DashboardLayoutUpdate(BaseModel):
     layout: List[str]
@@ -26,11 +28,21 @@ class DashboardLayoutUpdate(BaseModel):
 
 def _sanitize_layout(layout: List[str]) -> List[str]:
     cleaned: List[str] = []
+    seen_components = set()
+    components_found = False
+
     for item in layout:
-        if item in DEFAULT_LAYOUT and item not in cleaned:
+        if not isinstance(item, str):
+            continue
+        if item.startswith(PLACEHOLDER_PREFIX):
             cleaned.append(item)
-    if not cleaned:
-        cleaned = DEFAULT_LAYOUT.copy()
+        elif item in DEFAULT_LAYOUT and item not in seen_components:
+            cleaned.append(item)
+            seen_components.add(item)
+            components_found = True
+
+    if not components_found:
+        return DEFAULT_LAYOUT.copy()
     return cleaned
 
 
