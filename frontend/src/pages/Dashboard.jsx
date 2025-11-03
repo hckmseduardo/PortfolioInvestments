@@ -41,6 +41,7 @@ const Dashboard = () => {
   const [layout, setLayout] = useState(DEFAULT_LAYOUT);
   const [layoutLoading, setLayoutLoading] = useState(true);
   const [draggedId, setDraggedId] = useState(null);
+  const [overId, setOverId] = useState(null);
 
   useEffect(() => {
     const loadLayout = async () => {
@@ -180,11 +181,23 @@ const Dashboard = () => {
 
   const handleDragEnd = () => {
     setDraggedId(null);
+    setOverId(null);
   };
 
-  const handleDragOver = (event) => {
+  const handleDragOverItem = (event, targetId) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
+    if (overId !== targetId) {
+      setOverId(targetId);
+    }
+  };
+
+  const handleDragOverContainer = (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    if (overId !== 'container') {
+      setOverId('container');
+    }
   };
 
   const reorderLayout = (items, fromId, toId) => {
@@ -225,12 +238,14 @@ const Dashboard = () => {
     }
     if (layout[layout.length - 1] === dragged) {
       setDraggedId(null);
+      setOverId(null);
       return;
     }
     const filtered = layout.filter((item) => item !== dragged);
     const nextLayout = [...filtered, dragged];
     persistLayout(nextLayout);
     setDraggedId(null);
+    setOverId(null);
   };
 
   const layoutConfig = {
@@ -368,6 +383,15 @@ const Dashboard = () => {
     .map((item) => ({ key: item, config: layoutConfig[item] }))
     .filter((entry) => entry.config);
 
+  const placeholderStyles = {
+    border: '2px dashed',
+    borderColor: 'primary.main',
+    borderRadius: 2,
+    backgroundColor: 'action.hover',
+    height: '100%',
+    transition: 'all 0.2s ease'
+  };
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
@@ -397,27 +421,51 @@ const Dashboard = () => {
       <Grid
         container
         spacing={3}
-        onDragOver={handleDragOver}
+        onDragOver={handleDragOverContainer}
         onDrop={handleDropOnContainer}
       >
-        {renderedItems.map(({ key, config }) => (
-          <Grid item key={key} {...config.grid}>
-            <Box
-              draggable
-              onDragStart={(event) => handleDragStart(event, key)}
-              onDragOver={handleDragOver}
-              onDrop={(event) => handleDrop(event, key)}
-              onDragEnd={handleDragEnd}
-              sx={{
-                cursor: 'grab',
-                opacity: draggedId === key ? 0.55 : 1,
-                transition: 'opacity 0.2s'
-              }}
-            >
-              {config.render()}
-            </Box>
+        {renderedItems.flatMap(({ key, config }) => {
+          const items = [];
+          const shouldShowPlaceholder = draggedId && draggedId !== key && overId === key;
+
+          if (shouldShowPlaceholder) {
+            items.push(
+              <Grid item key={`${key}-placeholder`} {...config.grid}>
+                <Box sx={placeholderStyles} />
+              </Grid>
+            );
+          }
+
+          items.push(
+            <Grid item key={key} {...config.grid}>
+              <Box
+                draggable
+                onDragStart={(event) => handleDragStart(event, key)}
+                onDragOver={(event) => handleDragOverItem(event, key)}
+                onDrop={(event) => handleDrop(event, key)}
+                onDragEnd={handleDragEnd}
+                sx={{
+                  cursor: 'grab',
+                  opacity: draggedId === key ? 0.55 : 1,
+                  transition: 'opacity 0.25s ease, box-shadow 0.25s ease',
+                  boxShadow: draggedId === key ? 3 : 1,
+                  '&:hover': {
+                    boxShadow: 4
+                  }
+                }}
+              >
+                {config.render()}
+              </Box>
+            </Grid>
+          );
+
+          return items;
+        })}
+        {draggedId && overId === 'container' && (
+          <Grid item xs={12}>
+            <Box sx={{ ...placeholderStyles, minHeight: 80 }} />
           </Grid>
-        ))}
+        )}
       </Grid>
     </Container>
   );
