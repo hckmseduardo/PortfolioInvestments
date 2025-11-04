@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api import (
@@ -18,6 +18,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
+api_router = APIRouter(prefix="/api")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
@@ -26,14 +28,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
-app.include_router(accounts.router)
-app.include_router(positions.router)
-app.include_router(import_statements.router)
-app.include_router(expenses.router)
-app.include_router(dividends.router)
-app.include_router(transactions.router)
-app.include_router(dashboard.router)
+api_router.include_router(auth.router)
+api_router.include_router(accounts.router)
+api_router.include_router(positions.router)
+api_router.include_router(import_statements.router)
+api_router.include_router(expenses.router)
+api_router.include_router(dividends.router)
+api_router.include_router(transactions.router)
+api_router.include_router(dashboard.router)
+
+app.include_router(api_router)
 
 @app.get("/")
 async def root():
