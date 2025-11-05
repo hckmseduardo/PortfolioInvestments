@@ -19,6 +19,7 @@ class JSONDatabase:
             'expenses': self.db_path / 'expenses.json',
             'categories': self.db_path / 'categories.json',
             'statements': self.db_path / 'statements.json',
+            'dashboard_layouts': self.db_path / 'dashboard_layouts.json',
         }
         
         for collection_file in self.collections.values():

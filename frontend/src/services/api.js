@@ -1,6 +1,64 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const isLocalHostname = (hostname) =>
+  hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+
+const normalizePath = (path) => {
+  if (!path) {
+    return '';
+  }
+
+  if (path === '/') {
+    return '';
+  }
+
+  return path.startsWith('/') ? path : `/${path}`;
+};
+
+const buildUrl = (origin, path) => {
+  const normalizedOrigin = origin.replace(/\/$/, '');
+  const normalizedPath = normalizePath(path);
+  return `${normalizedOrigin}${normalizedPath}`;
+};
+
+const API_BASE_URL = (() => {
+  const envUrl = import.meta.env.VITE_API_URL?.trim();
+  const localPort = import.meta.env.VITE_API_PORT?.trim() || '8000';
+  const apiPath = normalizePath(import.meta.env.VITE_API_BASE_PATH?.trim() || '/api');
+
+  const getEnvBase = (originFallback) => {
+    if (!envUrl) {
+      return null;
+    }
+
+    if (envUrl.startsWith('/')) {
+      if (!originFallback) {
+        return envUrl;
+      }
+      return buildUrl(originFallback, envUrl);
+    }
+
+    try {
+      const parsed = new URL(envUrl, originFallback || `http://localhost:${localPort}`);
+      const path = normalizePath(parsed.pathname) || apiPath;
+      return buildUrl(parsed.origin, path);
+    } catch {
+      return envUrl;
+    }
+  };
+
+  if (typeof window === 'undefined') {
+    return getEnvBase() || buildUrl(`http://localhost:${localPort}`, apiPath);
+  }
+
+  const { origin, hostname } = window.location;
+
+  if (isLocalHostname(hostname)) {
+    return buildUrl(origin, apiPath);
+  }
+
+  return getEnvBase(origin) || buildUrl(origin, apiPath);
+})();
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -75,6 +133,12 @@ export const positionsAPI = {
   update: (id, data) => api.put(`/positions/${id}`, data),
   delete: (id) => api.delete(`/positions/${id}`),
   refreshPrices: () => api.post('/positions/refresh-prices'),
+};
+
+export const dashboardAPI = {
+  getLayout: () => api.get('/dashboard/layout'),
+  saveLayout: (layout) => api.put('/dashboard/layout', { layout }),
+  resetLayout: () => api.delete('/dashboard/layout')
 };
 
 export const dividendsAPI = {
