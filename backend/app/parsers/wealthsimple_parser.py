@@ -259,6 +259,20 @@ class WealthsimpleParser:
         match = re.match(r'^([A-Z][A-Z0-9.]*)\s*-', str(description))
         if match:
             return match.group(1)
+
+        stopwords = {'CAD', 'USD', 'FX', 'CDN', 'INTO'}
+        alt_match = re.search(
+            r'(?:purchase|buy|sale|sell|transfer|trade|swap)\s+'
+            r'(?:of\s+)?'
+            r'(?:\d+(?:[\s,]\d{3})*(?:[.,]\d+)?\s+)?'
+            r'([A-Z]{2,10})\b',
+            str(description),
+            re.IGNORECASE
+        )
+        if alt_match:
+            candidate = alt_match.group(1).upper()
+            if candidate not in stopwords:
+                return candidate
         return ''
 
     def _extract_quantity_from_description(self, description: str) -> float:
