@@ -168,11 +168,24 @@ export const expensesAPI = {
     api.get('/expenses', { params: { account_id: accountId, category } }),
   getSummary: (accountId) =>
     api.get('/expenses/summary', { params: accountId ? { account_id: accountId } : {} }),
+  getMonthlyComparison: (months = 6, accountId = null) =>
+    api.get('/expenses/monthly-comparison', {
+      params: {
+        months,
+        ...(accountId ? { account_id: accountId } : {})
+      }
+    }),
   create: (data) => api.post('/expenses', data),
   update: (id, data) => api.put(`/expenses/${id}`, data),
+  updateExpenseCategory: (id, category) => api.patch(`/expenses/${id}/category`, null, { params: { category } }),
   delete: (id) => api.delete(`/expenses/${id}`),
   getCategories: () => api.get('/expenses/categories'),
   createCategory: (data) => api.post('/expenses/categories', data),
+  updateCategory: (id, data) => api.put(`/expenses/categories/${id}`, data),
+  deleteCategory: (id) => api.delete(`/expenses/categories/${id}`),
+  initDefaultCategories: () => api.post('/expenses/categories/init-defaults'),
+  convertTransactions: (accountId = null) =>
+    api.post('/expenses/convert-transactions', accountId ? { params: { account_id: accountId } } : {}),
 };
 
 export const importAPI = {

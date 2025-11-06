@@ -9,12 +9,13 @@ from app.models.schemas import User, Statement
 from app.api.auth import get_current_user
 from app.database.json_db import get_db
 from app.parsers.wealthsimple_parser import WealthsimpleParser
+from app.parsers.tangerine_parser import TangerineParser
 from app.config import settings
 
 router = APIRouter(prefix="/import", tags=["import"])
 logger = logging.getLogger(__name__)
 
-ALLOWED_EXTENSIONS = {'.pdf', '.csv', '.xlsx', '.xls'}
+ALLOWED_EXTENSIONS = {'.pdf', '.csv', '.xlsx', '.xls', '.qfx', '.ofx'}
 
 def allowed_file(filename: str) -> bool:
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
@@ -115,21 +116,63 @@ def recalculate_positions_from_transactions(account_id: str, db):
 
     return positions_created
 
-def process_statement_file(file_path: str, account_id: str, db, current_user: User, statement_id: str = None):
-    parser = WealthsimpleParser()
-    file_ext = Path(file_path).suffix.lower()
+def detect_statement_type(file_path: str) -> str:
+    """
+    Detect which bank/institution the statement is from.
 
-    if file_ext == '.pdf':
-        parsed_data = parser.parse_pdf(str(file_path))
-    elif file_ext == '.csv':
-        parsed_data = parser.parse_csv(str(file_path))
-    elif file_ext in ['.xlsx', '.xls']:
-        parsed_data = parser.parse_excel(str(file_path))
+    Returns: 'wealthsimple' or 'tangerine'
+    """
+    file_ext = Path(file_path).suffix.lower()
+    filename = Path(file_path).name.lower()
+
+    # Check filename for hints
+    if 'tangerine' in filename:
+        return 'tangerine'
+    elif 'wealthsimple' in filename or 'wealth' in filename:
+        return 'wealthsimple'
+
+    # For QFX files, always use Tangerine parser
+    if file_ext in ['.qfx', '.ofx']:
+        return 'tangerine'
+
+    # For CSV, try to detect by reading first few lines
+    if file_ext == '.csv':
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                first_line = f.readline().lower()
+                # Tangerine CSV has: Date,Transaction,Nom,Description,Montant
+                if 'nom' in first_line and 'montant' in first_line:
+                    return 'tangerine'
+                # Wealthsimple has different headers
+                return 'wealthsimple'
+        except:
+            pass
+
+    # Default to Wealthsimple for backwards compatibility
+    return 'wealthsimple'
+
+def process_statement_file(file_path: str, account_id: str, db, current_user: User, statement_id: str = None):
+    file_ext = Path(file_path).suffix.lower()
+    statement_type = detect_statement_type(file_path)
+
+    # Choose appropriate parser
+    if statement_type == 'tangerine':
+        parser = TangerineParser(file_path)
+        parsed_data = parser.parse()
     else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file format"
-        )
+        # Wealthsimple parser
+        parser = WealthsimpleParser()
+        if file_ext == '.pdf':
+            parsed_data = parser.parse_pdf(str(file_path))
+        elif file_ext == '.csv':
+            parsed_data = parser.parse_csv(str(file_path))
+        elif file_ext in ['.xlsx', '.xls']:
+            parsed_data = parser.parse_excel(str(file_path))
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported file format"
+            )
 
     if not account_id:
         raise HTTPException(

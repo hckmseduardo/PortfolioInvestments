@@ -4,13 +4,22 @@ A comprehensive investment portfolio management platform that allows users to im
 
 ## Features
 
-- **Statement Import & Processing**: Upload Wealthsimple statements (PDF/CSV/Excel) and automatically extract portfolio data
+- **Multi-Bank Statement Import & Processing**:
+  - **Wealthsimple**: PDF, CSV, and Excel statements for investment and checking accounts
+  - **Tangerine**: CSV and QFX/OFX formats for checking and savings accounts
+  - Automatic bank detection based on file format and content
 - **Transaction Statements**: View and filter all imported transactions with date range filters (last 7 days, month to date, last month, year to date, last year, all time, or custom period)
 - **Account Balance Tracking**: Real-time balance calculation based on transaction history
 - **Portfolio Dashboard**: View all accounts, positions, and real-time performance metrics
 - **Performance Analytics**: Track portfolio value, book value vs market value, and gain/loss over time
 - **Dividend Tracking**: Monitor dividend income by month and security with interactive charts
-- **Expense Management**: Categorize and analyze checking account transactions
+- **Advanced Expense Management**:
+  - Convert checking account transactions to expenses automatically
+  - Smart auto-categorization with machine learning from your history
+  - Inline category editing with color-coded tags
+  - Custom category creation with budget limits
+  - Monthly expense comparison with stacked charts
+  - Category trend analysis over time
 - **Real-time Market Data**: Automatic price updates using Yahoo Finance API
 
 ## Tech Stack
@@ -126,12 +135,18 @@ npm run dev
 
 ### 2. Import Statements
 - Navigate to the "Import" page
-- Upload your Wealthsimple statement (PDF, CSV, or Excel)
-- The system will automatically extract:
+- Upload your bank statement:
+  - **Wealthsimple**: PDF, CSV, or Excel format
+  - **Tangerine**: CSV or QFX/OFX format
+- The system automatically detects the bank and format
+- Extracted data includes:
   - Account information
-  - Portfolio positions
+  - Portfolio positions (for investment accounts)
   - Transaction history
   - Dividend payments
+- Supported institutions:
+  - Wealthsimple (investment, crypto, and checking accounts)
+  - Tangerine (checking and savings accounts)
 
 ### 3. View Transactions
 - Navigate to the "Transactions" page
@@ -162,10 +177,28 @@ npm run dev
 - Pie chart showing dividend distribution by ticker
 
 ### 6. Manage Expenses
-- Track checking account transactions
-- Categorize expenses
-- View spending by category (pie chart)
-- Monitor monthly spending trends (bar chart)
+**NEW: Enhanced Expense Tracking System**
+- **Automatic Import**: Convert checking account withdrawal and fee transactions to expenses with one click
+- **Smart Categorization**: AI-powered auto-categorization based on transaction descriptions
+  - Learns from your existing categorizations
+  - Uses intelligent keyword matching for common categories
+  - Supports 12 default categories: Groceries, Dining, Transportation, Utilities, Entertainment, Shopping, Healthcare, Bills, Transfer, ATM, Fees, and Uncategorized
+- **Interactive Category Management**:
+  - Edit expense categories inline with color-coded dropdowns
+  - Create custom categories with your own colors and budget limits
+  - Delete or modify existing categories
+- **Three-Tab Interface**:
+  - **Overview Tab**: Total expenses, category breakdown (pie chart), and monthly trends (bar chart)
+  - **Expense List Tab**: Detailed table of all expenses with inline category editing and filtering
+  - **Monthly Comparison Tab**:
+    - Stacked bar chart showing expenses by category over last 6 months
+    - Line chart showing category trends over time
+    - Month-over-month comparison
+- **Advanced Filtering**:
+  - Filter by account (all accounts or specific checking account)
+  - Filter by category
+  - Real-time updates on filter changes
+- **Re-categorization Support**: As you manually categorize expenses, the system learns and improves future auto-categorization
 
 ### 7. Refresh Market Prices
 - Click "Refresh Prices" on Portfolio page
@@ -207,16 +240,28 @@ npm run dev
 - `DELETE /dividends/{id}` - Delete dividend
 
 ### Expenses
-- `GET /expenses` - List expenses
-- `GET /expenses/summary` - Get expense summary
+- `GET /expenses` - List expenses (with optional filters: account_id, category)
+- `GET /expenses/summary` - Get expense summary with totals by category and month
+- `GET /expenses/monthly-comparison` - Get monthly expense comparison for last N months
 - `POST /expenses` - Create expense
 - `PUT /expenses/{id}` - Update expense
+- `PATCH /expenses/{id}/category` - Update only the category of an expense
 - `DELETE /expenses/{id}` - Delete expense
-- `GET /expenses/categories` - List categories
-- `POST /expenses/categories` - Create category
+- `GET /expenses/categories` - List all categories for user
+- `POST /expenses/categories` - Create new category
+- `PUT /expenses/categories/{id}` - Update category
+- `DELETE /expenses/categories/{id}` - Delete category
+- `POST /expenses/categories/init-defaults` - Initialize default expense categories
+- `POST /expenses/convert-transactions` - Convert checking account transactions to expenses with auto-categorization
 
 ### Import
-- `POST /import/statement` - Upload and parse statement
+- `POST /import/statement` - Upload and parse statement (Wealthsimple or Tangerine)
+  - Supported formats: PDF, CSV, Excel (.xlsx/.xls), QFX/OFX
+  - Automatic bank detection
+- `GET /import/statements` - List all uploaded statements
+- `POST /import/statements/{id}/process` - Process uploaded statement
+- `POST /import/statements/{id}/reprocess` - Reprocess statement
+- `DELETE /import/statements/{id}` - Delete statement
 
 ## Data Models
 
@@ -262,14 +307,73 @@ npm run dev
   "id": "uuid",
   "account_id": "uuid",
   "date": "2024-01-01T00:00:00",
-  "type": "buy|sell|dividend|deposit|withdrawal",
+  "type": "buy|sell|dividend|deposit|withdrawal|fee|bonus|transfer|tax",
   "ticker": "AAPL",
   "quantity": 10,
   "price": 150.00,
   "fees": 0.00,
-  "total": 1500.00
+  "total": 1500.00,
+  "description": "Transaction description"
 }
 ```
+
+### Expense
+```json
+{
+  "id": "uuid",
+  "account_id": "uuid",
+  "date": "2024-01-01T00:00:00",
+  "description": "Grocery shopping at Metro",
+  "amount": 125.50,
+  "category": "Groceries",
+  "notes": "Imported from transaction (type: withdrawal)"
+}
+```
+
+### Category
+```json
+{
+  "id": "uuid",
+  "user_id": "uuid",
+  "name": "Groceries",
+  "type": "expense|transfer",
+  "color": "#4CAF50",
+  "budget_limit": 500.00
+}
+```
+
+## Supported File Formats
+
+### Wealthsimple Statements
+- **PDF**: Full account statements with positions and transactions
+- **CSV**: Transaction history with crypto support
+- **Excel (.xlsx, .xls)**: Multi-sheet statements with detailed breakdowns
+
+**Transaction Types Supported:**
+- Buy, Sell, Dividend, Deposit, Withdrawal, Fee, Bonus, Tax, Transfer
+
+### Tangerine Statements
+- **CSV**: Checking and savings account transaction history
+  - Format: Date, Transaction, Nom, Description, Montant
+  - Encoding: UTF-8
+- **QFX/OFX**: Open Financial Exchange format
+  - Standard banking format used by many financial software
+  - Includes account information and full transaction history
+
+**Transaction Types Detected:**
+- EFT Deposits/Withdrawals
+- INTERAC e-Transfer (in/out)
+- Bill Payments
+- Interest Payments
+- Account Transfers
+- Fees and Service Charges
+- Bonus/Reward Payouts
+
+### Automatic Bank Detection
+The system automatically detects which bank a statement is from based on:
+1. Filename (e.g., "Tangerine" or "Wealthsimple" in the name)
+2. File extension (.qfx/.ofx always uses Tangerine parser)
+3. File content (CSV header format)
 
 ## Project Structure
 

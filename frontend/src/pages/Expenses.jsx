@@ -4,30 +4,199 @@ import {
   Paper,
   Typography,
   Grid,
-  Box
+  Box,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Button,
+  Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  IconButton,
+  Alert,
+  Snackbar,
+  Tabs,
+  Tab,
+  CircularProgress
 } from '@mui/material';
-import { expensesAPI } from '../services/api';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+import {
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  Add as AddIcon,
+  Refresh as RefreshIcon,
+  Category as CategoryIcon
+} from '@mui/icons-material';
+import { expensesAPI, accountsAPI } from '../services/api';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, LineChart, Line } from 'recharts';
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FFC658', '#FF6B9D'];
+const CHART_COLORS = ['#4CAF50', '#FF9800', '#2196F3', '#9C27B0', '#E91E63', '#00BCD4', '#F44336', '#795548', '#607D8B', '#9E9E9E', '#FF5722', '#757575'];
 
 const Expenses = () => {
+  const [tabValue, setTabValue] = useState(0);
+  const [expenses, setExpenses] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [monthlyComparison, setMonthlyComparison] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [selectedAccount, setSelectedAccount] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
   const [loading, setLoading] = useState(true);
+  const [editingExpense, setEditingExpense] = useState(null);
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [newCategory, setNewCategory] = useState({ name: '', type: 'expense', color: '#4CAF50', budget_limit: '' });
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
   useEffect(() => {
-    fetchExpenses();
+    fetchInitialData();
   }, []);
 
-  const fetchExpenses = async () => {
+  useEffect(() => {
+    if (!loading) {
+      fetchExpenses();
+    }
+  }, [selectedAccount, selectedCategory]);
+
+  const fetchInitialData = async () => {
     try {
-      const response = await expensesAPI.getSummary();
-      setSummary(response.data);
+      setLoading(true);
+      await Promise.all([
+        fetchCategories(),
+        fetchAccounts(),
+        fetchExpenses(),
+        fetchSummary(),
+        fetchMonthlyComparison()
+      ]);
     } catch (error) {
-      console.error('Error fetching expenses:', error);
+      console.error('Error fetching initial data:', error);
+      showSnackbar('Error loading data', 'error');
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const response = await expensesAPI.getCategories();
+      setCategories(response.data);
+
+      // If no categories exist, initialize defaults
+      if (response.data.length === 0) {
+        const initResponse = await expensesAPI.initDefaultCategories();
+        setCategories(initResponse.data.categories);
+        showSnackbar('Default categories initialized', 'success');
+      }
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+    }
+  };
+
+  const fetchAccounts = async () => {
+    try {
+      const response = await accountsAPI.getAll();
+      setAccounts(response.data);
+    } catch (error) {
+      console.error('Error fetching accounts:', error);
+    }
+  };
+
+  const fetchExpenses = async () => {
+    try {
+      const response = await expensesAPI.getAll(selectedAccount || null, selectedCategory || null);
+      setExpenses(response.data);
+    } catch (error) {
+      console.error('Error fetching expenses:', error);
+    }
+  };
+
+  const fetchSummary = async () => {
+    try {
+      const response = await expensesAPI.getSummary(selectedAccount || null);
+      setSummary(response.data);
+    } catch (error) {
+      console.error('Error fetching summary:', error);
+    }
+  };
+
+  const fetchMonthlyComparison = async () => {
+    try {
+      const response = await expensesAPI.getMonthlyComparison(6, selectedAccount || null);
+      setMonthlyComparison(response.data);
+    } catch (error) {
+      console.error('Error fetching monthly comparison:', error);
+    }
+  };
+
+  const handleConvertTransactions = async () => {
+    try {
+      setLoading(true);
+      const response = await expensesAPI.convertTransactions(selectedAccount || null);
+      showSnackbar(response.data.message, 'success');
+      await fetchInitialData();
+    } catch (error) {
+      console.error('Error converting transactions:', error);
+      showSnackbar('Error converting transactions', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCategoryChange = async (expenseId, newCategory) => {
+    try {
+      await expensesAPI.updateExpenseCategory(expenseId, newCategory);
+      showSnackbar('Category updated successfully', 'success');
+      await fetchExpenses();
+      await fetchSummary();
+      await fetchMonthlyComparison();
+    } catch (error) {
+      console.error('Error updating category:', error);
+      showSnackbar('Error updating category', 'error');
+    }
+  };
+
+  const handleDeleteExpense = async (expenseId) => {
+    if (window.confirm('Are you sure you want to delete this expense?')) {
+      try {
+        await expensesAPI.delete(expenseId);
+        showSnackbar('Expense deleted successfully', 'success');
+        await fetchExpenses();
+        await fetchSummary();
+        await fetchMonthlyComparison();
+      } catch (error) {
+        console.error('Error deleting expense:', error);
+        showSnackbar('Error deleting expense', 'error');
+      }
+    }
+  };
+
+  const handleCreateCategory = async () => {
+    try {
+      const categoryData = {
+        ...newCategory,
+        budget_limit: newCategory.budget_limit ? parseFloat(newCategory.budget_limit) : null
+      };
+      await expensesAPI.createCategory(categoryData);
+      showSnackbar('Category created successfully', 'success');
+      setCategoryDialogOpen(false);
+      setNewCategory({ name: '', type: 'expense', color: '#4CAF50', budget_limit: '' });
+      await fetchCategories();
+    } catch (error) {
+      console.error('Error creating category:', error);
+      showSnackbar('Error creating category', 'error');
+    }
+  };
+
+  const showSnackbar = (message, severity = 'success') => {
+    setSnackbar({ open: true, message, severity });
   };
 
   const formatCurrency = (value) => {
@@ -37,126 +206,440 @@ const Expenses = () => {
     }).format(value);
   };
 
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-CA');
+  };
+
+  const getCategoryColor = (categoryName) => {
+    const category = categories.find(c => c.name === categoryName);
+    return category?.color || '#757575';
+  };
+
+  // Prepare chart data
+  const categoryData = Object.entries(summary?.by_category || {})
+    .map(([category, amount]) => ({
+      name: category,
+      value: amount,
+      color: getCategoryColor(category)
+    }));
+
+  const monthlyTrendData = monthlyComparison?.months || [];
+
+  // Prepare stacked bar chart data for monthly comparison by category
+  const prepareMonthlyByCategoryData = () => {
+    if (!monthlyComparison?.months) return [];
+
+    return monthlyComparison.months.map(month => {
+      const data = { month: month.month };
+      Object.entries(month.by_category).forEach(([category, amount]) => {
+        data[category] = amount;
+      });
+      return data;
+    });
+  };
+
+  const monthlyByCategoryData = prepareMonthlyByCategoryData();
+  const allCategories = [...new Set(monthlyByCategoryData.flatMap(m => Object.keys(m).filter(k => k !== 'month')))];
+
   if (loading) {
     return (
-      <Container>
-        <Typography>Loading...</Typography>
+      <Container maxWidth="xl" sx={{ mt: 4, mb: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+        <CircularProgress />
       </Container>
     );
   }
 
-  const categoryData = Object.entries(summary?.by_category || {})
-    .map(([category, amount]) => ({
-      name: category,
-      value: amount
-    }));
-
-  const monthlyData = Object.entries(summary?.by_month || {})
-    .map(([month, amount]) => ({
-      month,
-      amount
-    }))
-    .sort((a, b) => a.month.localeCompare(b.month));
-
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" gutterBottom>
-        Expense Management
-      </Typography>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h4">Expense Management</Typography>
+        <Box>
+          <Button
+            variant="outlined"
+            startIcon={<CategoryIcon />}
+            onClick={() => setCategoryDialogOpen(true)}
+            sx={{ mr: 1 }}
+          >
+            Manage Categories
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<RefreshIcon />}
+            onClick={handleConvertTransactions}
+          >
+            Import from Transactions
+          </Button>
+        </Box>
+      </Box>
 
-      <Grid container spacing={3}>
-        <Grid item xs={12}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h5" gutterBottom>
-              Total Expenses: {formatCurrency(summary?.total_expenses || 0)}
-            </Typography>
-            <Typography variant="body2" color="textSecondary">
-              {summary?.expense_count || 0} transactions
-            </Typography>
-          </Paper>
+      {/* Filters */}
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <FormControl fullWidth>
+              <InputLabel>Account</InputLabel>
+              <Select
+                value={selectedAccount}
+                onChange={(e) => setSelectedAccount(e.target.value)}
+                label="Account"
+              >
+                <MenuItem value="">All Accounts</MenuItem>
+                {accounts.map(account => (
+                  <MenuItem key={account.id} value={account.id}>
+                    {account.label} ({account.institution})
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <FormControl fullWidth>
+              <InputLabel>Category</InputLabel>
+              <Select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                label="Category"
+              >
+                <MenuItem value="">All Categories</MenuItem>
+                {categories.map(category => (
+                  <MenuItem key={category.id} value={category.name}>
+                    {category.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
         </Grid>
+      </Paper>
 
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Expenses by Category
-            </Typography>
-            {categoryData.length > 0 ? (
-              <>
+      <Tabs value={tabValue} onChange={(e, newValue) => setTabValue(newValue)} sx={{ mb: 3 }}>
+        <Tab label="Overview" />
+        <Tab label="Expense List" />
+        <Tab label="Monthly Comparison" />
+      </Tabs>
+
+      {/* Tab 0: Overview */}
+      {tabValue === 0 && (
+        <Grid container spacing={3}>
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h5" gutterBottom>
+                Total Expenses: {formatCurrency(summary?.total_expenses || 0)}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                {summary?.expense_count || 0} transactions
+              </Typography>
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Expenses by Category
+              </Typography>
+              {categoryData.length > 0 ? (
+                <>
+                  <Box sx={{ height: 300 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={categoryData}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {categoryData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value) => formatCurrency(value)} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </Box>
+                  <Box sx={{ mt: 2 }}>
+                    {categoryData.map((item) => (
+                      <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
+                        <Box display="flex" alignItems="center">
+                          <Box
+                            sx={{
+                              width: 12,
+                              height: 12,
+                              backgroundColor: item.color,
+                              mr: 1
+                            }}
+                          />
+                          <Typography variant="body2">{item.name}</Typography>
+                        </Box>
+                        <Typography variant="body2">{formatCurrency(item.value)}</Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                </>
+              ) : (
+                <Alert severity="info">
+                  No expense data available. Click "Import from Transactions" to convert your checking account transactions to expenses.
+                </Alert>
+              )}
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Monthly Spending Trend
+              </Typography>
+              {monthlyTrendData.length > 0 ? (
                 <Box sx={{ height: 300 }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={categoryData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {categoryData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
+                    <BarChart data={monthlyTrendData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
                       <Tooltip formatter={(value) => formatCurrency(value)} />
-                    </PieChart>
+                      <Legend />
+                      <Bar dataKey="total" fill="#82ca9d" name="Total Expenses" />
+                    </BarChart>
                   </ResponsiveContainer>
                 </Box>
-                <Box sx={{ mt: 2 }}>
-                  {categoryData.map((item, index) => (
-                    <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
-                      <Box display="flex" alignItems="center">
-                        <Box
-                          sx={{
-                            width: 12,
-                            height: 12,
-                            backgroundColor: COLORS[index % COLORS.length],
-                            mr: 1
-                          }}
-                        />
-                        <Typography variant="body2">{item.name}</Typography>
-                      </Box>
-                      <Typography variant="body2">{formatCurrency(item.value)}</Typography>
-                    </Box>
-                  ))}
-                </Box>
-              </>
-            ) : (
-              <Typography color="textSecondary">
-                No expense data available
-              </Typography>
-            )}
-          </Paper>
+              ) : (
+                <Typography color="textSecondary">
+                  No expense data available
+                </Typography>
+              )}
+            </Paper>
+          </Grid>
         </Grid>
+      )}
 
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Monthly Spending Trend
-            </Typography>
-            {monthlyData.length > 0 ? (
-              <Box sx={{ height: 300 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={monthlyData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip formatter={(value) => formatCurrency(value)} />
-                    <Legend />
-                    <Bar dataKey="amount" fill="#82ca9d" name="Expenses" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </Box>
-            ) : (
-              <Typography color="textSecondary">
-                No expense data available
+      {/* Tab 1: Expense List */}
+      {tabValue === 1 && (
+        <Paper sx={{ p: 2 }}>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Description</TableCell>
+                  <TableCell>Account</TableCell>
+                  <TableCell>Category</TableCell>
+                  <TableCell align="right">Amount</TableCell>
+                  <TableCell>Notes</TableCell>
+                  <TableCell align="center">Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {expenses.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center">
+                      <Typography color="textSecondary" py={3}>
+                        No expenses found. Try adjusting filters or click "Import from Transactions".
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  expenses.map((expense) => {
+                    const account = accounts.find(a => a.id === expense.account_id);
+                    return (
+                      <TableRow key={expense.id}>
+                        <TableCell>{formatDate(expense.date)}</TableCell>
+                        <TableCell>{expense.description}</TableCell>
+                        <TableCell>{account?.label || 'Unknown'}</TableCell>
+                        <TableCell>
+                          <FormControl size="small" fullWidth>
+                            <Select
+                              value={expense.category || 'Uncategorized'}
+                              onChange={(e) => handleCategoryChange(expense.id, e.target.value)}
+                              sx={{
+                                bgcolor: getCategoryColor(expense.category),
+                                color: 'white',
+                                '& .MuiOutlinedInput-notchedOutline': {
+                                  borderColor: 'transparent'
+                                },
+                                '&:hover .MuiOutlinedInput-notchedOutline': {
+                                  borderColor: 'rgba(255,255,255,0.5)'
+                                }
+                              }}
+                            >
+                              {categories.map(cat => (
+                                <MenuItem key={cat.id} value={cat.name}>
+                                  {cat.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </TableCell>
+                        <TableCell align="right">{formatCurrency(expense.amount)}</TableCell>
+                        <TableCell>{expense.notes || '-'}</TableCell>
+                        <TableCell align="center">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleDeleteExpense(expense.id)}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      )}
+
+      {/* Tab 2: Monthly Comparison */}
+      {tabValue === 2 && (
+        <Grid container spacing={3}>
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Monthly Expenses by Category (Last 6 Months)
               </Typography>
-            )}
-          </Paper>
+              {monthlyByCategoryData.length > 0 ? (
+                <Box sx={{ height: 400 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={monthlyByCategoryData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Tooltip formatter={(value) => formatCurrency(value)} />
+                      <Legend />
+                      {allCategories.map((category, index) => (
+                        <Bar
+                          key={category}
+                          dataKey={category}
+                          stackId="a"
+                          fill={getCategoryColor(category)}
+                          name={category}
+                        />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Box>
+              ) : (
+                <Typography color="textSecondary">
+                  No monthly data available
+                </Typography>
+              )}
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Category Trends Over Time
+              </Typography>
+              {monthlyByCategoryData.length > 0 ? (
+                <Box sx={{ height: 400 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={monthlyByCategoryData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Tooltip formatter={(value) => formatCurrency(value)} />
+                      <Legend />
+                      {allCategories.map((category) => (
+                        <Line
+                          key={category}
+                          type="monotone"
+                          dataKey={category}
+                          stroke={getCategoryColor(category)}
+                          name={category}
+                          strokeWidth={2}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Box>
+              ) : (
+                <Typography color="textSecondary">
+                  No trend data available
+                </Typography>
+              )}
+            </Paper>
+          </Grid>
         </Grid>
-      </Grid>
+      )}
+
+      {/* Category Management Dialog */}
+      <Dialog open={categoryDialogOpen} onClose={() => setCategoryDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Manage Categories</DialogTitle>
+        <DialogContent>
+          <Box mb={3}>
+            <Typography variant="subtitle1" gutterBottom>Existing Categories</Typography>
+            {categories.map(category => (
+              <Chip
+                key={category.id}
+                label={category.name}
+                sx={{
+                  m: 0.5,
+                  bgcolor: category.color,
+                  color: 'white'
+                }}
+              />
+            ))}
+          </Box>
+
+          <Typography variant="subtitle1" gutterBottom>Add New Category</Typography>
+          <TextField
+            fullWidth
+            label="Category Name"
+            value={newCategory.name}
+            onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+            margin="normal"
+          />
+          <FormControl fullWidth margin="normal">
+            <InputLabel>Type</InputLabel>
+            <Select
+              value={newCategory.type}
+              onChange={(e) => setNewCategory({ ...newCategory, type: e.target.value })}
+              label="Type"
+            >
+              <MenuItem value="expense">Expense</MenuItem>
+              <MenuItem value="transfer">Transfer</MenuItem>
+            </Select>
+          </FormControl>
+          <TextField
+            fullWidth
+            label="Color (hex)"
+            value={newCategory.color}
+            onChange={(e) => setNewCategory({ ...newCategory, color: e.target.value })}
+            margin="normal"
+            placeholder="#4CAF50"
+          />
+          <TextField
+            fullWidth
+            label="Budget Limit (optional)"
+            type="number"
+            value={newCategory.budget_limit}
+            onChange={(e) => setNewCategory({ ...newCategory, budget_limit: e.target.value })}
+            margin="normal"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCategoryDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleCreateCategory} variant="contained" disabled={!newCategory.name}>
+            Create Category
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+      >
+        <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 };
