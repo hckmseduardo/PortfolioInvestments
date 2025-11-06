@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Optional, Tuple
+from datetime import datetime, timedelta
 from collections import defaultdict
 import re
 from app.models.schemas import Expense, ExpenseCreate, Category, CategoryCreate, User
@@ -71,6 +71,103 @@ def auto_categorize_expense(description: str, user_id: str) -> Optional[str]:
             best_match = category
 
     return best_match
+
+def detect_transfers(user_id: str, db, days_tolerance: int = 3) -> List[Tuple[str, str]]:
+    """
+    Detect transfers between accounts by finding matching debit/credit pairs.
+
+    Args:
+        user_id: User ID to check transfers for
+        db: Database instance
+        days_tolerance: Number of days to look for matching transactions
+
+    Returns:
+        List of tuples (transaction_id_1, transaction_id_2) that are transfers
+    """
+    # Get all user accounts
+    accounts = db.find("accounts", {"user_id": user_id})
+    account_ids = [acc["id"] for acc in accounts]
+
+    # Get all transactions for user
+    all_transactions = []
+    for acc_id in account_ids:
+        txns = db.find("transactions", {"account_id": acc_id})
+        all_transactions.extend(txns)
+
+    # Group transactions by similar amounts (within 0.01 tolerance)
+    amount_groups = defaultdict(list)
+    for txn in all_transactions:
+        amount = abs(txn.get("total", 0))
+        if amount > 0:  # Ignore zero amounts
+            # Round to nearest cent for grouping
+            amount_key = round(amount, 2)
+            amount_groups[amount_key].append(txn)
+
+    transfers = []
+
+    # For each group of same-amount transactions, find debit/credit pairs
+    for amount, txns in amount_groups.items():
+        if len(txns) < 2:
+            continue
+
+        # Separate into debits and credits
+        debits = [t for t in txns if t.get("total", 0) < 0]
+        credits = [t for t in txns if t.get("total", 0) > 0]
+
+        # Try to match each debit with a credit
+        for debit in debits:
+            debit_date = debit.get("date")
+            if isinstance(debit_date, str):
+                debit_date = datetime.fromisoformat(debit_date.replace('Z', '+00:00'))
+
+            debit_desc = debit.get("description", "").lower()
+            debit_account = debit.get("account_id")
+
+            for credit in credits:
+                # Skip if same account
+                if credit.get("account_id") == debit_account:
+                    continue
+
+                credit_date = credit.get("date")
+                if isinstance(credit_date, str):
+                    credit_date = datetime.fromisoformat(credit_date.replace('Z', '+00:00'))
+
+                # Check if dates are within tolerance
+                date_diff = abs((credit_date - debit_date).days)
+                if date_diff > days_tolerance:
+                    continue
+
+                credit_desc = credit.get("description", "").lower()
+
+                # Check if descriptions indicate a transfer
+                is_transfer = False
+
+                # Check for credit card payment patterns
+                if ("mastercard" in debit_desc or "credit card" in debit_desc) and \
+                   ("payment" in credit_desc or "payment received" in credit_desc):
+                    is_transfer = True
+                elif ("mastercard" in credit_desc or "credit card" in credit_desc) and \
+                     ("payment" in debit_desc or "payment for" in debit_desc):
+                    is_transfer = True
+
+                # Check for general transfer patterns
+                elif ("transfer" in debit_desc and "transfer" in credit_desc) or \
+                     ("interac" in debit_desc and "interac" in credit_desc):
+                    is_transfer = True
+
+                # Check for bank-to-bank transfers (e.g., Tangerine <-> NBC)
+                elif ("tangerine" in debit_desc and "tangerine" in credit_desc) or \
+                     ("nbc" in debit_desc and "nbc" in credit_desc) or \
+                     ("bnc" in debit_desc and "bnc" in credit_desc):
+                    is_transfer = True
+
+                if is_transfer:
+                    transfers.append((debit.get("id"), credit.get("id")))
+                    # Remove matched credit from list to avoid double-matching
+                    credits.remove(credit)
+                    break
+
+    return transfers
 
 @router.post("", response_model=Expense)
 async def create_expense(
@@ -424,30 +521,65 @@ async def get_monthly_expense_comparison(
         "total_months": len(result)
     }
 
+@router.post("/detect-transfers")
+async def detect_and_mark_transfers(current_user: User = Depends(get_current_user)):
+    """
+    Detect transfers between accounts and mark them in transactions.
+    This helps exclude transfers from expense totals.
+    """
+    db = get_db()
+
+    # Detect transfers
+    transfers = detect_transfers(current_user.id, db, days_tolerance=5)
+
+    # Mark transactions as transfers
+    marked_count = 0
+    for txn_id1, txn_id2 in transfers:
+        # Update both transactions to mark them as part of a transfer pair
+        db.update("transactions", {"id": txn_id1}, {"is_transfer": True, "transfer_pair_id": txn_id2})
+        db.update("transactions", {"id": txn_id2}, {"is_transfer": True, "transfer_pair_id": txn_id1})
+        marked_count += 2
+
+    return {
+        "message": f"Detected and marked {len(transfers)} transfer pairs",
+        "transfer_pairs": len(transfers),
+        "transactions_marked": marked_count
+    }
+
 @router.post("/convert-transactions")
 async def convert_transactions_to_expenses(
     account_id: str = None,
     current_user: User = Depends(get_current_user)
 ):
     """
-    Convert checking account withdrawal and fee transactions to expenses.
+    Convert checking and credit card withdrawal and fee transactions to expenses.
+    Automatically excludes transfers between accounts.
     Optionally specify account_id to convert for a specific account only.
     """
     db = get_db()
 
-    # Get all checking accounts for the user
+    # First, detect and mark transfers
+    transfers = detect_transfers(current_user.id, db, days_tolerance=5)
+    transfer_transaction_ids = set()
+    for txn_id1, txn_id2 in transfers:
+        transfer_transaction_ids.add(txn_id1)
+        transfer_transaction_ids.add(txn_id2)
+
+    # Get all checking and credit card accounts for the user
     if account_id:
-        accounts = [db.find_one("accounts", {"id": account_id, "user_id": current_user.id, "account_type": "checking"})]
-        if not accounts[0]:
+        accounts = [db.find_one("accounts", {"id": account_id, "user_id": current_user.id})]
+        if not accounts[0] or accounts[0].get("account_type") not in ["checking", "credit_card"]:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Checking account not found"
+                detail="Checking or credit card account not found"
             )
     else:
-        accounts = db.find("accounts", {"user_id": current_user.id, "account_type": "checking"})
+        checking_accounts = db.find("accounts", {"user_id": current_user.id, "account_type": "checking"})
+        credit_card_accounts = db.find("accounts", {"user_id": current_user.id, "account_type": "credit_card"})
+        accounts = checking_accounts + credit_card_accounts
 
     if not accounts:
-        return {"message": "No checking accounts found", "expenses_created": 0}
+        return {"message": "No checking or credit card accounts found", "expenses_created": 0}
 
     account_ids = [acc["id"] for acc in accounts]
 
@@ -473,9 +605,15 @@ async def convert_transactions_to_expenses(
         )
         existing_expense_keys.add(key)
 
-    # Convert transactions to expenses
+    # Convert transactions to expenses (excluding transfers)
     expenses_created = 0
+    transfers_skipped = 0
     for txn in transactions:
+        # Skip if this transaction is part of a transfer
+        if txn.get("id") in transfer_transaction_ids:
+            transfers_skipped += 1
+            continue
+
         # Check if this transaction is already an expense
         txn_key = (
             txn.get("account_id"),
@@ -501,7 +639,8 @@ async def convert_transactions_to_expenses(
             expenses_created += 1
 
     return {
-        "message": f"Converted {expenses_created} transactions to expenses",
+        "message": f"Converted {expenses_created} transactions to expenses ({transfers_skipped} transfers excluded)",
         "expenses_created": expenses_created,
+        "transfers_excluded": transfers_skipped,
         "transactions_processed": len(transactions)
     }

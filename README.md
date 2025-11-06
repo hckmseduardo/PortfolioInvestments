@@ -15,12 +15,15 @@ A comprehensive investment portfolio management platform that allows users to im
 - **Performance Analytics**: Track portfolio value, book value vs market value, and gain/loss over time
 - **Dividend Tracking**: Monitor dividend income by month and security with interactive charts
 - **Advanced Expense Management**:
-  - Convert checking account transactions to expenses automatically
+  - Convert checking and credit card transactions to expenses automatically
+  - Smart transfer detection: Automatically identifies and excludes transfers between accounts
+  - Credit card payment matching: Links payments from checking to credit card accounts
   - Smart auto-categorization with machine learning from your history
   - Inline category editing with color-coded tags
   - Custom category creation with budget limits
   - Monthly expense comparison with stacked charts
   - Category trend analysis over time
+  - Accurate totals excluding inter-account transfers
 - **Real-time Market Data**: Automatic price updates using Yahoo Finance API
 
 ## Tech Stack
@@ -255,7 +258,8 @@ npm run dev
 - `PUT /expenses/categories/{id}` - Update category
 - `DELETE /expenses/categories/{id}` - Delete category
 - `POST /expenses/categories/init-defaults` - Initialize default expense categories
-- `POST /expenses/convert-transactions` - Convert checking account transactions to expenses with auto-categorization
+- `POST /expenses/convert-transactions` - Convert checking and credit card transactions to expenses with auto-categorization (excludes transfers)
+- `POST /expenses/detect-transfers` - Detect and mark transfers between accounts
 
 ### Import
 - `POST /import/statement` - Upload and parse statement (Wealthsimple, Tangerine, or NBC)
