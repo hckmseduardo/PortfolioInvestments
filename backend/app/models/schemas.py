@@ -7,6 +7,7 @@ class AccountType(str, Enum):
     INVESTMENT = "investment"
     CHECKING = "checking"
     SAVINGS = "savings"
+    CREDIT_CARD = "credit_card"
 
 class TransactionType(str, Enum):
     BUY = "buy"

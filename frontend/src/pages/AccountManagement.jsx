@@ -167,6 +167,8 @@ const AccountManagement = () => {
         return 'success';
       case 'savings':
         return 'info';
+      case 'credit_card':
+        return 'warning';
       default:
         return 'default';
     }
@@ -299,6 +301,7 @@ const AccountManagement = () => {
               <MenuItem value="investment">Investment</MenuItem>
               <MenuItem value="checking">Checking</MenuItem>
               <MenuItem value="savings">Savings</MenuItem>
+              <MenuItem value="credit_card">Credit Card</MenuItem>
             </TextField>
             <TextField
               label="Institution"

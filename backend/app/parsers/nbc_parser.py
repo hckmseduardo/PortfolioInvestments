@@ -43,25 +43,30 @@ class NBCParser:
         """
         Parse NBC CSV statement.
 
-        CSV Format:
-        Date;Description;Category;Debit;Credit;Balance
-        "2025-11-06";"Mastercard payment";"Credit card payment";"2090.47";"0";"2300.95"
+        CSV Formats:
+        Checking: Date;Description;Category;Debit;Credit;Balance
+        Credit Card: Date;card Number;Description;Category;Debit;Credit
         """
         transactions = []
-        account_info = {
-            "institution": "NBC",
-            "account_type": "checking",
-            "currency": "CAD"
-        }
 
         try:
             with open(self.file_path, 'r', encoding='utf-8') as file:
                 # NBC uses semicolon as delimiter
                 reader = csv.DictReader(file, delimiter=';')
 
+                # Detect account type from headers
+                headers = reader.fieldnames
+                is_credit_card = 'card Number' in headers or 'Card Number' in headers
+
+                account_info = {
+                    "institution": "NBC",
+                    "account_type": "credit_card" if is_credit_card else "checking",
+                    "currency": "CAD"
+                }
+
                 for row in reader:
                     try:
-                        transaction = self._parse_csv_row(row)
+                        transaction = self._parse_csv_row(row, is_credit_card)
                         if transaction:
                             transactions.append(transaction)
                     except Exception as e:
@@ -79,7 +84,7 @@ class NBCParser:
             "dividends": []
         }
 
-    def _parse_csv_row(self, row: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    def _parse_csv_row(self, row: Dict[str, str], is_credit_card: bool = False) -> Optional[Dict[str, Any]]:
         """Parse a single CSV row into a transaction."""
         try:
             # Parse date (YYYY-MM-DD format)
@@ -112,7 +117,7 @@ class NBCParser:
                 full_description += f" ({category})"
 
             # Map NBC transaction to our system
-            mapped_type = self._map_transaction_type(description, category, amount)
+            mapped_type = self._map_transaction_type(description, category, amount, is_credit_card)
 
             return {
                 "date": date,
@@ -131,7 +136,7 @@ class NBCParser:
             logger.warning(f"Error parsing row: {row}. Error: {e}")
             return None
 
-    def _map_transaction_type(self, description: str, category: str, amount: float) -> str:
+    def _map_transaction_type(self, description: str, category: str, amount: float, is_credit_card: bool = False) -> str:
         """
         Map NBC transaction to our system.
 
@@ -139,6 +144,7 @@ class NBCParser:
             description: Transaction description
             category: NBC category
             amount: Transaction amount (positive = credit, negative = debit)
+            is_credit_card: Whether this is from a credit card statement
 
         Returns:
             Mapped transaction type
@@ -148,6 +154,15 @@ class NBCParser:
 
         # Check for specific patterns - order matters!
         # More specific patterns should come before generic ones
+
+        # Credit card specific handling
+        if is_credit_card:
+            # Payment received on credit card
+            if 'payment received' in desc_lower or 'credit card payment' in cat_lower:
+                return 'deposit'  # Payment to credit card (reduces balance)
+            # All other credit card transactions are purchases (withdrawals)
+            else:
+                return 'withdrawal'
 
         # Salary/Income
         if 'paie' in desc_lower or 'paycheck' in desc_lower or 'salary' in cat_lower:

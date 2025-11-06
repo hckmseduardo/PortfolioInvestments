@@ -7,7 +7,7 @@ A comprehensive investment portfolio management platform that allows users to im
 - **Multi-Bank Statement Import & Processing**:
   - **Wealthsimple**: PDF, CSV, and Excel statements for investment and checking accounts
   - **Tangerine**: CSV and QFX/OFX formats for checking and savings accounts
-  - **NBC (National Bank of Canada)**: CSV format for checking and savings accounts
+  - **NBC (National Bank of Canada)**: CSV format for checking, savings, and credit card accounts
   - Automatic bank detection based on file format and content
 - **Transaction Statements**: View and filter all imported transactions with date range filters (last 7 days, month to date, last month, year to date, last year, all time, or custom period)
 - **Account Balance Tracking**: Real-time balance calculation based on transaction history
@@ -149,7 +149,7 @@ npm run dev
 - Supported institutions:
   - Wealthsimple (investment, crypto, and checking accounts)
   - Tangerine (checking and savings accounts)
-  - NBC - National Bank of Canada (checking and savings accounts)
+  - NBC - National Bank of Canada (checking, savings, and credit card accounts)
 
 ### 3. View Transactions
 - Navigate to the "Transactions" page
@@ -373,17 +373,23 @@ npm run dev
 - Bonus/Reward Payouts
 
 ### NBC (National Bank of Canada) Statements
-- **CSV**: Checking and savings account transaction history
+- **CSV (Checking/Savings)**: Account transaction history
   - Format: Date;Description;Category;Debit;Credit;Balance (semicolon delimiter)
   - Date format: YYYY-MM-DD (ISO format)
   - Encoding: UTF-8
   - Includes merchant categories and separate debit/credit columns
 
+- **CSV (Credit Card)**: Credit card transaction history
+  - Format: Date;card Number;Description;Category;Debit;Credit (semicolon delimiter)
+  - Automatically detected by "card Number" column
+  - All purchases automatically categorized as expenses
+  - Payments received tracked as deposits
+
 **Transaction Types Detected:**
 - Salary/Payroll deposits
 - Government payments (tax refunds, benefits)
 - INTERAC e-Transfer (in/out)
-- Credit card payments
+- Credit card payments and purchases
 - Mortgage and rent payments
 - Insurance payments
 - Bill payments and utilities
