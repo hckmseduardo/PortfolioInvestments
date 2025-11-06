@@ -50,6 +50,7 @@ const Expenses = () => {
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
+  const [dateRange, setDateRange] = useState('current_month'); // current_month, last_month, last_3_months, last_6_months, last_year, all_time
   const [loading, setLoading] = useState(true);
   const [editingExpense, setEditingExpense] = useState(null);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
@@ -63,8 +64,9 @@ const Expenses = () => {
   useEffect(() => {
     if (!loading) {
       fetchExpenses();
+      fetchSummary();
     }
-  }, [selectedAccount, selectedCategory]);
+  }, [selectedAccount, selectedCategory, dateRange]);
 
   const fetchInitialData = async () => {
     try {
@@ -100,6 +102,38 @@ const Expenses = () => {
     }
   };
 
+  const getDateRangeFilter = () => {
+    const now = new Date();
+    let startDate, endDate = now;
+
+    switch (dateRange) {
+      case 'current_month':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        break;
+      case 'last_month':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        endDate = new Date(now.getFullYear(), now.getMonth(), 0);
+        break;
+      case 'last_3_months':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+        break;
+      case 'last_6_months':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 6, 1);
+        break;
+      case 'last_year':
+        startDate = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+        break;
+      case 'year_to_date':
+        startDate = new Date(now.getFullYear(), 0, 1);
+        break;
+      case 'all_time':
+      default:
+        return { startDate: null, endDate: null };
+    }
+
+    return { startDate, endDate };
+  };
+
   const fetchAccounts = async () => {
     try {
       const response = await accountsAPI.getAll();
@@ -112,7 +146,18 @@ const Expenses = () => {
   const fetchExpenses = async () => {
     try {
       const response = await expensesAPI.getAll(selectedAccount || null, selectedCategory || null);
-      setExpenses(response.data);
+      const { startDate, endDate } = getDateRangeFilter();
+
+      // Filter expenses by date range
+      let filteredExpenses = response.data;
+      if (startDate && endDate) {
+        filteredExpenses = response.data.filter(expense => {
+          const expenseDate = new Date(expense.date);
+          return expenseDate >= startDate && expenseDate <= endDate;
+        });
+      }
+
+      setExpenses(filteredExpenses);
     } catch (error) {
       console.error('Error fetching expenses:', error);
     }
@@ -121,7 +166,32 @@ const Expenses = () => {
   const fetchSummary = async () => {
     try {
       const response = await expensesAPI.getSummary(selectedAccount || null);
-      setSummary(response.data);
+      const { startDate, endDate } = getDateRangeFilter();
+
+      // Filter summary by date range if needed
+      if (startDate && endDate) {
+        // Recalculate summary for the filtered date range
+        const allExpenses = await expensesAPI.getAll(selectedAccount || null, null);
+        const filteredExpenses = allExpenses.data.filter(expense => {
+          const expenseDate = new Date(expense.date);
+          return expenseDate >= startDate && expenseDate <= endDate;
+        });
+
+        const totalExpenses = filteredExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+        const byCategory = {};
+        filteredExpenses.forEach(exp => {
+          const cat = exp.category || 'Uncategorized';
+          byCategory[cat] = (byCategory[cat] || 0) + (exp.amount || 0);
+        });
+
+        setSummary({
+          total_expenses: totalExpenses,
+          by_category: byCategory,
+          expense_count: filteredExpenses.length
+        });
+      } else {
+        setSummary(response.data);
+      }
     } catch (error) {
       console.error('Error fetching summary:', error);
     }
@@ -275,7 +345,25 @@ const Expenses = () => {
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
+          <Grid item xs={12} md={4}>
+            <FormControl fullWidth>
+              <InputLabel>Time Period</InputLabel>
+              <Select
+                value={dateRange}
+                onChange={(e) => setDateRange(e.target.value)}
+                label="Time Period"
+              >
+                <MenuItem value="current_month">Current Month</MenuItem>
+                <MenuItem value="last_month">Last Month</MenuItem>
+                <MenuItem value="last_3_months">Last 3 Months</MenuItem>
+                <MenuItem value="last_6_months">Last 6 Months</MenuItem>
+                <MenuItem value="year_to_date">Year to Date</MenuItem>
+                <MenuItem value="last_year">Last Year</MenuItem>
+                <MenuItem value="all_time">All Time</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} md={4}>
             <FormControl fullWidth>
               <InputLabel>Account</InputLabel>
               <Select
@@ -292,7 +380,7 @@ const Expenses = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12} md={6}>
+          <Grid item xs={12} md={4}>
             <FormControl fullWidth>
               <InputLabel>Category</InputLabel>
               <Select
