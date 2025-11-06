@@ -10,6 +10,7 @@ from app.api.auth import get_current_user
 from app.database.json_db import get_db
 from app.parsers.wealthsimple_parser import WealthsimpleParser
 from app.parsers.tangerine_parser import TangerineParser
+from app.parsers.nbc_parser import NBCParser
 from app.config import settings
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -120,13 +121,15 @@ def detect_statement_type(file_path: str) -> str:
     """
     Detect which bank/institution the statement is from.
 
-    Returns: 'wealthsimple' or 'tangerine'
+    Returns: 'wealthsimple', 'tangerine', or 'nbc'
     """
     file_ext = Path(file_path).suffix.lower()
     filename = Path(file_path).name.lower()
 
     # Check filename for hints
-    if 'tangerine' in filename:
+    if 'bnc' in filename or 'nbc' in filename or 'banque nationale' in filename:
+        return 'nbc'
+    elif 'tangerine' in filename:
         return 'tangerine'
     elif 'wealthsimple' in filename or 'wealth' in filename:
         return 'wealthsimple'
@@ -140,8 +143,11 @@ def detect_statement_type(file_path: str) -> str:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 first_line = f.readline().lower()
+                # NBC CSV has: Date;Description;Category;Debit;Credit;Balance (semicolon delimiter)
+                if 'debit' in first_line and 'credit' in first_line and 'balance' in first_line and ';' in first_line:
+                    return 'nbc'
                 # Tangerine CSV has: Date,Transaction,Nom,Description,Montant
-                if 'nom' in first_line and 'montant' in first_line:
+                elif 'nom' in first_line and 'montant' in first_line:
                     return 'tangerine'
                 # Wealthsimple has different headers
                 return 'wealthsimple'
@@ -156,7 +162,10 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
     statement_type = detect_statement_type(file_path)
 
     # Choose appropriate parser
-    if statement_type == 'tangerine':
+    if statement_type == 'nbc':
+        parser = NBCParser(file_path)
+        parsed_data = parser.parse()
+    elif statement_type == 'tangerine':
         parser = TangerineParser(file_path)
         parsed_data = parser.parse()
     else:

@@ -99,14 +99,9 @@ async def get_account_balance(
         txn_type = txn.get('type', '')
         total = txn.get('total', 0.0)
 
-        if txn_type in ['deposit', 'dividend', 'bonus']:
-            balance += total
-        elif txn_type in ['withdrawal', 'fee', 'tax']:
-            balance -= abs(total)
-        elif txn_type == 'buy':
-            balance += total
-        elif txn_type == 'sell':
-            balance += total
+        # Simply add the total - it's already signed correctly
+        # (positive for credits, negative for debits)
+        balance += total
 
     return {
         "account_id": account_id,

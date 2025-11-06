@@ -7,6 +7,7 @@ A comprehensive investment portfolio management platform that allows users to im
 - **Multi-Bank Statement Import & Processing**:
   - **Wealthsimple**: PDF, CSV, and Excel statements for investment and checking accounts
   - **Tangerine**: CSV and QFX/OFX formats for checking and savings accounts
+  - **NBC (National Bank of Canada)**: CSV format for checking and savings accounts
   - Automatic bank detection based on file format and content
 - **Transaction Statements**: View and filter all imported transactions with date range filters (last 7 days, month to date, last month, year to date, last year, all time, or custom period)
 - **Account Balance Tracking**: Real-time balance calculation based on transaction history
@@ -138,6 +139,7 @@ npm run dev
 - Upload your bank statement:
   - **Wealthsimple**: PDF, CSV, or Excel format
   - **Tangerine**: CSV or QFX/OFX format
+  - **NBC**: CSV format
 - The system automatically detects the bank and format
 - Extracted data includes:
   - Account information
@@ -147,6 +149,7 @@ npm run dev
 - Supported institutions:
   - Wealthsimple (investment, crypto, and checking accounts)
   - Tangerine (checking and savings accounts)
+  - NBC - National Bank of Canada (checking and savings accounts)
 
 ### 3. View Transactions
 - Navigate to the "Transactions" page
@@ -255,7 +258,7 @@ npm run dev
 - `POST /expenses/convert-transactions` - Convert checking account transactions to expenses with auto-categorization
 
 ### Import
-- `POST /import/statement` - Upload and parse statement (Wealthsimple or Tangerine)
+- `POST /import/statement` - Upload and parse statement (Wealthsimple, Tangerine, or NBC)
   - Supported formats: PDF, CSV, Excel (.xlsx/.xls), QFX/OFX
   - Automatic bank detection
 - `GET /import/statements` - List all uploaded statements
@@ -369,11 +372,34 @@ npm run dev
 - Fees and Service Charges
 - Bonus/Reward Payouts
 
+### NBC (National Bank of Canada) Statements
+- **CSV**: Checking and savings account transaction history
+  - Format: Date;Description;Category;Debit;Credit;Balance (semicolon delimiter)
+  - Date format: YYYY-MM-DD (ISO format)
+  - Encoding: UTF-8
+  - Includes merchant categories and separate debit/credit columns
+
+**Transaction Types Detected:**
+- Salary/Payroll deposits
+- Government payments (tax refunds, benefits)
+- INTERAC e-Transfer (in/out)
+- Credit card payments
+- Mortgage and rent payments
+- Insurance payments
+- Bill payments and utilities
+- Mobile deposits
+- Investments and transfers
+- Fees and service charges
+- Restaurant and shopping transactions
+
 ### Automatic Bank Detection
 The system automatically detects which bank a statement is from based on:
-1. Filename (e.g., "Tangerine" or "Wealthsimple" in the name)
+1. Filename (e.g., "Tangerine", "Wealthsimple", "BNC", or "NBC" in the name)
 2. File extension (.qfx/.ofx always uses Tangerine parser)
-3. File content (CSV header format)
+3. File content (CSV header format and delimiter):
+   - NBC: Semicolon-delimited with "Debit;Credit;Balance" headers
+   - Tangerine: Comma-delimited with "Nom,Montant" headers
+   - Wealthsimple: Standard CSV format
 
 ## Project Structure
 
