@@ -260,11 +260,11 @@ class WealthsimpleParser:
         if match:
             return match.group(1)
 
-        stopwords = {'CAD', 'USD', 'FX', 'CDN', 'INTO'}
+        stopwords = {'CAD', 'USD', 'FX', 'CDN', 'INTO', 'DE', 'AU'}
         alt_match = re.search(
-            r'(?:purchase|buy|sale|sell|transfer|trade|swap)\s+'
-            r'(?:of\s+)?'
-            r'(?:\d+(?:[\s,]\d{3})*(?:[.,]\d+)?\s+)?'
+            r'(?:purchase|buy|sale|sell|transfer|trade|swap|achat|vente)\s+'
+            r'(?:of\s+|de\s+)?'
+            r'(?:\d+(?:[\s,]\d{3})*(?:[.,]\d+)*\s+)?'
             r'([A-Z]{2,10})\b',
             str(description),
             re.IGNORECASE
@@ -279,7 +279,19 @@ class WealthsimpleParser:
         if not description:
             return 0.0
 
-        # First, try to match patterns with "shares" or "actions" keyword
+        # First, check for crypto transactions (most specific pattern)
+        # "Purchase of 0.0012926500 BTC" or "Achat de 0,0031719200 BTC"
+        match = re.search(r'(?:Purchase of|Sale of|Achat de|Vente de)\s+(\d+(?:[.,]\d+)*)\s+[A-Z]{2,10}', str(description), re.IGNORECASE)
+        if match:
+            try:
+                num_str = match.group(1)
+                # Crypto quantities use comma as decimal in French, dot in English
+                num_str = num_str.replace(',', '.')
+                return float(num_str)
+            except:
+                return 0.0
+
+        # Then try to match patterns with "shares" or "actions" keyword
         # Handle both English and French formats
         # English: "10.5 shares" or "10,000.5 shares" (dot = decimal, comma = thousands)
         # French: "10,5 actions" or "10 000,5 actions" (comma = decimal, space = thousands)
@@ -306,6 +318,7 @@ class WealthsimpleParser:
                 return 0.0
 
         # For "Transfer of X shares" or "Bought X shares" or "Achat de X actions" patterns
+        # NOTE: This should NOT match crypto (checked above), only regular securities
         match = re.search(r'(?:Transfer of|Bought|Sold|Achat de|Vente de)\s+(\d+(?:[\s,]\d{3})*(?:[.,]\d+)?)', str(description), re.IGNORECASE)
         if match:
             try:
