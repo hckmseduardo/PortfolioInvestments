@@ -45,15 +45,41 @@ def get_historical_price(ticker: str, as_of: datetime) -> Optional[float]:
     """
     db, session = get_db_service()
     normalized_date = _normalize_date(as_of)
+    ticker_key = ticker.upper()
 
     try:
+        # First try to find a record marked as historical (is_current=0)
         record = db.find_one(_COLLECTION, {
-            "ticker": ticker.upper(),
+            "ticker": ticker_key,
             "date": normalized_date,
-            "is_current": 0  # Only fetch historical prices
+            "is_current": 0
         })
+
+        # If not found, try legacy records (no is_current field)
+        # These are old cache records from before the is_current feature
+        if not record:
+            # Get all records for this ticker and date
+            from app.config import settings
+            if settings.use_postgres:
+                # PostgreSQL - need to handle differently
+                pass  # Will use the db service query
+            else:
+                # JSON mode - find without is_current field
+                all_records = db.find(_COLLECTION, {
+                    "ticker": ticker_key,
+                    "date": normalized_date
+                })
+                # Find one without is_current field (legacy record)
+                for rec in all_records:
+                    if "is_current" not in rec:
+                        record = rec
+                        break
+
         if record:
             return record.get("price")
+        return None
+    except Exception as e:
+        logger.error(f"Error getting historical price for {ticker_key}: {e}")
         return None
     finally:
         if session:

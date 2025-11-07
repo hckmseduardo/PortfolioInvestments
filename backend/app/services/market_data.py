@@ -26,12 +26,19 @@ class MarketDataService:
         Returns:
             Current price or None if not available
         """
+        # CASH always has a price of 1.0 (CAD)
+        if ticker.upper() == 'CASH':
+            return 1.0
+
         # Check cache first if use_cache is True
         if use_cache:
-            cached_price, is_expired = price_cache.get_current_price(ticker)
-            if cached_price is not None and not is_expired:
-                logger.debug(f"Using cached current price for {ticker}: {cached_price}")
-                return cached_price
+            try:
+                cached_price, is_expired = price_cache.get_current_price(ticker)
+                if cached_price is not None and not is_expired:
+                    logger.debug(f"Using cached current price for {ticker}: {cached_price}")
+                    return cached_price
+            except Exception as e:
+                logger.warning(f"Failed to get cached price for {ticker}: {e}")
 
         # Fetch fresh price from market
         price = self._fetch_current_price_from_market(ticker)
@@ -85,6 +92,10 @@ class MarketDataService:
         If the date is today or future, gets current price instead.
         Historical prices are cached permanently.
         """
+        # CASH always has a price of 1.0 (CAD)
+        if ticker.upper() == 'CASH':
+            return 1.0
+
         target = target_date
         if target.tzinfo is None:
             target = target.replace(tzinfo=timezone.utc)
@@ -95,28 +106,40 @@ class MarketDataService:
             return self.get_current_price(ticker)
 
         # Check cache for historical price
-        cached = price_cache.get_historical_price(ticker, target_midnight)
-        if cached is not None and (cached >= 1 or ticker.upper() == 'CASH'):
-            logger.debug(f"Using cached historical price for {ticker} on {target_midnight.date()}: {cached}")
-            return cached
+        try:
+            cached = price_cache.get_historical_price(ticker, target_midnight)
+            if cached is not None and cached >= 1:
+                logger.debug(f"Using cached historical price for {ticker} on {target_midnight.date()}: {cached}")
+                return cached
+        except Exception as e:
+            logger.warning(f"Failed to get cached historical price for {ticker}: {e}")
 
         # Fetch from market data sources
         yahoo_price = self._fetch_yahoo_historical(ticker, target_midnight)
         if yahoo_price is not None:
-            price_cache.set_historical_price(ticker, target_midnight, yahoo_price)
-            logger.debug(f"Cached historical price for {ticker} on {target_midnight.date()}: {yahoo_price}")
+            try:
+                price_cache.set_historical_price(ticker, target_midnight, yahoo_price)
+                logger.debug(f"Cached historical price for {ticker} on {target_midnight.date()}: {yahoo_price}")
+            except Exception as e:
+                logger.warning(f"Failed to cache historical price for {ticker}: {e}")
             return yahoo_price
 
         stooq_price = self._fetch_stooq_historical(ticker, target_midnight)
         if stooq_price is not None:
-            price_cache.set_historical_price(ticker, target_midnight, stooq_price)
-            logger.debug(f"Cached historical price for {ticker} on {target_midnight.date()}: {stooq_price}")
+            try:
+                price_cache.set_historical_price(ticker, target_midnight, stooq_price)
+                logger.debug(f"Cached historical price for {ticker} on {target_midnight.date()}: {stooq_price}")
+            except Exception as e:
+                logger.warning(f"Failed to cache historical price for {ticker}: {e}")
             return stooq_price
 
         tv_price = tradingview_client.get_price_on(ticker, target_midnight)
         if tv_price is not None:
-            price_cache.set_historical_price(ticker, target_midnight, tv_price)
-            logger.debug(f"Cached historical price for {ticker} on {target_midnight.date()}: {tv_price}")
+            try:
+                price_cache.set_historical_price(ticker, target_midnight, tv_price)
+                logger.debug(f"Cached historical price for {ticker} on {target_midnight.date()}: {tv_price}")
+            except Exception as e:
+                logger.warning(f"Failed to cache historical price for {ticker}: {e}")
             return tv_price
 
         logger.warning("No historical market price found for %s on %s", ticker, target_midnight)
