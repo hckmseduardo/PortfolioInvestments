@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Callable, Dict, Any
 from datetime import datetime, timedelta
 from collections import defaultdict
 import re
+from rq.exceptions import NoSuchJobError
 from app.models.schemas import Expense, ExpenseCreate, Category, CategoryCreate, User
 from app.api.auth import get_current_user
 from app.database.json_db import get_db
+from app.services.job_queue import enqueue_expense_conversion_job, get_job_info
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
@@ -630,44 +632,49 @@ async def detect_and_mark_transfers(current_user: User = Depends(get_current_use
         "transactions_marked": marked_count
     }
 
-@router.post("/convert-transactions")
-async def convert_transactions_to_expenses(
-    account_id: str = None,
-    current_user: User = Depends(get_current_user)
-):
+def run_expense_conversion(
+    user_id: str,
+    account_id: Optional[str] = None,
+    progress_callback: Optional[Callable[[str], None]] = None
+) -> Dict[str, Any]:
     """
-    Convert checking and credit card withdrawal and fee transactions to expenses.
-    Automatically excludes transfers between accounts.
-    Optionally specify account_id to convert for a specific account only.
+    Core logic that converts transactions to expenses for a user.
+    Designed to be executed by a background worker.
     """
     db = get_db()
 
-    # First, detect and mark transfers
-    transfers = detect_transfers(current_user.id, db, days_tolerance=5)
+    def notify(stage: str):
+        if progress_callback:
+            progress_callback(stage)
+
+    notify("detecting_transfers")
+    transfers = detect_transfers(user_id, db, days_tolerance=5)
     transfer_transaction_ids = set()
     for txn_id1, txn_id2 in transfers:
         transfer_transaction_ids.add(txn_id1)
         transfer_transaction_ids.add(txn_id2)
 
-    # Get all checking and credit card accounts for the user
     if account_id:
-        accounts = [db.find_one("accounts", {"id": account_id, "user_id": current_user.id})]
-        if not accounts[0] or accounts[0].get("account_type") not in ["checking", "credit_card"]:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Checking or credit card account not found"
-            )
+        account = db.find_one("accounts", {"id": account_id, "user_id": user_id})
+        if not account or not _is_expense_account(account):
+            raise ValueError("Checking or credit card account not found")
+        accounts = [account]
     else:
-        checking_accounts = db.find("accounts", {"user_id": current_user.id, "account_type": "checking"})
-        credit_card_accounts = db.find("accounts", {"user_id": current_user.id, "account_type": "credit_card"})
-        accounts = checking_accounts + credit_card_accounts
+        accounts = _get_expense_accounts(db, user_id)
 
     if not accounts:
-        return {"message": "No checking or credit card accounts found", "expenses_created": 0}
+        return {
+            "message": "No checking or credit card accounts found",
+            "expenses_created": 0,
+            "expenses_updated": 0,
+            "transfers_excluded": 0,
+            "transfer_expenses_removed": 0,
+            "transactions_processed": 0,
+        }
 
     account_ids = [acc["id"] for acc in accounts]
 
-    # Get all withdrawal and fee transactions from checking accounts
+    notify("loading_transactions")
     transactions = []
     for acc_id in account_ids:
         txns = db.find("transactions", {"account_id": acc_id})
@@ -691,14 +698,11 @@ async def convert_transactions_to_expenses(
             txn.get("description")
         ))
 
-    # Get existing expenses to avoid duplicates and preserve manual categorizations
+    notify("loading_expenses")
     existing_expenses = []
     for acc_id in account_ids:
         existing_expenses.extend(db.find("expenses", {"account_id": acc_id}))
 
-    # Build maps for existing expenses:
-    # 1. By transaction_id (for direct matching)
-    # 2. By (account_id, date, amount, description) for legacy expenses without transaction_id
     existing_by_txn_id = {}
     existing_expense_keys = set()
     for exp in existing_expenses:
@@ -713,7 +717,7 @@ async def convert_transactions_to_expenses(
         )
         existing_expense_keys.add(key)
 
-    # Remove stale expenses that correspond to transactions now identified as transfers
+    notify("cleaning_transfer_expenses")
     transfer_expenses_removed = 0
     if transfer_transaction_ids:
         for exp in list(existing_expenses):
@@ -740,29 +744,23 @@ async def convert_transactions_to_expenses(
                     existing_expense_keys.remove(key)
                 existing_expenses.remove(exp)
 
-    # Convert transactions to expenses (excluding transfers)
+    notify("converting_transactions")
     expenses_created = 0
     expenses_updated = 0
     transfers_skipped = 0
     for txn in transactions:
-        # Skip if this transaction is part of a transfer
         if txn.get("id") in transfer_transaction_ids:
             transfers_skipped += 1
             continue
 
         txn_id = txn.get("id")
 
-        # Check if expense already exists for this transaction
         if txn_id and txn_id in existing_by_txn_id:
-            # Expense exists - update it but preserve manual category
             existing_exp = existing_by_txn_id[txn_id]
-
-            # Update expense with latest transaction data, but keep manual category
             update_data = {
                 "date": txn.get("date"),
                 "description": txn.get("description", ""),
                 "amount": abs(txn.get("total", 0)),
-                # Keep existing category (it may have been manually set)
                 "category": existing_exp.get("category", "Uncategorized"),
                 "transaction_id": txn_id
             }
@@ -771,7 +769,6 @@ async def convert_transactions_to_expenses(
             expenses_updated += 1
             continue
 
-        # Check legacy duplicate detection (for expenses without transaction_id)
         txn_key = (
             txn.get("account_id"),
             txn.get("date"),
@@ -780,23 +777,18 @@ async def convert_transactions_to_expenses(
         )
 
         if txn_key in existing_expense_keys:
-            # Legacy expense exists - update it to add transaction_id and preserve category
             matching_exp = next((e for e in existing_expenses
                                if e.get("account_id") == txn.get("account_id")
                                and e.get("date") == txn.get("date")
                                and e.get("amount") == abs(txn.get("total", 0))
                                and e.get("description") == txn.get("description")), None)
 
-            if matching_exp:
-                update_data = {
-                    "transaction_id": txn_id
-                }
-                db.update("expenses", {"id": matching_exp["id"]}, update_data)
+            if matching_exp and txn_id:
+                db.update("expenses", {"id": matching_exp["id"]}, {"transaction_id": txn_id})
                 expenses_updated += 1
             continue
 
-        # New expense - auto-categorize
-        category = auto_categorize_expense(txn.get("description", ""), current_user.id)
+        category = auto_categorize_expense(txn.get("description", ""), user_id)
 
         expense_doc = {
             "date": txn.get("date"),
@@ -811,6 +803,7 @@ async def convert_transactions_to_expenses(
         db.insert("expenses", expense_doc)
         expenses_created += 1
 
+    notify("completed")
     return {
         "message": (
             f"Converted {expenses_created} new transactions to expenses, "
@@ -822,5 +815,66 @@ async def convert_transactions_to_expenses(
         "expenses_updated": expenses_updated,
         "transfers_excluded": transfers_skipped,
         "transfer_expenses_removed": transfer_expenses_removed,
-        "transactions_processed": len(transactions)
+        "transactions_processed": len(transactions),
+        "user_id": user_id,
+        "account_id": account_id,
     }
+
+
+@router.post("/convert-transactions")
+async def convert_transactions_to_expenses(
+    account_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    db = get_db()
+
+    if account_id:
+        account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+        if not account or not _is_expense_account(account):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Checking or credit card account not found"
+            )
+
+    job = enqueue_expense_conversion_job(current_user.id, account_id)
+    job.meta = job.meta or {}
+    job.meta["user_id"] = current_user.id
+    if account_id:
+        job.meta["account_id"] = account_id
+    job.meta["stage"] = "queued"
+    job.save_meta()
+
+    return {
+        "job_id": job.id,
+        "status": job.get_status(),
+        "meta": job.meta
+    }
+
+
+@router.get("/convert-transactions/jobs/{job_id}")
+async def get_conversion_job_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        job_info = get_job_info(job_id)
+    except NoSuchJobError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found"
+        )
+    job_meta = job_info.get("meta") or {}
+
+    if job_meta.get("user_id") != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found"
+        )
+
+    result = job_info.get("result")
+    if isinstance(result, dict):
+        sanitized_result = result.copy()
+        sanitized_result.pop("user_id", None)
+        job_info["result"] = sanitized_result
+
+    return job_info

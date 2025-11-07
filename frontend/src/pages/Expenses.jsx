@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Container,
   Paper,
@@ -70,6 +70,12 @@ const Expenses = () => {
   const [editingCategory, setEditingCategory] = useState(null);
   const [newCategory, setNewCategory] = useState({ name: '', type: 'expense', color: '#4CAF50', budget_limit: '' });
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [conversionJobId, setConversionJobId] = useState(null);
+  const [conversionJobStatus, setConversionJobStatus] = useState(null);
+  const [conversionStage, setConversionStage] = useState(null);
+  const [isConversionRunning, setIsConversionRunning] = useState(false);
+  const conversionPollRef = useRef(null);
+  const conversionJobIdRef = useRef(null);
 
   useEffect(() => {
     fetchInitialData();
@@ -237,17 +243,108 @@ const Expenses = () => {
     }
   };
 
+  const formatStageLabel = (stage) => {
+    if (!stage) return '';
+    return stage
+      .split('_')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
+  const clearConversionPolling = () => {
+    if (conversionPollRef.current) {
+      clearInterval(conversionPollRef.current);
+      conversionPollRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => clearConversionPolling();
+  }, []);
+
+  useEffect(() => {
+    if (!conversionJobId) {
+      conversionJobIdRef.current = null;
+      setConversionJobStatus(null);
+      setConversionStage(null);
+      setIsConversionRunning(false);
+      clearConversionPolling();
+      return;
+    }
+
+    setIsConversionRunning(true);
+    conversionJobIdRef.current = conversionJobId;
+
+    const pollJob = async (jobId) => {
+      try {
+        if (!jobId) return;
+        const response = await expensesAPI.getConversionJobStatus(jobId);
+        const data = response.data;
+        setConversionJobStatus(data.status);
+        setConversionStage(data.meta?.stage || data.status);
+
+        if (data.status === 'finished') {
+          clearConversionPolling();
+          setConversionJobId(null);
+          setIsConversionRunning(false);
+          showSnackbar(data.result?.message || 'Transactions converted successfully', 'success');
+          await fetchInitialData();
+        } else if (data.status === 'failed') {
+          clearConversionPolling();
+          setConversionJobId(null);
+          setIsConversionRunning(false);
+          const errorMessage = data.error?.split('\n').slice(-2, -1)[0] || 'Conversion job failed';
+          showSnackbar(errorMessage, 'error');
+        }
+      } catch (error) {
+        if (conversionJobIdRef.current !== jobId) {
+          // Stale poll result from previous job; ignore.
+          return;
+        }
+
+        if (error.response?.status === 404) {
+          clearConversionPolling();
+          setConversionJobId(null);
+          setIsConversionRunning(false);
+          showSnackbar('Conversion job expired or was removed. Please try again.', 'warning');
+          return;
+        }
+
+        console.error('Error polling conversion job:', error);
+        clearConversionPolling();
+        setConversionJobId(null);
+        setIsConversionRunning(false);
+        showSnackbar('Error monitoring conversion job', 'error');
+      }
+    };
+
+    pollJob(conversionJobId);
+    conversionPollRef.current = setInterval(() => pollJob(conversionJobIdRef.current), 4000);
+
+    return () => clearConversionPolling();
+  }, [conversionJobId]);
+
   const handleConvertTransactions = async () => {
+    if (isConversionRunning) {
+      return;
+    }
+
     try {
-      setLoading(true);
       const response = await expensesAPI.convertTransactions(selectedAccount || null);
-      showSnackbar(response.data.message, 'success');
-      await fetchInitialData();
+      const { job_id: jobId, status, meta } = response.data || {};
+
+      if (!jobId) {
+        showSnackbar('Unable to start conversion job', 'error');
+        return;
+      }
+
+      setConversionJobId(jobId);
+      setConversionJobStatus(status);
+      setConversionStage(meta?.stage || 'queued');
+      showSnackbar('Import queued. We will refresh data when it finishes.', 'info');
     } catch (error) {
       console.error('Error converting transactions:', error);
-      showSnackbar('Error converting transactions', 'error');
-    } finally {
-      setLoading(false);
+      showSnackbar('Error starting conversion job', 'error');
     }
   };
 
@@ -408,9 +505,15 @@ const Expenses = () => {
             variant="contained"
             startIcon={<RefreshIcon />}
             onClick={handleConvertTransactions}
+            disabled={isConversionRunning}
           >
-            Import from Transactions
+            {isConversionRunning ? 'Import in Progress' : 'Import from Transactions'}
           </Button>
+          {isConversionRunning && (
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+              Running job ({conversionJobStatus || 'queued'}{conversionStage ? ` - ${formatStageLabel(conversionStage)}` : ''})...
+            </Typography>
+          )}
         </Box>
       </Box>
 
