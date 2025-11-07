@@ -89,10 +89,12 @@ class DatabaseService:
         if not model_class:
             raise ValueError(f"Unknown collection: {collection}")
 
-        # Add ID and timestamps if not present
+        # Add ID if not present
         if 'id' not in document:
             document['id'] = str(uuid.uuid4())
-        if 'created_at' not in document:
+
+        # Add created_at timestamp only if the model has this field
+        if 'created_at' not in document and hasattr(model_class, 'created_at'):
             document['created_at'] = datetime.utcnow()
 
         # Convert enum strings to enum types

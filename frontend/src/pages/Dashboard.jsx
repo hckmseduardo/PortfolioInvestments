@@ -8,7 +8,11 @@ import {
   Card,
   CardContent,
   Paper,
-  Typography
+  Typography,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select
 } from '@mui/material';
 import {
   TrendingUp,
@@ -58,6 +62,56 @@ const TILE_CONSTRAINTS = {
 const sanitizeNumber = (value, fallback) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const DATE_PRESETS = {
+  CURRENT: 'current',
+  LAST_MONTH: 'last_month',
+  SPECIFIC_MONTH: 'specific_month',
+  LAST_QUARTER: 'last_quarter',
+  LAST_YEAR: 'last_year',
+  END_OF_YEAR: 'end_of_year'
+};
+
+const formatISODate = (date) => date.toISOString().split('T')[0];
+const getLastDayOfMonthDate = (year, monthIndexZeroBased) =>
+  formatISODate(new Date(year, monthIndexZeroBased + 1, 0));
+
+const computeValuationDate = (preset, specificMonthValue, endOfYearValue) => {
+  const now = new Date();
+
+  switch (preset) {
+    case DATE_PRESETS.CURRENT:
+      return '';
+    case DATE_PRESETS.LAST_MONTH: {
+      const date = new Date(now.getFullYear(), now.getMonth(), 0);
+      return formatISODate(date);
+    }
+    case DATE_PRESETS.SPECIFIC_MONTH: {
+      if (!specificMonthValue) return '';
+      const [year, month] = specificMonthValue.split('-').map(Number);
+      if (!year || !month) return '';
+      return getLastDayOfMonthDate(year, month - 1);
+    }
+    case DATE_PRESETS.LAST_QUARTER: {
+      const currentQuarter = Math.floor(now.getMonth() / 3);
+      const targetQuarter = currentQuarter === 0 ? 3 : currentQuarter;
+      const targetYear = currentQuarter === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const lastMonthIndex = targetQuarter * 3 - 1;
+      return getLastDayOfMonthDate(targetYear, lastMonthIndex);
+    }
+    case DATE_PRESETS.LAST_YEAR: {
+      const date = new Date(now.getFullYear() - 1, 12, 0);
+      return formatISODate(date);
+    }
+    case DATE_PRESETS.END_OF_YEAR: {
+      const year = parseInt(endOfYearValue, 10);
+      if (!year) return '';
+      return formatISODate(new Date(year, 12, 0));
+    }
+    default:
+      return '';
+  }
 };
 
 const applyConstraints = (layout) =>
@@ -162,10 +216,17 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedDate, setSelectedDate] = useState('');
+  const [datePreset, setDatePreset] = useState(DATE_PRESETS.CURRENT);
+  const [specificMonth, setSpecificMonth] = useState('');
+  const [endOfYear, setEndOfYear] = useState('');
   const [gridLayout, setGridLayout] = useState(ensureCompleteLayout(DEFAULT_TILE_LAYOUT));
   const [layoutLoading, setLayoutLoading] = useState(true);
   const isReadyToPersist = useRef(false);
+
+  const valuationDate = useMemo(
+    () => computeValuationDate(datePreset, specificMonth, endOfYear),
+    [datePreset, specificMonth, endOfYear]
+  );
 
   useEffect(() => {
     const loadLayout = async () => {
@@ -194,7 +255,7 @@ const Dashboard = () => {
     const fetchData = async () => {
       setFetching(true);
       try {
-        const asOfParam = selectedDate || undefined;
+        const asOfParam = valuationDate || undefined;
         const [summaryRes, accountsRes, dividendsRes] = await Promise.all([
           positionsAPI.getSummary(asOfParam),
           accountsAPI.getAll(),
@@ -213,7 +274,7 @@ const Dashboard = () => {
     };
 
     fetchData();
-  }, [selectedDate, layoutLoading]);
+  }, [valuationDate, layoutLoading]);
 
   const formatCurrency = (value) =>
     new Intl.NumberFormat('en-CA', {
@@ -266,7 +327,7 @@ const Dashboard = () => {
     try {
       await positionsAPI.refreshPrices();
       // Refetch all data after refreshing prices
-      const asOfParam = selectedDate || undefined;
+      const asOfParam = valuationDate || undefined;
       const [summaryRes, accountsRes, dividendsRes] = await Promise.all([
         positionsAPI.getSummary(asOfParam),
         accountsAPI.getAll(),
@@ -294,8 +355,8 @@ const Dashboard = () => {
   const gainLossColor = capitalGains >= 0 ? 'success.main' : 'error.main';
   const gainLossIcon = capitalGains >= 0 ? <TrendingUp fontSize="large" /> : <TrendingDown fontSize="large" />;
 
-  const asOfLabel = selectedDate
-    ? new Date(selectedDate).toLocaleDateString()
+  const asOfLabel = valuationDate
+    ? new Date(valuationDate).toLocaleDateString()
     : new Date().toLocaleDateString();
 
   const renderTile = (id, layoutItem) => {
@@ -441,15 +502,55 @@ const Dashboard = () => {
           </Typography>
         </Box>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
-          <TextField
-            label="As of date"
-            type="date"
-            size="small"
-            value={selectedDate}
-            onChange={(event) => setSelectedDate(event.target.value)}
-            InputLabelProps={{ shrink: true }}
-            helperText="Select a past date to view historical metrics"
-          />
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel id="dashboard-date-select">Valuation</InputLabel>
+            <Select
+              labelId="dashboard-date-select"
+              value={datePreset}
+              label="Valuation"
+              onChange={(event) => setDatePreset(event.target.value)}
+            >
+              <MenuItem value={DATE_PRESETS.CURRENT}>Current Price</MenuItem>
+              <MenuItem value={DATE_PRESETS.LAST_MONTH}>Last Month</MenuItem>
+              <MenuItem value={DATE_PRESETS.SPECIFIC_MONTH}>Specific Month</MenuItem>
+              <MenuItem value={DATE_PRESETS.LAST_QUARTER}>Last Quarter</MenuItem>
+              <MenuItem value={DATE_PRESETS.LAST_YEAR}>Last Year</MenuItem>
+              <MenuItem value={DATE_PRESETS.END_OF_YEAR}>End of Year</MenuItem>
+            </Select>
+          </FormControl>
+          {datePreset === DATE_PRESETS.SPECIFIC_MONTH && (
+            <TextField
+              label="Month"
+              type="month"
+              size="small"
+              value={specificMonth}
+              onChange={(event) => setSpecificMonth(event.target.value)}
+              InputLabelProps={{ shrink: true }}
+            />
+          )}
+          {datePreset === DATE_PRESETS.END_OF_YEAR && (
+            <TextField
+              label="Year"
+              type="number"
+              size="small"
+              value={endOfYear}
+              onChange={(event) => setEndOfYear(event.target.value)}
+              InputProps={{ inputProps: { min: 1900, max: 9999 } }}
+            />
+          )}
+          {datePreset !== DATE_PRESETS.CURRENT && (
+            <Button
+              variant="text"
+              size="small"
+              onClick={() => {
+                setDatePreset(DATE_PRESETS.CURRENT);
+                setSpecificMonth('');
+                setEndOfYear('');
+              }}
+            >
+              Clear selection
+            </Button>
+          )}
           <Button
             variant="contained"
             size="small"

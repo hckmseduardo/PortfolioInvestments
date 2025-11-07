@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)
 
 def main():
     redis_conn = Redis.from_url(settings.REDIS_URL)
-    listen = [settings.EXPENSE_QUEUE_NAME]
+    listen = [settings.EXPENSE_QUEUE_NAME, settings.PRICE_QUEUE_NAME]
 
     with Connection(redis_conn):
         worker = Worker(list(map(Queue, listen)))

@@ -18,10 +18,11 @@ fi
 
 echo "Choose an option:"
 echo "1. Start with Docker (Recommended)"
-echo "2. Start Backend Only (Development)"
-echo "3. Start Frontend Only (Development)"
-echo "4. Stop Docker Containers"
-echo "5. View Logs"
+echo "2. Start with Docker (Recommended) and see console output"
+echo "3. Start Backend Only (Development)"
+echo "4. Start Frontend Only (Development)"
+echo "5. Stop Docker Containers"
+echo "6. View Logs"
 echo ""
 read -p "Enter your choice (1-5): " choice
 
@@ -29,9 +30,14 @@ case $choice in
     1)
         echo ""
         echo "Building and starting Docker containers..."
-        docker-compose up --build
+        docker-compose up --build -d
         ;;
     2)
+        echo ""
+        echo "Building and starting Docker containers with console output..."
+        docker-compose up --build 
+        ;;
+    3)
         echo ""
         echo "Starting backend in development mode..."
         cd backend
@@ -45,7 +51,7 @@ case $choice in
         echo "Starting FastAPI server..."
         python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
         ;;
-    3)
+    4)
         echo ""
         echo "Starting frontend in development mode..."
         cd frontend
@@ -56,13 +62,13 @@ case $choice in
         echo "Starting Vite dev server..."
         npm run dev
         ;;
-    4)
+    5)
         echo ""
         echo "Stopping Docker containers..."
         docker-compose down
         echo "Containers stopped."
         ;;
-    5)
+    6)
         echo ""
         echo "Showing Docker logs (Ctrl+C to exit)..."
         docker-compose logs -f

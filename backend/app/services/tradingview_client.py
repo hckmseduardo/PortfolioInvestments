@@ -1,9 +1,10 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Set, Tuple
 
 import requests
 
+from app.services.symbol_utils import generate_equity_symbol_variants
 
 logger = logging.getLogger(__name__)
 
@@ -166,50 +167,30 @@ class TradingViewClient:
             return None
 
     def _generate_symbols(self, ticker: str):
-        upper = ticker.upper()
-        base = upper
+        seen: Set[str] = set()
+        variants = generate_equity_symbol_variants(ticker)
 
-        if ':' in upper:
-            exchange, symbol = upper.split(':', 1)
+        # Yield explicit colon variants first
+        for variant in variants:
+            if ':' not in variant:
+                continue
+            exchange, symbol = variant.split(':', 1)
             screener = EXCHANGE_SCREENERS.get(exchange)
             if screener:
-                yield f"{exchange}:{symbol}", screener
-            return
-
-        if '.' in upper:
-            base = upper
-        else:
-            base = upper
-
-        yielded = set()
-
-        def emit(exchange: str, symbol: str):
-            screener = EXCHANGE_SCREENERS.get(exchange)
-            if not screener:
-                return
-            tv_symbol = f"{exchange}:{symbol}"
-            if tv_symbol not in yielded:
-                yielded.add(tv_symbol)
-                yield tv_symbol, screener
-
-        # If ticker already has '.', TradingView expects same
-        if '.' in base:
-            for exchange, screener in DEFAULT_SCREENERS:
-                tv_symbol = f"{exchange}:{base}"
-                if tv_symbol not in yielded:
-                    yielded.add(tv_symbol)
-                    yield tv_symbol, screener
-        else:
-            # Try Canadian exchanges first
-            for exchange, screener in DEFAULT_SCREENERS:
-                tv_symbol = f"{exchange}:{base}"
-                if tv_symbol not in yielded:
-                    yielded.add(tv_symbol)
+                tv_symbol = f"{exchange}:{symbol}"
+                if tv_symbol not in seen:
+                    seen.add(tv_symbol)
                     yield tv_symbol, screener
 
-        # Finally emit bare ticker with global screener (less reliable)
-        if base not in yielded:
-            yield base, "global"
+        # Fall back to default screeners for remaining variants
+        for variant in variants:
+            if ':' in variant:
+                continue
+            for exchange, screener in DEFAULT_SCREENERS:
+                tv_symbol = f"{exchange}:{variant}"
+                if tv_symbol not in seen:
+                    seen.add(tv_symbol)
+                    yield tv_symbol, screener
 
 
 tradingview_client = TradingViewClient()

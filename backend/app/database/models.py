@@ -184,6 +184,7 @@ class StockPrice(Base):
     price = Column(Float, nullable=False)
     is_current = Column(Integer, default=0, nullable=False)  # 1 for current prices, 0 for historical (closed days)
     cached_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # When this price was cached
+    source = Column(String, nullable=True)
 
     __table_args__ = (
         # Unique constraint on ticker + date combination

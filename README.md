@@ -13,6 +13,7 @@ A comprehensive investment portfolio management platform that allows users to im
 - **Account Balance Tracking**: Real-time balance calculation based on transaction history
 - **Portfolio Dashboard**: View all accounts, positions, and real-time performance metrics
 - **Performance Analytics**: Track portfolio value, book value vs market value, and gain/loss over time
+- **Asynchronous Quote Fetching**: Positions load instantly while live prices update in the background with multi-source fallbacks
 - **Dividend Tracking**: Monitor dividend income by month and security with interactive charts
 - **Advanced Expense Management**:
   - Convert checking and credit card transactions to expenses automatically
@@ -29,6 +30,7 @@ A comprehensive investment portfolio management platform that allows users to im
   - Category trend analysis over time
   - Accurate totals excluding inter-account transfers
 - **Real-time Market Data**: Automatic price updates using Yahoo Finance API
+- **Expanded Price Providers**: Automatic fallback to TradingView, Stooq, and TwelveData (optional API key) for improved Canadian coverage
 - **🆕 PostgreSQL Migration**: Seamless migration from JSON to PostgreSQL with automatic data import on first login
 
 ## Tech Stack
@@ -89,6 +91,8 @@ POSTGRES_DB=portfolio
 PGADMIN_DEFAULT_EMAIL=admin@example.com
 PGADMIN_DEFAULT_PASSWORD=supersecurepassword
 PGADMIN_PORT=5050
+# Optional market data providers
+TWELVEDATA_API_KEY=your_twelvedata_key_optional
 # Redis / background jobs
 REDIS_URL=redis://redis:6379/0
 ```

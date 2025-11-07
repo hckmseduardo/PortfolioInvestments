@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
     EXPENSE_QUEUE_NAME: str = "expense_conversion"
     EXPENSE_JOB_TIMEOUT: int = 1800  # 30 minutes
+    PRICE_QUEUE_NAME: str = "price_fetch"
+    PRICE_JOB_TIMEOUT: int = 600  # 10 minutes
+    PRICE_FETCH_MAX_ATTEMPTS: int = 3
+
+    # Market data providers
+    TWELVEDATA_API_KEY: Optional[str] = None
 
     @property
     def cors_origins_list(self) -> List[str]:

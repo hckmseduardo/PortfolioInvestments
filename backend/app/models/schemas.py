@@ -98,6 +98,10 @@ class AggregatedPosition(BaseModel):
     book_value: float
     market_value: float
     price: Optional[float] = None
+    price_source: Optional[str] = None
+    price_fetched_at: Optional[datetime] = None
+    has_live_price: bool = False
+    price_pending: bool = False
 
 class TransactionBase(BaseModel):
     date: datetime

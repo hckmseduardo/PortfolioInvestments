@@ -12,7 +12,10 @@ from app.models.schemas import (
 )
 from app.api.auth import get_current_user
 from app.database.json_db import get_db
-from app.services.market_data import market_service
+from app.config import settings
+from app.services.market_data import market_service, PriceQuote
+from app.services.job_queue import enqueue_price_fetch_job
+from app.services import price_cache
 
 router = APIRouter(prefix="/positions", tags=["positions"])
 logger = logging.getLogger(__name__)
@@ -252,40 +255,52 @@ def _build_aggregated_positions(db, account_ids: List[str], as_of: Optional[date
 
     aggregated = _aggregate_position_maps(position_maps)
 
-    price_cache: Dict[str, Optional[float]] = {}
+    tickers_for_quote = [pos['ticker'] for pos in aggregated if pos['ticker'] != 'CASH']
+    quote_cache: Dict[str, PriceQuote] = {
+        key.upper(): value for key, value in market_service.get_cached_quotes(tickers_for_quote, as_of).items()
+    }
+    missing_tickers: List[str] = []
+    max_attempts = settings.PRICE_FETCH_MAX_ATTEMPTS
 
     for position in aggregated:
         ticker = position['ticker']
         if ticker == 'CASH':
             position['price'] = 1.0
             position['market_value'] = float(position['quantity'])
+            position['price_source'] = 'cash'
+            position['price_fetched_at'] = datetime.utcnow().isoformat()
+            position['has_live_price'] = True
+            position['price_pending'] = False
+            position['price_failed'] = False
             continue
 
-        if ticker in price_cache:
-            price = price_cache[ticker]
-        else:
-            price = None
-            try:
-                if as_of:
-                    price = market_service.get_historical_price(ticker, as_of)
-                else:
-                    price = market_service.get_current_price(ticker)
-                price_cache[ticker] = price
-            except Exception as exc:
-                logger.warning("Failed to fetch market price for %s: %s", ticker, exc)
-                price_cache[ticker] = None
+        quote = quote_cache.get(ticker.upper())
 
-        if price is not None:
-            position['price'] = float(price)
-            position['market_value'] = float(price) * float(position['quantity'])
+        position['price_source'] = getattr(quote, "source", None)
+        fetched_at = getattr(quote, "fetched_at", None)
+        position['price_fetched_at'] = fetched_at.isoformat() if fetched_at else None
+        has_live = bool(getattr(quote, "price", None) is not None and getattr(quote, "is_live", False))
+        position['has_live_price'] = has_live
+
+        if has_live:
+            price_value = float(quote.price)
+            position['price'] = price_value
+            position['market_value'] = price_value * float(position['quantity'])
+            position['price_pending'] = False
+            position['price_failed'] = False
+            price_cache.reset_price_retry_count(ticker, as_of)
         else:
-            fallback_price = (
-                (position['book_value'] / position['quantity'])
-                if position['quantity']
-                else 0.0
-            )
-            position['price'] = fallback_price
-            position['market_value'] = fallback_price * float(position['quantity'])
+            position['price'] = None
+            position['market_value'] = 0.0
+            retry_count = price_cache.get_price_retry_count(ticker, as_of)
+            position['price_failed'] = retry_count >= max_attempts
+            position['price_pending'] = not position['price_failed']
+            if not position['price_failed']:
+                missing_tickers.append(ticker)
+
+    if missing_tickers:
+        unique = sorted({t.upper() for t in missing_tickers})
+        enqueue_price_fetch_job(unique, as_of.isoformat() if as_of else None)
 
     return aggregated
 
@@ -399,8 +414,8 @@ async def get_portfolio_summary(
 
     aggregated = _build_aggregated_positions(db, account_ids, as_of)
 
-    total_market_value = sum(pos.get("market_value", 0) for pos in aggregated)
-    total_book_value = sum(pos.get("book_value", 0) for pos in aggregated)
+    total_market_value = sum((pos.get("market_value") or 0) for pos in aggregated)
+    total_book_value = sum((pos.get("book_value") or 0) for pos in aggregated)
     total_gain_loss = total_market_value - total_book_value
     total_gain_loss_percent = (total_gain_loss / total_book_value * 100) if total_book_value > 0 else 0
     positions_count = len([pos for pos in aggregated if pos.get("ticker") != "CASH"])
@@ -468,7 +483,7 @@ async def refresh_market_prices(current_user: User = Depends(get_current_user)):
     for ticker in tickers:
         try:
             # use_cache=False forces fresh fetch from market
-            price = market_service.get_current_price(ticker, use_cache=False)
+            price = market_service.get_current_price_quote(ticker, use_cache=False).price
             if price is not None:
                 prices[ticker] = price
         except Exception as e:

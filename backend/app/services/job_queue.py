@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from redis import Redis
 from rq import Queue
@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 _redis_connection: Optional[Redis] = None
 _expense_queue: Optional[Queue] = None
+_price_queue: Optional[Queue] = None
 
 
 def _get_redis_connection() -> Redis:
@@ -43,6 +44,34 @@ def enqueue_expense_conversion_job(user_id: str, account_id: Optional[str] = Non
         job_timeout=settings.EXPENSE_JOB_TIMEOUT,
     )
     logger.info("Enqueued expense conversion job %s for user %s", job.id, user_id)
+    return job
+
+
+def get_price_queue() -> Queue:
+    global _price_queue
+    if _price_queue is None:
+        _price_queue = Queue(
+            settings.PRICE_QUEUE_NAME,
+            connection=_get_redis_connection(),
+            default_timeout=settings.PRICE_JOB_TIMEOUT,
+        )
+    return _price_queue
+
+
+def enqueue_price_fetch_job(tickers: List[str], as_of_date: Optional[str] = None) -> Optional[Job]:
+    if not tickers:
+        return None
+
+    from app.tasks.prices import run_price_fetch_job
+
+    queue = get_price_queue()
+    job = queue.enqueue(
+        run_price_fetch_job,
+        tickers,
+        as_of_date,
+        job_timeout=settings.PRICE_JOB_TIMEOUT,
+    )
+    logger.info("Enqueued price fetch job %s for %s tickers", job.id, len(tickers))
     return job
 
 
