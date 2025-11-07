@@ -323,6 +323,9 @@ def get_cached_prices(tickers: List[str], as_of: Optional[datetime]) -> Dict[str
                     "date": rec.get("date"),
                     "is_current": bool(rec.get("is_current", 0))
                 }
+    except Exception as exc:
+        logger.warning("Failed to fetch cached prices for %s: %s", tickers, exc)
+        results = {}
     finally:
         if session:
             session.close()
