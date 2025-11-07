@@ -629,6 +629,13 @@ const Expenses = () => {
                           outerRadius={80}
                           fill="#8884d8"
                           dataKey="value"
+                          onDoubleClick={(_, index) => {
+                            const selected = categoryData[index];
+                            if (selected) {
+                              setSelectedCategory(selected.name);
+                              setTabValue(1);
+                            }
+                          }}
                         >
                           {categoryData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />
@@ -673,7 +680,15 @@ const Expenses = () => {
               {monthlyTrendData.length > 0 ? (
                 <Box sx={{ height: 300 }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyTrendData}>
+                      <BarChart
+                        data={monthlyTrendData}
+                        onDoubleClick={(e) => {
+                          if (!e?.activeLabel) return;
+                          setSpecificMonth(e.activeLabel);
+                          setDateRange('specific_month');
+                          setTabValue(0);
+                        }}
+                      >
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="month" />
                       <YAxis />
