@@ -14,7 +14,8 @@ import {
   TrendingUp,
   TrendingDown,
   AccountBalance,
-  AttachMoney
+  AttachMoney,
+  Refresh
 } from '@mui/icons-material';
 import { accountsAPI, positionsAPI, dividendsAPI, dashboardAPI } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -160,6 +161,7 @@ const Dashboard = () => {
   const [dividendSummary, setDividendSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedDate, setSelectedDate] = useState('');
   const [gridLayout, setGridLayout] = useState(ensureCompleteLayout(DEFAULT_TILE_LAYOUT));
   const [layoutLoading, setLayoutLoading] = useState(true);
@@ -256,6 +258,28 @@ const Dashboard = () => {
     } catch (error) {
       console.error('Error resetting dashboard layout:', error);
       setGridLayout(convertFromServerLayout(DEFAULT_TILE_LAYOUT));
+    }
+  };
+
+  const handleRefreshPrices = async () => {
+    setRefreshing(true);
+    try {
+      await positionsAPI.refreshPrices();
+      // Refetch all data after refreshing prices
+      const asOfParam = selectedDate || undefined;
+      const [summaryRes, accountsRes, dividendsRes] = await Promise.all([
+        positionsAPI.getSummary(asOfParam),
+        accountsAPI.getAll(),
+        dividendsAPI.getSummary(undefined, undefined, asOfParam)
+      ]);
+
+      setSummary(summaryRes.data);
+      setAccounts(accountsRes.data);
+      setDividendSummary(dividendsRes.data);
+    } catch (error) {
+      console.error('Error refreshing prices:', error);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -426,6 +450,15 @@ const Dashboard = () => {
             InputLabelProps={{ shrink: true }}
             helperText="Select a past date to view historical metrics"
           />
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<Refresh />}
+            onClick={handleRefreshPrices}
+            disabled={refreshing || fetching}
+          >
+            {refreshing ? 'Refreshing...' : 'Refresh Prices'}
+          </Button>
           <Button variant="outlined" size="small" onClick={handleResetLayout}>
             Reset Layout
           </Button>

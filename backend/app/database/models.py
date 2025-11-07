@@ -173,3 +173,20 @@ class DashboardLayout(Base):
 
     # Relationships
     user = relationship("User", back_populates="dashboard_layouts")
+
+
+class StockPrice(Base):
+    __tablename__ = "stock_prices"
+
+    id = Column(String, primary_key=True)
+    ticker = Column(String, nullable=False, index=True)
+    date = Column(DateTime, nullable=False, index=True)  # Date at midnight UTC for historical, or exact timestamp for current
+    price = Column(Float, nullable=False)
+    is_current = Column(Integer, default=0, nullable=False)  # 1 for current prices, 0 for historical (closed days)
+    cached_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # When this price was cached
+
+    __table_args__ = (
+        # Unique constraint on ticker + date combination
+        # This ensures we don't store duplicate prices for the same ticker on the same date
+        {'sqlite_autoincrement': True}
+    )

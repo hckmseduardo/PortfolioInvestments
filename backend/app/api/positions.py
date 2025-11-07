@@ -448,19 +448,33 @@ async def update_position(
 
 @router.post("/refresh-prices")
 async def refresh_market_prices(current_user: User = Depends(get_current_user)):
+    """
+    Force refresh all market prices from data sources, bypassing cache.
+    Updates position market values and refreshes the price cache.
+    """
     db = get_db()
-    
+
     user_accounts = db.find("accounts", {"user_id": current_user.id})
     account_ids = [acc["id"] for acc in user_accounts]
-    
+
     all_positions = []
     for acc_id in account_ids:
         all_positions.extend(db.find("positions", {"account_id": acc_id}))
-    
-    tickers = list(set(pos["ticker"] for pos in all_positions if pos.get("ticker")))
-    
-    prices = market_service.get_multiple_prices(tickers)
-    
+
+    tickers = list(set(pos["ticker"] for pos in all_positions if pos.get("ticker") and pos.get("ticker") != "CASH"))
+
+    # Fetch fresh prices from market (bypassing cache) and update cache
+    prices = {}
+    for ticker in tickers:
+        try:
+            # use_cache=False forces fresh fetch from market
+            price = market_service.get_current_price(ticker, use_cache=False)
+            if price is not None:
+                prices[ticker] = price
+        except Exception as e:
+            logger.warning(f"Failed to refresh price for {ticker}: {e}")
+
+    # Update position market values
     updated_count = 0
     for position in all_positions:
         ticker = position.get("ticker")
@@ -469,11 +483,15 @@ async def refresh_market_prices(current_user: User = Depends(get_current_user)):
             db.update(
                 "positions",
                 {"id": position["id"]},
-                {"market_value": new_market_value}
+                {"market_value": new_market_value, "last_updated": datetime.utcnow().isoformat()}
             )
             updated_count += 1
-    
-    return {"message": f"Updated {updated_count} positions", "prices": prices}
+
+    return {
+        "message": f"Refreshed {len(prices)} prices and updated {updated_count} positions",
+        "prices": prices,
+        "tickers_refreshed": list(prices.keys())
+    }
 
 @router.delete("/{position_id}")
 async def delete_position(

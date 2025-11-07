@@ -5,16 +5,49 @@ from typing import Dict, Optional
 from app.services.tradingview_client import tradingview_client
 from app.services.yahoo_client import yahoo_client
 from app.services.stooq_client import stooq_client
-from app.services.price_cache import get_price as cache_get_price, set_price as cache_set_price
+from app.services import price_cache
 
 logger = logging.getLogger(__name__)
 
 class MarketDataService:
     def __init__(self):
-        self.cache: Dict[str, float] = {}
-        self.cache_expiry: Dict[str, datetime] = {}
-    
-    def get_current_price(self, ticker: str) -> Optional[float]:
+        # In-memory cache is no longer needed, using database cache instead
+        pass
+
+    def get_current_price(self, ticker: str, use_cache: bool = True) -> Optional[float]:
+        """
+        Get current price for a ticker.
+
+        Args:
+            ticker: Stock ticker symbol
+            use_cache: If True, check cache first and only fetch if expired or missing.
+                      If False, always fetch fresh from market and update cache.
+
+        Returns:
+            Current price or None if not available
+        """
+        # Check cache first if use_cache is True
+        if use_cache:
+            cached_price, is_expired = price_cache.get_current_price(ticker)
+            if cached_price is not None and not is_expired:
+                logger.debug(f"Using cached current price for {ticker}: {cached_price}")
+                return cached_price
+
+        # Fetch fresh price from market
+        price = self._fetch_current_price_from_market(ticker)
+
+        # Cache the result if we got a valid price
+        if price is not None:
+            try:
+                price_cache.set_current_price(ticker, price)
+                logger.debug(f"Cached current price for {ticker}: {price}")
+            except Exception as e:
+                logger.warning(f"Failed to cache price for {ticker}: {e}")
+
+        return price
+
+    def _fetch_current_price_from_market(self, ticker: str) -> Optional[float]:
+        """Fetch current price from market data sources."""
         tv_price = tradingview_client.get_latest_price(ticker)
         if tv_price is not None:
             if tv_price >= 1:
@@ -47,6 +80,11 @@ class MarketDataService:
         return prices
     
     def get_historical_price(self, ticker: str, target_date: datetime) -> Optional[float]:
+        """
+        Get historical price for a ticker on a specific date.
+        If the date is today or future, gets current price instead.
+        Historical prices are cached permanently.
+        """
         target = target_date
         if target.tzinfo is None:
             target = target.replace(tzinfo=timezone.utc)
@@ -56,23 +94,29 @@ class MarketDataService:
         if target_midnight.date() >= today:
             return self.get_current_price(ticker)
 
-        cached = cache_get_price(ticker, target_midnight)
+        # Check cache for historical price
+        cached = price_cache.get_historical_price(ticker, target_midnight)
         if cached is not None and (cached >= 1 or ticker.upper() == 'CASH'):
+            logger.debug(f"Using cached historical price for {ticker} on {target_midnight.date()}: {cached}")
             return cached
 
+        # Fetch from market data sources
         yahoo_price = self._fetch_yahoo_historical(ticker, target_midnight)
         if yahoo_price is not None:
-            cache_set_price(ticker, target_midnight, yahoo_price)
+            price_cache.set_historical_price(ticker, target_midnight, yahoo_price)
+            logger.debug(f"Cached historical price for {ticker} on {target_midnight.date()}: {yahoo_price}")
             return yahoo_price
 
         stooq_price = self._fetch_stooq_historical(ticker, target_midnight)
         if stooq_price is not None:
-            cache_set_price(ticker, target_midnight, stooq_price)
+            price_cache.set_historical_price(ticker, target_midnight, stooq_price)
+            logger.debug(f"Cached historical price for {ticker} on {target_midnight.date()}: {stooq_price}")
             return stooq_price
 
         tv_price = tradingview_client.get_price_on(ticker, target_midnight)
         if tv_price is not None:
-            cache_set_price(ticker, target_midnight, tv_price)
+            price_cache.set_historical_price(ticker, target_midnight, tv_price)
+            logger.debug(f"Cached historical price for {ticker} on {target_midnight.date()}: {tv_price}")
             return tv_price
 
         logger.warning("No historical market price found for %s on %s", ticker, target_midnight)
