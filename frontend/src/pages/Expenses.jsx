@@ -462,6 +462,20 @@ const Expenses = () => {
       color: getCategoryColor(category)
     }));
 
+  // Separate data by type (income, expense, investment)
+  const getCategoryType = (categoryName) => {
+    const category = categories.find(c => c.name === categoryName);
+    return category?.type || 'expense';
+  };
+
+  const incomeData = categoryData.filter(item => getCategoryType(item.name) === 'income');
+  const expenseData = categoryData.filter(item => getCategoryType(item.name) === 'expense');
+  const investmentData = categoryData.filter(item => getCategoryType(item.name) === 'investment');
+
+  const totalIncome = incomeData.reduce((sum, item) => sum + item.value, 0);
+  const totalExpenses = expenseData.reduce((sum, item) => sum + item.value, 0);
+  const totalInvestments = investmentData.reduce((sum, item) => sum + item.value, 0);
+
   const monthlyTrendData = monthlyComparison?.months || [];
 
   // Prepare stacked bar chart data for monthly comparison by category
@@ -599,78 +613,193 @@ const Expenses = () => {
       {/* Tab 0: Overview */}
       {tabValue === 0 && (
         <Grid container spacing={3}>
-          <Grid item xs={12}>
-            <Paper sx={{ p: 3 }}>
-              <Typography variant="h5" gutterBottom>
-                Total Expenses: {formatCurrency(summary?.total_expenses || 0)}
+          {/* Summary Cards */}
+          <Grid item xs={12} md={4}>
+            <Paper sx={{ p: 3, bgcolor: 'success.light', color: 'success.contrastText' }}>
+              <Typography variant="h6" gutterBottom>
+                Total Income
               </Typography>
-              <Typography variant="body2" color="textSecondary">
-                {summary?.expense_count || 0} transactions
+              <Typography variant="h4">
+                {formatCurrency(totalIncome)}
+              </Typography>
+              <Typography variant="body2">
+                {incomeData.length} categories
               </Typography>
             </Paper>
           </Grid>
 
-          <Grid item xs={12} md={6}>
-            <Paper sx={{ p: 3 }}>
+          <Grid item xs={12} md={4}>
+            <Paper sx={{ p: 3, bgcolor: 'error.light', color: 'error.contrastText' }}>
               <Typography variant="h6" gutterBottom>
-                Expenses by Category
+                Total Expenses
               </Typography>
-              {categoryData.length > 0 ? (
-                <>
-                  <Box sx={{ height: 300 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={categoryData}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                          outerRadius={80}
-                          fill="#8884d8"
-                          dataKey="value"
-                          onDoubleClick={(_, index) => {
-                            const selected = categoryData[index];
-                            if (selected) {
-                              setSelectedCategory(selected.name);
-                              setTabValue(1);
-                            }
-                          }}
-                        >
-                          {categoryData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(value) => formatCurrency(value)} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </Box>
-                  <Box sx={{ mt: 2 }}>
-                    {categoryData.map((item) => (
-                      <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
-                        <Box display="flex" alignItems="center">
-                          <Box
-                            sx={{
-                              width: 12,
-                              height: 12,
-                              backgroundColor: item.color,
-                              mr: 1
-                            }}
-                          />
-                          <Typography variant="body2">{item.name}</Typography>
-                        </Box>
-                        <Typography variant="body2">{formatCurrency(item.value)}</Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                </>
-              ) : (
-                <Alert severity="info">
-                  No expense data available. Click "Import from Transactions" to convert your checking account transactions to expenses.
-                </Alert>
-              )}
+              <Typography variant="h4">
+                {formatCurrency(totalExpenses)}
+              </Typography>
+              <Typography variant="body2">
+                {expenseData.length} categories
+              </Typography>
             </Paper>
           </Grid>
+
+          <Grid item xs={12} md={4}>
+            <Paper sx={{ p: 3, bgcolor: 'info.light', color: 'info.contrastText' }}>
+              <Typography variant="h6" gutterBottom>
+                Total Investments
+              </Typography>
+              <Typography variant="h4">
+                {formatCurrency(totalInvestments)}
+              </Typography>
+              <Typography variant="body2">
+                {investmentData.length} categories
+              </Typography>
+            </Paper>
+          </Grid>
+
+          {/* Income Chart */}
+          {incomeData.length > 0 && (
+            <Grid item xs={12} md={4}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom color="success.main">
+                  Income by Category
+                </Typography>
+                <Box sx={{ height: 250 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={incomeData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={70}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {incomeData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => formatCurrency(value)} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+                <Box sx={{ mt: 2 }}>
+                  {incomeData.map((item) => (
+                    <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
+                      <Box display="flex" alignItems="center">
+                        <Box sx={{ width: 12, height: 12, backgroundColor: item.color, mr: 1 }} />
+                        <Typography variant="body2">{item.name}</Typography>
+                      </Box>
+                      <Typography variant="body2">{formatCurrency(item.value)}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Paper>
+            </Grid>
+          )}
+
+          {/* Expenses Chart */}
+          {expenseData.length > 0 && (
+            <Grid item xs={12} md={4}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom color="error.main">
+                  Expenses by Category
+                </Typography>
+                <Box sx={{ height: 250 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={expenseData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={70}
+                        fill="#8884d8"
+                        dataKey="value"
+                        onDoubleClick={(_, index) => {
+                          const selected = expenseData[index];
+                          if (selected) {
+                            setSelectedCategory(selected.name);
+                            setTabValue(1);
+                          }
+                        }}
+                      >
+                        {expenseData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => formatCurrency(value)} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+                <Box sx={{ mt: 2 }}>
+                  {expenseData.map((item) => (
+                    <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
+                      <Box display="flex" alignItems="center">
+                        <Box sx={{ width: 12, height: 12, backgroundColor: item.color, mr: 1 }} />
+                        <Typography variant="body2">{item.name}</Typography>
+                      </Box>
+                      <Typography variant="body2">{formatCurrency(item.value)}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Paper>
+            </Grid>
+          )}
+
+          {/* Investments Chart */}
+          {investmentData.length > 0 && (
+            <Grid item xs={12} md={4}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom color="info.main">
+                  Investments by Category
+                </Typography>
+                <Box sx={{ height: 250 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={investmentData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={70}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {investmentData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => formatCurrency(value)} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+                <Box sx={{ mt: 2 }}>
+                  {investmentData.map((item) => (
+                    <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
+                      <Box display="flex" alignItems="center">
+                        <Box sx={{ width: 12, height: 12, backgroundColor: item.color, mr: 1 }} />
+                        <Typography variant="body2">{item.name}</Typography>
+                      </Box>
+                      <Typography variant="body2">{formatCurrency(item.value)}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Paper>
+            </Grid>
+          )}
+
+          {/* Show message if no data */}
+          {incomeData.length === 0 && expenseData.length === 0 && investmentData.length === 0 && (
+            <Grid item xs={12}>
+              <Alert severity="info">
+                No cash flow data available. Click "Import from Transactions" to convert your transactions.
+              </Alert>
+            </Grid>
+          )}
 
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 3 }}>

@@ -477,7 +477,15 @@ async def initialize_default_categories(current_user: User = Depends(get_current
 
     # Define default categories with colors
     default_categories = [
-        {"name": "Groceries", "type": "expense", "color": "#4CAF50", "budget_limit": None},
+        # Income categories
+        {"name": "Income", "type": "income", "color": "#4CAF50", "budget_limit": None},
+
+        # Investment categories
+        {"name": "Investment In", "type": "investment", "color": "#1976D2", "budget_limit": None},
+        {"name": "Investment Out", "type": "investment", "color": "#0D47A1", "budget_limit": None},
+
+        # Expense categories
+        {"name": "Groceries", "type": "expense", "color": "#8BC34A", "budget_limit": None},
         {"name": "Dining", "type": "expense", "color": "#FF9800", "budget_limit": None},
         {"name": "Transportation", "type": "expense", "color": "#2196F3", "budget_limit": None},
         {"name": "Utilities", "type": "expense", "color": "#9C27B0", "budget_limit": None},
