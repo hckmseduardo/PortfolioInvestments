@@ -14,6 +14,7 @@ from app.database.models import (
     Transaction as TransactionModel, Dividend as DividendModel,
     Expense as ExpenseModel, Category as CategoryModel,
     Statement as StatementModel, DashboardLayout as DashboardLayoutModel,
+    StockPrice as StockPriceModel,
     AccountTypeEnum, TransactionTypeEnum
 )
 
@@ -29,7 +30,8 @@ COLLECTION_MODEL_MAP = {
     "expenses": ExpenseModel,
     "categories": CategoryModel,
     "statements": StatementModel,
-    "dashboard_layouts": DashboardLayoutModel
+    "dashboard_layouts": DashboardLayoutModel,
+    "price_cache": StockPriceModel
 }
 
 

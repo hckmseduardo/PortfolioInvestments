@@ -176,7 +176,7 @@ class DashboardLayout(Base):
 
 
 class StockPrice(Base):
-    __tablename__ = "stock_prices"
+    __tablename__ = "price_cache"
 
     id = Column(String, primary_key=True)
     ticker = Column(String, nullable=False, index=True)
