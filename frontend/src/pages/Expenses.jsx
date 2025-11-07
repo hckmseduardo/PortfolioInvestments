@@ -70,6 +70,7 @@ const Expenses = () => {
   const [conversionStage, setConversionStage] = useState(null);
   const [isConversionRunning, setIsConversionRunning] = useState(false);
   const conversionPollRef = useRef(null);
+  const conversionJobIdRef = useRef(null);
 
   useEffect(() => {
     fetchInitialData();
@@ -250,6 +251,7 @@ const Expenses = () => {
 
   useEffect(() => {
     if (!conversionJobId) {
+      conversionJobIdRef.current = null;
       setConversionJobStatus(null);
       setConversionStage(null);
       setIsConversionRunning(false);
@@ -258,10 +260,12 @@ const Expenses = () => {
     }
 
     setIsConversionRunning(true);
+    conversionJobIdRef.current = conversionJobId;
 
-    const pollJob = async () => {
+    const pollJob = async (jobId) => {
       try {
-        const response = await expensesAPI.getConversionJobStatus(conversionJobId);
+        if (!jobId) return;
+        const response = await expensesAPI.getConversionJobStatus(jobId);
         const data = response.data;
         setConversionJobStatus(data.status);
         setConversionStage(data.meta?.stage || data.status);
@@ -280,6 +284,19 @@ const Expenses = () => {
           showSnackbar(errorMessage, 'error');
         }
       } catch (error) {
+        if (conversionJobIdRef.current !== jobId) {
+          // Stale poll result from previous job; ignore.
+          return;
+        }
+
+        if (error.response?.status === 404) {
+          clearConversionPolling();
+          setConversionJobId(null);
+          setIsConversionRunning(false);
+          showSnackbar('Conversion job expired or was removed. Please try again.', 'warning');
+          return;
+        }
+
         console.error('Error polling conversion job:', error);
         clearConversionPolling();
         setConversionJobId(null);
@@ -288,8 +305,8 @@ const Expenses = () => {
       }
     };
 
-    pollJob();
-    conversionPollRef.current = setInterval(pollJob, 4000);
+    pollJob(conversionJobId);
+    conversionPollRef.current = setInterval(() => pollJob(conversionJobIdRef.current), 4000);
 
     return () => clearConversionPolling();
   }, [conversionJobId]);
