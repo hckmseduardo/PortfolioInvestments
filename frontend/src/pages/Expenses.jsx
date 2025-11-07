@@ -41,6 +41,13 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis
 
 const CHART_COLORS = ['#4CAF50', '#FF9800', '#2196F3', '#9C27B0', '#E91E63', '#00BCD4', '#F44336', '#795548', '#607D8B', '#9E9E9E', '#FF5722', '#757575'];
 
+const COLOR_PALETTE = [
+  '#4CAF50', '#8BC34A', '#CDDC39', '#FFEB3B', '#FFC107', '#FF9800',
+  '#FF5722', '#F44336', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5',
+  '#2196F3', '#03A9F4', '#00BCD4', '#009688', '#4DB6AC', '#80CBC4',
+  '#607D8B', '#795548', '#9E9E9E', '#757575', '#424242', '#212121'
+];
+
 const Expenses = () => {
   const [tabValue, setTabValue] = useState(0);
   const [expenses, setExpenses] = useState([]);
@@ -693,14 +700,48 @@ const Expenses = () => {
               <MenuItem value="transfer">Transfer</MenuItem>
             </Select>
           </FormControl>
-          <TextField
-            fullWidth
-            label="Color (hex)"
-            value={newCategory.color}
-            onChange={(e) => setNewCategory({ ...newCategory, color: e.target.value })}
-            margin="normal"
-            placeholder="#4CAF50"
-          />
+          <Box mt={2} mb={2}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Select Color
+            </Typography>
+            <Grid container spacing={1}>
+              {COLOR_PALETTE.map((color) => (
+                <Grid item key={color}>
+                  <Box
+                    onClick={() => setNewCategory({ ...newCategory, color })}
+                    sx={{
+                      width: 40,
+                      height: 40,
+                      bgcolor: color,
+                      borderRadius: 1,
+                      cursor: 'pointer',
+                      border: newCategory.color === color ? '3px solid #000' : '1px solid #ddd',
+                      boxShadow: newCategory.color === color ? 2 : 0,
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        transform: 'scale(1.1)',
+                        boxShadow: 2
+                      }
+                    }}
+                  />
+                </Grid>
+              ))}
+            </Grid>
+            <Box mt={2} display="flex" alignItems="center" gap={2}>
+              <Box
+                sx={{
+                  width: 60,
+                  height: 40,
+                  bgcolor: newCategory.color,
+                  borderRadius: 1,
+                  border: '1px solid #ddd'
+                }}
+              />
+              <Typography variant="body2" color="text.secondary">
+                Selected: {newCategory.color}
+              </Typography>
+            </Box>
+          </Box>
           <TextField
             fullWidth
             label="Budget Limit (optional)"
