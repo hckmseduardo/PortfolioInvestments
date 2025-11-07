@@ -84,6 +84,10 @@ DATABASE_URL=postgresql://portfolio_user:your_secure_password@postgres:5432/port
 POSTGRES_USER=portfolio_user
 POSTGRES_PASSWORD=your_secure_password
 POSTGRES_DB=portfolio
+# pgAdmin (database explorer)
+PGADMIN_DEFAULT_EMAIL=admin@example.com
+PGADMIN_DEFAULT_PASSWORD=supersecurepassword
+PGADMIN_PORT=5050
 ```
 
 4. Build and start the containers:
@@ -95,8 +99,22 @@ docker-compose up --build
 - Frontend: http://localhost
 - Backend API: http://localhost:8000
 - API Documentation: http://localhost:8000/docs
+- pgAdmin (PostgreSQL explorer): http://localhost:5050 (or the port set in `PGADMIN_PORT`)
 
 **Note**: On first login, your data will be automatically migrated from JSON to PostgreSQL if you have existing data.
+
+### Exploring PostgreSQL Data with pgAdmin
+
+1. Ensure `PGADMIN_DEFAULT_EMAIL`, `PGADMIN_DEFAULT_PASSWORD`, and `PGADMIN_PORT` are set in your `.env`.
+2. Start the stack with `docker-compose up --build` (or `docker-compose up -d`).
+3. Open `http://localhost:5050` (or the configured port) and log in with the pgAdmin credentials.
+4. Register a new server in pgAdmin:
+   - **Name**: `portfolio-postgres` (any label works)
+   - **Host**: `postgres` (Docker service name)
+   - **Port**: `5432`
+   - **Maintenance DB**: value from `POSTGRES_DB` (default `portfolio`)
+   - **Username / Password**: values from `POSTGRES_USER` / `POSTGRES_PASSWORD`
+5. Once connected, you can browse schemas, tables, and run SQL queries directly against the PostgreSQL data.
 
 ### Migrating Existing JSON Data
 

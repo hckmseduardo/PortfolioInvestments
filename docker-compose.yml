@@ -54,7 +54,24 @@ services:
       - VITE_API_URL=http://localhost:8000
     restart: unless-stopped
 
+  pgadmin:
+    image: dpage/pgadmin4:8.5
+    container_name: portfolio-pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD:-change_this_password}
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   data:
   uploads:
+  pgadmin_data:
