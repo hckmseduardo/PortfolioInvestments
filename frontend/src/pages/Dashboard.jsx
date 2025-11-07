@@ -725,7 +725,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
               <Typography color="textSecondary">Classify positions to view this chart.</Typography>
             ) : (
               <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <Box sx={{ flexShrink: 0, height: Math.min(320, Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 300)) }}>
+                <Box sx={{ height: Math.min(320, Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 260)) }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -752,7 +752,16 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     </PieChart>
                   </ResponsiveContainer>
                 </Box>
-                <Stack spacing={1} sx={{ mt: 2 }}>
+                <Stack
+                  spacing={1}
+                  sx={{
+                    mt: 2,
+                    flexGrow: 1,
+                    overflowY: 'auto',
+                    pr: 1,
+                    minHeight: 0
+                  }}
+                >
                   {industryBreakdown.map((slice) => (
                     <Box
                       key={slice.industry_id || 'unclassified'}
@@ -792,7 +801,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
               <Typography color="textSecondary">Assign instrument types to view this chart.</Typography>
             ) : (
               <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <Box sx={{ flexShrink: 0, height: Math.min(320, Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 300)) }}>
+                <Box sx={{ height: Math.min(320, Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 260)) }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -819,7 +828,16 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     </PieChart>
                   </ResponsiveContainer>
                 </Box>
-                <Stack spacing={1} sx={{ mt: 2 }}>
+                <Stack
+                  spacing={1}
+                  sx={{
+                    mt: 2,
+                    flexGrow: 1,
+                    overflowY: 'auto',
+                    pr: 1,
+                    minHeight: 0
+                  }}
+                >
                   {typeBreakdown.map((slice) => (
                     <Box
                       key={slice.type_id || 'unclassified'}
