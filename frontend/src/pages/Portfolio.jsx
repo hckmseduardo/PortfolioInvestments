@@ -912,60 +912,37 @@ const Portfolio = () => {
                 Classify your positions to see the breakdown by industry.
               </Typography>
             ) : (
-              <>
-                <Box sx={{ height: 320 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={industrySlices}
-                        dataKey="market_value"
-                        nameKey="industry_name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius="45%"
-                        outerRadius="80%"
-                        paddingAngle={2}
-                        labelLine={false}
-                      >
-                        {industrySlices.map((slice) => (
-                          <Cell
-                            key={slice.industry_id || 'unclassified'}
-                            fill={slice.color || '#b0bec5'}
-                            onDoubleClick={() => handleIndustrySliceDoubleClick(slice)}
-                          />
-                        ))}
-                      </Pie>
-                      <RechartsTooltip
-                        formatter={(value, name, payload) => [
-                          formatCurrency(value),
-                          payload?.payload?.industry_name || name
-                        ]}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </Box>
-                <Stack spacing={1} sx={{ mt: 2 }}>
-                  {industrySlices.map((slice) => (
-                    <Box
-                      key={slice.industry_id || 'unclassified'}
-                      sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              <Box sx={{ height: 320 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={industrySlices}
+                      dataKey="market_value"
+                      nameKey="industry_name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius="45%"
+                      outerRadius="80%"
+                      paddingAngle={2}
+                      labelLine={false}
                     >
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {renderColorSwatch(slice.color)}
-                        <Typography variant="body2">{slice.industry_name}</Typography>
-                      </Box>
-                      <Box textAlign="right">
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {formatCurrency(slice.market_value)}
-                        </Typography>
-                        <Typography variant="caption" color="textSecondary">
-                          {slice.percentage.toFixed(1)}%
-                        </Typography>
-                      </Box>
-                    </Box>
-                  ))}
-                </Stack>
-              </>
+                      {industrySlices.map((slice) => (
+                        <Cell
+                          key={slice.industry_id || 'unclassified'}
+                          fill={slice.color || '#b0bec5'}
+                          onDoubleClick={() => handleIndustrySliceDoubleClick(slice)}
+                        />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip
+                      formatter={(value, name, payload) => [
+                        formatCurrency(value),
+                        payload?.payload?.industry_name || name
+                      ]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </Box>
             )}
           </Paper>
         </Grid>
@@ -982,60 +959,37 @@ const Portfolio = () => {
                 Assign instrument types to see this breakdown.
               </Typography>
             ) : (
-              <>
-                <Box sx={{ height: 320 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={typeSlices}
-                        dataKey="market_value"
-                        nameKey="type_name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius="45%"
-                        outerRadius="80%"
-                        paddingAngle={2}
-                        labelLine={false}
-                      >
-                        {typeSlices.map((slice) => (
-                          <Cell
-                            key={slice.type_id || 'unclassified_type'}
-                            fill={slice.color || '#b0bec5'}
-                            onDoubleClick={() => handleTypeSliceDoubleClick(slice)}
-                          />
-                        ))}
-                      </Pie>
-                      <RechartsTooltip
-                        formatter={(value, name, payload) => [
-                          formatCurrency(value),
-                          payload?.payload?.type_name || name
-                        ]}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </Box>
-                <Stack spacing={1} sx={{ mt: 2 }}>
-                  {typeSlices.map((slice) => (
-                    <Box
-                      key={slice.type_id || 'unclassified_type'}
-                      sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              <Box sx={{ height: 320 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={typeSlices}
+                      dataKey="market_value"
+                      nameKey="type_name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius="45%"
+                      outerRadius="80%"
+                      paddingAngle={2}
+                      labelLine={false}
                     >
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {renderColorSwatch(slice.color)}
-                        <Typography variant="body2">{slice.type_name}</Typography>
-                      </Box>
-                      <Box textAlign="right">
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {formatCurrency(slice.market_value)}
-                        </Typography>
-                        <Typography variant="caption" color="textSecondary">
-                          {slice.percentage.toFixed(1)}%
-                        </Typography>
-                      </Box>
-                    </Box>
-                  ))}
-                </Stack>
-              </>
+                      {typeSlices.map((slice) => (
+                        <Cell
+                          key={slice.type_id || 'unclassified_type'}
+                          fill={slice.color || '#b0bec5'}
+                          onDoubleClick={() => handleTypeSliceDoubleClick(slice)}
+                        />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip
+                      formatter={(value, name, payload) => [
+                        formatCurrency(value),
+                        payload?.payload?.type_name || name
+                      ]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </Box>
             )}
           </Paper>
         </Grid>

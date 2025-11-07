@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Container,
   Box,
@@ -23,45 +23,100 @@ import {
 } from '@mui/icons-material';
 import { accountsAPI, positionsAPI, dividendsAPI, dashboardAPI } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import RGL, { WidthProvider } from 'react-grid-layout';
+import { Responsive, WidthProvider } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 
-const GridLayout = WidthProvider(RGL);
-const GRID_COLS = 12;
+const ResponsiveGridLayout = WidthProvider(Responsive);
 const ROW_HEIGHT = 120;
 const GRID_MARGIN = [16, 16];
 
-const DEFAULT_TILE_LAYOUT = [
-  { i: 'total_value', x: 0, y: 0, w: 3, h: 1 },
-  { i: 'book_value', x: 3, y: 0, w: 3, h: 1 },
-  { i: 'capital_gains', x: 6, y: 0, w: 3, h: 1 },
-  { i: 'dividends', x: 9, y: 0, w: 3, h: 1 },
-  { i: 'total_gains', x: 0, y: 1, w: 3, h: 1 },
-  { i: 'accounts_summary', x: 3, y: 1, w: 3, h: 1 },
-  { i: 'performance', x: 0, y: 2, w: 8, h: 3 },
-  { i: 'accounts_list', x: 8, y: 2, w: 4, h: 3 },
-  { i: 'industry_breakdown', x: 0, y: 5, w: 6, h: 2 },
-  { i: 'type_breakdown', x: 6, y: 5, w: 6, h: 2 }
+const LAYOUT_PROFILES = [
+  'desktop',
+  'tablet_landscape',
+  'tablet_portrait',
+  'mobile_landscape',
+  'mobile_portrait'
 ];
 
-const DEFAULT_TILE_MAP = DEFAULT_TILE_LAYOUT.reduce((acc, item) => {
-  acc[item.i] = { ...item };
-  return acc;
-}, {});
-
-const TILE_CONSTRAINTS = {
-  total_value: { minW: 2, minH: 1 },
-  book_value: { minW: 2, minH: 1 },
-  capital_gains: { minW: 2, minH: 1 },
-  dividends: { minW: 2, minH: 1 },
-  total_gains: { minW: 2, minH: 1 },
-  accounts_summary: { minW: 2, minH: 1 },
-  industry_breakdown: { minW: 3, minH: 2 },
-  type_breakdown: { minW: 3, minH: 2 },
-  performance: { minW: 6, minH: 2 },
-  accounts_list: { minW: 4, minH: 2 }
+const BREAKPOINTS = {
+  desktop: 1600,
+  tablet_landscape: 1200,
+  tablet_portrait: 992,
+  mobile_landscape: 768,
+  mobile_portrait: 0
 };
+
+const COLS = {
+  desktop: 12,
+  tablet_landscape: 12,
+  tablet_portrait: 8,
+  mobile_landscape: 6,
+  mobile_portrait: 4
+};
+
+const PROFILE_DEFAULT_LAYOUTS = {
+  desktop: [
+    { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
+    { i: 'capital_gains', x: 3, y: 0, w: 3, h: 1 },
+    { i: 'dividends', x: 6, y: 0, w: 3, h: 1 },
+    { i: 'total_gains', x: 9, y: 0, w: 3, h: 1 },
+    { i: 'accounts_summary', x: 0, y: 1, w: 4, h: 1 },
+    { i: 'accounts_list', x: 4, y: 1, w: 8, h: 2 },
+    { i: 'performance', x: 0, y: 3, w: 12, h: 3 },
+    { i: 'type_breakdown', x: 0, y: 6, w: 6, h: 4, minH: 4 },
+    { i: 'industry_breakdown', x: 6, y: 6, w: 6, h: 4, minH: 4 }
+  ],
+  tablet_landscape: [
+    { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
+    { i: 'capital_gains', x: 3, y: 0, w: 3, h: 1 },
+    { i: 'dividends', x: 6, y: 0, w: 3, h: 1 },
+    { i: 'total_gains', x: 9, y: 0, w: 3, h: 1 },
+    { i: 'accounts_summary', x: 0, y: 1, w: 4, h: 1 },
+    { i: 'accounts_list', x: 4, y: 1, w: 8, h: 2 },
+    { i: 'performance', x: 0, y: 3, w: 12, h: 3 },
+    { i: 'type_breakdown', x: 0, y: 6, w: 6, h: 4, minH: 4 },
+    { i: 'industry_breakdown', x: 6, y: 6, w: 6, h: 4, minH: 4 }
+  ],
+  tablet_portrait: [
+    { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
+    { i: 'capital_gains', x: 4, y: 0, w: 4, h: 1 },
+    { i: 'dividends', x: 0, y: 1, w: 4, h: 1 },
+    { i: 'total_gains', x: 4, y: 1, w: 4, h: 1 },
+    { i: 'accounts_summary', x: 0, y: 2, w: 4, h: 1 },
+    { i: 'accounts_list', x: 0, y: 3, w: 8, h: 2 },
+    { i: 'performance', x: 0, y: 5, w: 8, h: 3 },
+    { i: 'type_breakdown', x: 0, y: 8, w: 4, h: 4, minH: 4 },
+    { i: 'industry_breakdown', x: 4, y: 8, w: 4, h: 4, minH: 4 }
+  ],
+  mobile_landscape: [
+    { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
+    { i: 'capital_gains', x: 3, y: 0, w: 3, h: 1 },
+    { i: 'dividends', x: 0, y: 1, w: 3, h: 1 },
+    { i: 'total_gains', x: 3, y: 1, w: 3, h: 1 },
+    { i: 'accounts_summary', x: 0, y: 2, w: 3, h: 1 },
+    { i: 'accounts_list', x: 0, y: 3, w: 6, h: 2 },
+    { i: 'performance', x: 0, y: 5, w: 6, h: 3 },
+    { i: 'type_breakdown', x: 0, y: 8, w: 3, h: 4, minH: 4 },
+    { i: 'industry_breakdown', x: 3, y: 8, w: 3, h: 4, minH: 4 }
+  ],
+  mobile_portrait: [
+    { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
+    { i: 'capital_gains', x: 0, y: 1, w: 4, h: 1 },
+    { i: 'dividends', x: 0, y: 2, w: 4, h: 1 },
+    { i: 'total_gains', x: 0, y: 3, w: 4, h: 1 },
+    { i: 'accounts_summary', x: 0, y: 4, w: 4, h: 1 },
+    { i: 'accounts_list', x: 0, y: 5, w: 4, h: 2 },
+    { i: 'performance', x: 0, y: 7, w: 4, h: 3 },
+    { i: 'type_breakdown', x: 0, y: 10, w: 4, h: 5, minH: 5 },
+    { i: 'industry_breakdown', x: 0, y: 15, w: 4, h: 5, minH: 5 }
+  ]
+};
+
+const LEGACY_TILE_MAP = {
+  total_value: { i: 'total_value', x: 0, y: 0, w: 3, h: 1 }
+};
+
 
 const sanitizeNumber = (value, fallback) => {
   const parsed = Number(value);
@@ -75,6 +130,16 @@ const DATE_PRESETS = {
   LAST_QUARTER: 'last_quarter',
   LAST_YEAR: 'last_year',
   END_OF_YEAR: 'end_of_year'
+};
+
+const PERFORMANCE_PRESETS = {
+  LAST_MONTH: 'last_month',
+  LAST_3_MONTHS: 'last_3_months',
+  LAST_6_MONTHS: 'last_6_months',
+  LAST_YEAR: 'last_year',
+  YEAR_TO_DATE: 'year_to_date',
+  SPECIFIC_MONTH: 'specific_month',
+  SPECIFIC_YEAR: 'specific_year'
 };
 
 const formatISODate = (date) => date.toISOString().split('T')[0];
@@ -118,72 +183,181 @@ const computeValuationDate = (preset, specificMonthValue, endOfYearValue) => {
   }
 };
 
-const applyConstraints = (layout) =>
-  layout.map((item) => {
-    const defaults = DEFAULT_TILE_MAP[item.i] || DEFAULT_TILE_LAYOUT[0];
-    const meta = TILE_CONSTRAINTS[item.i] || {};
+const getDefaultLayout = (profile) =>
+  (PROFILE_DEFAULT_LAYOUTS[profile] || PROFILE_DEFAULT_LAYOUTS.desktop).map((tile) => ({ ...tile }));
 
-    return {
-      ...defaults,
-      ...item,
-      x: sanitizeNumber(item.x, defaults.x),
-      y: sanitizeNumber(item.y, defaults.y),
-      w: sanitizeNumber(item.w, defaults.w),
-      h: sanitizeNumber(item.h, defaults.h),
-      minW: meta.minW || defaults.minW || 1,
-      minH: meta.minH || defaults.minH || 1
-    };
-  });
-
-const ensureCompleteLayout = (layout) => {
-  const seen = new Set(layout.map((item) => item.i));
-  const result = [...layout];
-
-  DEFAULT_TILE_LAYOUT.forEach((defaultTile) => {
-    if (!seen.has(defaultTile.i)) {
-      result.push({ ...defaultTile });
-    }
-  });
-
-  return applyConstraints(result);
-};
-
-const convertFromServerLayout = (serverLayout) => {
-  if (!Array.isArray(serverLayout)) {
-    return ensureCompleteLayout([]);
-  }
-
-  const parsed = [];
+const sanitizeLayout = (layout, profile) => {
+  const defaults = PROFILE_DEFAULT_LAYOUTS[profile] || PROFILE_DEFAULT_LAYOUTS.desktop;
+  const defaultMap = defaults.reduce((acc, tile) => {
+    acc[tile.i] = { ...tile };
+    return acc;
+  }, {});
+  const allowedIds = new Set([...Object.keys(defaultMap), ...Object.keys(LEGACY_TILE_MAP)]);
+  const sanitized = [];
   const seen = new Set();
 
-  serverLayout.forEach((tile) => {
-    if (!tile) return;
-    const id = tile.id || tile.i;
-    if (!id || seen.has(id) || !DEFAULT_TILE_MAP[id]) return;
-
-    parsed.push({
+  (layout || []).forEach((item) => {
+    if (!item) return;
+    const id = item.i || item.id;
+    if (!id || !allowedIds.has(id) || seen.has(id)) {
+      return;
+    }
+    const base = defaultMap[id] || LEGACY_TILE_MAP[id];
+    if (!base) {
+      return;
+    }
+    const normalized = {
       i: id,
-      x: sanitizeNumber(tile.x, DEFAULT_TILE_MAP[id].x),
-      y: sanitizeNumber(tile.y, DEFAULT_TILE_MAP[id].y),
-      w: sanitizeNumber(tile.w, DEFAULT_TILE_MAP[id].w),
-      h: sanitizeNumber(tile.h, DEFAULT_TILE_MAP[id].h)
-    });
+      x: sanitizeNumber(item.x, base.x),
+      y: sanitizeNumber(item.y, base.y),
+      w: sanitizeNumber(item.w, base.w),
+      h: sanitizeNumber(item.h, base.h),
+      minW: sanitizeNumber(item.minW ?? base.minW, base.minW || 1),
+      minH: sanitizeNumber(item.minH ?? base.minH, base.minH || 1)
+    };
+    normalized.w = Math.max(normalized.w, normalized.minW || 1);
+    normalized.h = Math.max(normalized.h, normalized.minH || 1);
+    sanitized.push(normalized);
     seen.add(id);
   });
 
-  return ensureCompleteLayout(parsed);
+  defaults.forEach((tile) => {
+    if (!seen.has(tile.i)) {
+      sanitized.push({ ...tile });
+    }
+  });
+
+  return sanitized;
 };
 
-const serializeLayout = (layout) =>
+const convertFromServerLayout = (serverLayout, profile) => {
+  if (!Array.isArray(serverLayout)) {
+    return getDefaultLayout(profile);
+  }
+
+  const parsed = serverLayout.map((tile) => ({
+    i: tile?.i || tile?.id,
+    x: tile?.x,
+    y: tile?.y,
+    w: tile?.w,
+    h: tile?.h,
+    minW: tile?.minW,
+    minH: tile?.minH
+  }));
+
+  return sanitizeLayout(parsed, profile);
+};
+
+const serializeLayout = (layout = []) =>
   layout.map(({ i, x, y, w, h, minW, minH }) => ({
     id: i,
     x,
     y,
     w,
     h,
-    minW,
-    minH
+    ...(minW ? { minW } : {}),
+    ...(minH ? { minH } : {})
   }));
+
+const buildInitialLayouts = () => {
+  const initial = {};
+  LAYOUT_PROFILES.forEach((profile) => {
+    initial[profile] = getDefaultLayout(profile);
+  });
+  return initial;
+};
+
+const getMonthDailyDates = (year, monthIndexZeroBased) => {
+  const totalDays = new Date(year, monthIndexZeroBased + 1, 0).getDate();
+  const dates = [];
+  for (let day = 1; day <= totalDays; day += 1) {
+    dates.push(formatISODate(new Date(year, monthIndexZeroBased, day)));
+  }
+  return dates;
+};
+
+const buildRecentMonthEnds = (months) => {
+  const now = new Date();
+  const dates = [];
+  for (let offset = months - 1; offset >= 0; offset -= 1) {
+    const target = new Date(now.getFullYear(), now.getMonth() - offset + 1, 0);
+    dates.push(formatISODate(target));
+  }
+  return dates;
+};
+
+const buildYearToDateSeries = () => {
+  const now = new Date();
+  const dates = [];
+  for (let month = 0; month <= now.getMonth(); month += 1) {
+    dates.push(getLastDayOfMonthDate(now.getFullYear(), month));
+  }
+  return dates;
+};
+
+const buildSpecificYearSeries = (year) => {
+  const dates = [];
+  for (let month = 0; month < 12; month += 1) {
+    dates.push(getLastDayOfMonthDate(year, month));
+  }
+  return dates;
+};
+
+const computePerformanceDates = (range, specificMonthValue, specificYearValue) => {
+  switch (range) {
+    case PERFORMANCE_PRESETS.LAST_MONTH: {
+      const now = new Date();
+      const target = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      return getMonthDailyDates(target.getFullYear(), target.getMonth());
+    }
+    case PERFORMANCE_PRESETS.LAST_3_MONTHS:
+      return buildRecentMonthEnds(3);
+    case PERFORMANCE_PRESETS.LAST_6_MONTHS:
+      return buildRecentMonthEnds(6);
+    case PERFORMANCE_PRESETS.LAST_YEAR:
+      return buildRecentMonthEnds(12);
+    case PERFORMANCE_PRESETS.YEAR_TO_DATE:
+      return buildYearToDateSeries();
+    case PERFORMANCE_PRESETS.SPECIFIC_MONTH: {
+      if (!specificMonthValue) {
+        return [];
+      }
+      const [year, month] = specificMonthValue.split('-').map(Number);
+      if (!year || !month) {
+        return [];
+      }
+      return getMonthDailyDates(year, month - 1);
+    }
+    case PERFORMANCE_PRESETS.SPECIFIC_YEAR: {
+      if (!specificYearValue) {
+        return [];
+      }
+      const parsedYear = parseInt(specificYearValue, 10);
+      if (!parsedYear) {
+        return [];
+      }
+      return buildSpecificYearSeries(parsedYear);
+    }
+    default:
+      return buildRecentMonthEnds(6);
+  }
+};
+
+const DEFAULT_LAYOUTS_STATE = buildInitialLayouts();
+
+const renderColorSwatch = (color) => (
+  <Box
+    component="span"
+    sx={{
+      width: 12,
+      height: 12,
+      borderRadius: '50%',
+      display: 'inline-flex',
+      border: '1px solid rgba(0,0,0,0.12)',
+      backgroundColor: color || '#b0bec5'
+    }}
+  />
+);
 
 const StatCard = ({ title, value, icon, color, subtitle }) => (
   <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -245,33 +419,89 @@ const Dashboard = () => {
   const [datePreset, setDatePreset] = useState(DATE_PRESETS.CURRENT);
   const [specificMonth, setSpecificMonth] = useState('');
   const [endOfYear, setEndOfYear] = useState('');
-  const [gridLayout, setGridLayout] = useState(ensureCompleteLayout(DEFAULT_TILE_LAYOUT));
+  const [layouts, setLayouts] = useState(DEFAULT_LAYOUTS_STATE);
+  const [currentProfile, setCurrentProfile] = useState('desktop');
   const [layoutLoading, setLayoutLoading] = useState(true);
+  const loadedProfiles = useRef(new Set());
   const isReadyToPersist = useRef(false);
+  const [performanceRange, setPerformanceRange] = useState(PERFORMANCE_PRESETS.LAST_6_MONTHS);
+  const [performanceMonth, setPerformanceMonth] = useState('');
+  const [performanceYear, setPerformanceYear] = useState('');
+  const [performanceData, setPerformanceData] = useState([]);
+  const [performanceLoading, setPerformanceLoading] = useState(false);
 
   const valuationDate = useMemo(
     () => computeValuationDate(datePreset, specificMonth, endOfYear),
     [datePreset, specificMonth, endOfYear]
   );
 
-  useEffect(() => {
-    const loadLayout = async () => {
+  const fetchLayoutForProfile = useCallback(
+    async (profile, markReady = false) => {
       try {
-        const response = await dashboardAPI.getLayout();
+        const response = await dashboardAPI.getLayout(profile);
         const serverLayout = response.data?.layout;
-        const converted = convertFromServerLayout(serverLayout);
-        setGridLayout(converted);
+        const converted = convertFromServerLayout(serverLayout, profile);
+        setLayouts((prev) => ({ ...prev, [profile]: converted }));
       } catch (error) {
-        console.error('Error loading dashboard layout:', error);
-        setGridLayout(convertFromServerLayout(DEFAULT_TILE_LAYOUT));
+        console.error(`Error loading ${profile} dashboard layout:`, error);
+        setLayouts((prev) => ({ ...prev, [profile]: getDefaultLayout(profile) }));
       } finally {
-        setLayoutLoading(false);
-        isReadyToPersist.current = true;
+        loadedProfiles.current.add(profile);
+        if (markReady) {
+          setLayoutLoading(false);
+          isReadyToPersist.current = true;
+        }
       }
-    };
+    },
+    []
+  );
 
-    loadLayout();
-  }, []);
+  useEffect(() => {
+    fetchLayoutForProfile('desktop', true);
+  }, [fetchLayoutForProfile]);
+
+  useEffect(() => {
+    if (!currentProfile || currentProfile === 'desktop') {
+      return;
+    }
+    if (loadedProfiles.current.has(currentProfile)) {
+      return;
+    }
+    fetchLayoutForProfile(currentProfile);
+  }, [currentProfile, fetchLayoutForProfile]);
+
+  const fetchPerformanceSeries = useCallback(async () => {
+    const dates = computePerformanceDates(performanceRange, performanceMonth, performanceYear);
+    if (dates.length === 0) {
+      setPerformanceData([]);
+      return;
+    }
+    setPerformanceLoading(true);
+    try {
+      const series = await Promise.all(
+        dates.map(async (date) => {
+          const response = await positionsAPI.getSummary(date);
+          const payload = response.data || {};
+          return {
+            date,
+            label: new Date(date).toLocaleDateString(),
+            market_value: payload.total_market_value || 0,
+            book_value: payload.total_book_value || 0
+          };
+        })
+      );
+      setPerformanceData(series);
+    } catch (error) {
+      console.error('Error fetching performance data:', error);
+      setPerformanceData([]);
+    } finally {
+      setPerformanceLoading(false);
+    }
+  }, [performanceRange, performanceMonth, performanceYear]);
+
+  useEffect(() => {
+    fetchPerformanceSeries();
+  }, [fetchPerformanceSeries]);
 
   useEffect(() => {
     if (layoutLoading) {
@@ -306,11 +536,13 @@ const Dashboard = () => {
     fetchData();
   }, [valuationDate, layoutLoading]);
 
-  const formatCurrency = (value) =>
-    new Intl.NumberFormat('en-CA', {
-      style: 'currency',
-      currency: 'CAD'
-    }).format(value || 0);
+const formatCurrency = (value) =>
+  new Intl.NumberFormat('en-CA', {
+    style: 'currency',
+    currency: 'CAD'
+  }).format(value || 0);
+
+const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
 
   const capitalGains = useMemo(() => {
     try {
@@ -325,30 +557,38 @@ const Dashboard = () => {
   const totalDividends = dividendSummary?.total_dividends || 0;
   const totalGains = capitalGains + totalDividends;
 
-  const handleLayoutCommit = (nextLayout) => {
-    const constrained = applyConstraints(nextLayout);
-    setGridLayout(constrained);
-    if (isReadyToPersist.current) {
-      persistLayout(constrained);
-    }
-  };
-
-  const persistLayout = async (layout) => {
+  const persistLayout = useCallback(async (profile, layout) => {
     try {
-      await dashboardAPI.saveLayout(serializeLayout(layout));
+      await dashboardAPI.saveLayout(profile, serializeLayout(layout));
     } catch (error) {
-      console.error('Error saving dashboard layout:', error);
+      console.error(`Error saving ${profile} dashboard layout:`, error);
     }
-  };
+  }, []);
+
+  const handleLayoutCommit = useCallback(
+    (profile, nextLayout) => {
+      if (!nextLayout) {
+        return;
+      }
+      const sanitized = sanitizeLayout(nextLayout, profile);
+      loadedProfiles.current.add(profile);
+      setLayouts((prev) => ({ ...prev, [profile]: sanitized }));
+      if (isReadyToPersist.current) {
+        persistLayout(profile, sanitized);
+      }
+    },
+    [persistLayout]
+  );
 
   const handleResetLayout = async () => {
     try {
-      const response = await dashboardAPI.resetLayout();
-      const converted = convertFromServerLayout(response.data?.layout);
-      setGridLayout(converted);
+      const response = await dashboardAPI.resetLayout(currentProfile);
+      const converted = convertFromServerLayout(response.data?.layout, currentProfile);
+      loadedProfiles.current.add(currentProfile);
+      setLayouts((prev) => ({ ...prev, [currentProfile]: converted }));
     } catch (error) {
-      console.error('Error resetting dashboard layout:', error);
-      setGridLayout(convertFromServerLayout(DEFAULT_TILE_LAYOUT));
+      console.error(`Error resetting ${currentProfile} dashboard layout:`, error);
+      setLayouts((prev) => ({ ...prev, [currentProfile]: getDefaultLayout(currentProfile) }));
     }
   };
 
@@ -358,17 +598,20 @@ const Dashboard = () => {
       await positionsAPI.refreshPrices();
       // Refetch all data after refreshing prices
       const asOfParam = valuationDate || undefined;
-      const [summaryRes, accountsRes, dividendsRes, industryRes] = await Promise.all([
+      const [summaryRes, accountsRes, dividendsRes, industryRes, typeRes] = await Promise.all([
         positionsAPI.getSummary(asOfParam),
         accountsAPI.getAll(),
         dividendsAPI.getSummary(undefined, undefined, asOfParam),
-        positionsAPI.getIndustryBreakdown({ as_of_date: asOfParam })
+        positionsAPI.getIndustryBreakdown({ as_of_date: asOfParam }),
+        positionsAPI.getTypeBreakdown({ as_of_date: asOfParam })
       ]);
 
       setSummary(summaryRes.data);
       setAccounts(accountsRes.data);
       setDividendSummary(dividendsRes.data);
       setIndustryBreakdown(industryRes.data || []);
+      setTypeBreakdown(typeRes.data || []);
+      await fetchPerformanceSeries();
     } catch (error) {
       console.error('Error refreshing prices:', error);
     } finally {
@@ -452,7 +695,7 @@ const Dashboard = () => {
         );
       case 'industry_breakdown':
         return (
-          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <Typography
               variant="caption"
               color="textSecondary"
@@ -464,39 +707,70 @@ const Dashboard = () => {
             {industryBreakdown.length === 0 ? (
               <Typography color="textSecondary">Classify positions to view this chart.</Typography>
             ) : (
-              <Box sx={{ flexGrow: 1, minHeight: ROW_HEIGHT * (layoutItem?.h || 2) - 60 }}>
-                <ResponsiveContainer width="100%" height="100%">
+              <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <Box
+                  sx={{
+                    flexShrink: 0,
+                    height: Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 260)
+                  }}
+                >
+                  <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
                         data={industryBreakdown}
                         dataKey="market_value"
                         nameKey="industry_name"
-                      innerRadius="40%"
-                      outerRadius="70%"
-                      paddingAngle={2}
+                        innerRadius="40%"
+                        outerRadius="70%"
+                        paddingAngle={2}
+                      >
+                        {industryBreakdown.map((slice) => (
+                          <Cell
+                            key={slice.industry_id || 'unclassified'}
+                            fill={slice.color || '#b0bec5'}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value, name, payload) => [
+                          `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
+                          payload?.payload?.industry_name || name
+                        ]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+                <Stack
+                  spacing={1}
+                  sx={{ mt: 2, flexGrow: 1, overflowY: 'auto', minHeight: 0, pr: 1 }}
+                >
+                  {industryBreakdown.map((slice) => (
+                    <Box
+                      key={slice.industry_id || 'unclassified'}
+                      sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                     >
-                      {industryBreakdown.map((slice) => (
-                        <Cell
-                          key={slice.industry_id || 'unclassified'}
-                          fill={slice.color || '#b0bec5'}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value, name, payload) => [
-                        formatCurrency(value),
-                        payload?.payload?.industry_name || name
-                      ]}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {renderColorSwatch(slice.color)}
+                        <Typography variant="body2">{slice.industry_name}</Typography>
+                      </Box>
+                      <Box textAlign="right">
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {formatCurrency(slice.market_value)}
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary">
+                          {formatPercent(slice.percentage)}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  ))}
+                </Stack>
               </Box>
             )}
           </Paper>
         );
       case 'type_breakdown':
         return (
-          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <Typography
               variant="caption"
               color="textSecondary"
@@ -508,32 +782,63 @@ const Dashboard = () => {
             {typeBreakdown.length === 0 ? (
               <Typography color="textSecondary">Assign instrument types to view this chart.</Typography>
             ) : (
-              <Box sx={{ flexGrow: 1, minHeight: ROW_HEIGHT * (layoutItem?.h || 2) - 60 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={typeBreakdown}
-                      dataKey="market_value"
-                      nameKey="type_name"
-                      innerRadius="40%"
-                      outerRadius="70%"
-                      paddingAngle={2}
+              <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <Box
+                  sx={{
+                    flexShrink: 0,
+                    height: Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 260)
+                  }}
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={typeBreakdown}
+                        dataKey="market_value"
+                        nameKey="type_name"
+                        innerRadius="40%"
+                        outerRadius="70%"
+                        paddingAngle={2}
+                      >
+                        {typeBreakdown.map((slice) => (
+                          <Cell
+                            key={slice.type_id || 'unclassified'}
+                            fill={slice.color || '#b0bec5'}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value, name, payload) => [
+                          `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
+                          payload?.payload?.type_name || name
+                        ]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+                <Stack
+                  spacing={1}
+                  sx={{ mt: 2, flexGrow: 1, overflowY: 'auto', minHeight: 0, pr: 1 }}
+                >
+                  {typeBreakdown.map((slice) => (
+                    <Box
+                      key={slice.type_id || 'unclassified'}
+                      sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                     >
-                      {typeBreakdown.map((slice) => (
-                        <Cell
-                          key={slice.type_id || 'unclassified'}
-                          fill={slice.color || '#b0bec5'}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value, name, payload) => [
-                        formatCurrency(value),
-                        payload?.payload?.type_name || name
-                      ]}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {renderColorSwatch(slice.color)}
+                        <Typography variant="body2">{slice.type_name}</Typography>
+                      </Box>
+                      <Box textAlign="right">
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {formatCurrency(slice.market_value)}
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary">
+                          {formatPercent(slice.percentage)}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  ))}
+                </Stack>
               </Box>
             )}
           </Paper>
@@ -549,25 +854,85 @@ const Dashboard = () => {
             >
               Portfolio Performance
             </Typography>
-            {fetching && (
-              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-                Updating metrics…
-              </Typography>
-            )}
-            <Box sx={{ flexGrow: 1, minHeight: ROW_HEIGHT * layoutItem.h - 80 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={[]}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Line type="monotone" dataKey="value" stroke="#8884d8" name="Portfolio Value" />
-                </LineChart>
-              </ResponsiveContainer>
+            <Stack
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={2}
+              alignItems={{ xs: 'flex-start', md: 'center' }}
+              sx={{ mb: 2 }}
+            >
+              <FormControl size="small" sx={{ minWidth: 200 }}>
+                <InputLabel id="performance-range-label">Range</InputLabel>
+                <Select
+                  labelId="performance-range-label"
+                  value={performanceRange}
+                  label="Range"
+                  onChange={(event) => setPerformanceRange(event.target.value)}
+                >
+                  <MenuItem value={PERFORMANCE_PRESETS.LAST_MONTH}>Last Month</MenuItem>
+                  <MenuItem value={PERFORMANCE_PRESETS.LAST_3_MONTHS}>Last 3 Months</MenuItem>
+                  <MenuItem value={PERFORMANCE_PRESETS.LAST_6_MONTHS}>Last 6 Months</MenuItem>
+                  <MenuItem value={PERFORMANCE_PRESETS.LAST_YEAR}>Last Year</MenuItem>
+                  <MenuItem value={PERFORMANCE_PRESETS.YEAR_TO_DATE}>Year to Date</MenuItem>
+                  <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_MONTH}>Specific Month</MenuItem>
+                  <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_YEAR}>Specific Year</MenuItem>
+                </Select>
+              </FormControl>
+              {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_MONTH && (
+                <TextField
+                  label="Month"
+                  type="month"
+                  size="small"
+                  value={performanceMonth}
+                  onChange={(event) => setPerformanceMonth(event.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+              )}
+              {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_YEAR && (
+                <TextField
+                  label="Year"
+                  type="number"
+                  size="small"
+                  value={performanceYear}
+                  onChange={(event) => setPerformanceYear(event.target.value)}
+                  InputProps={{ inputProps: { min: 1900, max: 9999 } }}
+                />
+              )}
+            </Stack>
+            <Box sx={{ flexGrow: 1, minHeight: ROW_HEIGHT * (layoutItem?.h || 2) - 80 }}>
+              {performanceLoading ? (
+                <Typography color="textSecondary">Loading performance…</Typography>
+              ) : performanceData.length === 0 ? (
+                <Typography color="textSecondary">
+                  No performance data for the selected range.
+                </Typography>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={performanceData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="label" />
+                    <YAxis />
+                    <Tooltip formatter={(value) => formatCurrency(value)} />
+                    <Legend />
+                    <Line
+                      type="monotone"
+                      dataKey="market_value"
+                      stroke="#1976d2"
+                      name="Market Value"
+                      dot={false}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="book_value"
+                      stroke="#9c27b0"
+                      name="Book Value"
+                      dot={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </Box>
             <Typography variant="caption" color="textSecondary" sx={{ mt: 2 }}>
-              Import statements to see historical performance
+              Values are sampled at closing balances for the selected period.
             </Typography>
           </Paper>
         );
@@ -686,24 +1051,30 @@ const Dashboard = () => {
         </Stack>
       </Box>
 
-      <GridLayout
+      <ResponsiveGridLayout
         className="dashboard-grid"
-        layout={gridLayout}
-        cols={GRID_COLS}
+        layouts={layouts}
+        breakpoints={BREAKPOINTS}
+        cols={COLS}
         rowHeight={ROW_HEIGHT}
         margin={GRID_MARGIN}
         compactType={null}
         preventCollision={false}
-        onDragStop={handleLayoutCommit}
-        onResizeStop={handleLayoutCommit}
         draggableHandle=".dashboard-tile-handle"
+        onBreakpointChange={(newBreakpoint) => {
+          if (LAYOUT_PROFILES.includes(newBreakpoint)) {
+            setCurrentProfile(newBreakpoint);
+          }
+        }}
+        onDragStop={(layout) => handleLayoutCommit(currentProfile, layout)}
+        onResizeStop={(layout) => handleLayoutCommit(currentProfile, layout)}
       >
-        {gridLayout.map((item) => (
+        {(layouts[currentProfile] || []).map((item) => (
           <div key={item.i}>
             {renderTile(item.i, item)}
           </div>
         ))}
-      </GridLayout>
+      </ResponsiveGridLayout>
     </Container>
   );
 };

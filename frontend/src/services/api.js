@@ -161,9 +161,12 @@ export const positionsAPI = {
 };
 
 export const dashboardAPI = {
-  getLayout: () => api.get('/dashboard/layout'),
-  saveLayout: (layout) => api.put('/dashboard/layout', { layout }),
-  resetLayout: () => api.delete('/dashboard/layout')
+  getLayout: (profile = 'desktop') =>
+    api.get('/dashboard/layout', { params: { profile } }),
+  saveLayout: (profile, layout) =>
+    api.put('/dashboard/layout', { profile, layout }),
+  resetLayout: (profile) =>
+    api.delete('/dashboard/layout', { params: profile ? { profile } : {} })
 };
 
 export const dividendsAPI = {
