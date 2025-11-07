@@ -312,6 +312,7 @@ npm run dev
 - `GET /positions/aggregated` - Get aggregated positions (supports filters: account_id, as_of_date, instrument_type_id, instrument_industry_id)
 - `GET /positions/summary` - Get portfolio summary
 - `GET /positions/industry-breakdown` - Get market value grouped by industry (same optional filters as aggregated)
+- `GET /positions/type-breakdown` - Get market value grouped by instrument type (same optional filters as aggregated)
 - `POST /positions` - Create position
 - `PUT /positions/{id}` - Update position
 - `POST /positions/refresh-prices` - Refresh market prices

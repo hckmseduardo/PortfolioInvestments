@@ -252,6 +252,14 @@ class IndustryBreakdownSlice(BaseModel):
     percentage: float
     position_count: int
 
+class TypeBreakdownSlice(BaseModel):
+    type_id: Optional[str] = None
+    type_name: str
+    color: str
+    market_value: float
+    percentage: float
+    position_count: int
+
 class StatementBase(BaseModel):
     filename: str
     file_path: str

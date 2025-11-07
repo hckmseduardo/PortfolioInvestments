@@ -26,10 +26,22 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Divider
+  Divider,
+  Tabs,
+  Tab,
+  IconButton,
+  Snackbar,
+  Alert
 } from '@mui/material';
-import { Refresh, ErrorOutline, Add } from '@mui/icons-material';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
+import {
+  Refresh,
+  ErrorOutline,
+  Category as CategoryIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  Business as BusinessIcon
+} from '@mui/icons-material';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { positionsAPI, accountsAPI, instrumentsAPI } from '../services/api';
 
 const DATE_PRESETS = {
@@ -40,6 +52,23 @@ const DATE_PRESETS = {
   LAST_YEAR: 'last_year',
   END_OF_YEAR: 'end_of_year'
 };
+
+const UNCLASSIFIED_SENTINEL = '__unclassified__';
+
+const COLOR_PALETTE = [
+  '#007bff',
+  '#e91e63',
+  '#4caf50',
+  '#ff9800',
+  '#9c27b0',
+  '#00bcd4',
+  '#8bc34a',
+  '#ffc107',
+  '#ff5722',
+  '#3f51b5',
+  '#009688',
+  '#cddc39'
+];
 
 const formatISODate = (date) => date.toISOString().split('T')[0];
 
@@ -95,15 +124,19 @@ const Portfolio = () => {
   const [fetching, setFetching] = useState(false);
   const [summary, setSummary] = useState(null);
   const [industrySlices, setIndustrySlices] = useState([]);
+  const [typeSlices, setTypeSlices] = useState([]);
   const [instrumentTypes, setInstrumentTypes] = useState([]);
   const [instrumentIndustries, setInstrumentIndustries] = useState([]);
   const [selectedTypeId, setSelectedTypeId] = useState('');
   const [selectedIndustryId, setSelectedIndustryId] = useState('');
-  const [typeDialogOpen, setTypeDialogOpen] = useState(false);
-  const [industryDialogOpen, setIndustryDialogOpen] = useState(false);
-  const [typeForm, setTypeForm] = useState({ name: '', color: '#8884d8' });
-  const [industryForm, setIndustryForm] = useState({ name: '', color: '#82ca9d' });
+  const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
+  const [metadataTab, setMetadataTab] = useState('types');
+  const [editingType, setEditingType] = useState(null);
+  const [editingIndustry, setEditingIndustry] = useState(null);
+  const [newType, setNewType] = useState({ name: '', color: '#8884d8' });
+  const [newIndustry, setNewIndustry] = useState({ name: '', color: '#82ca9d' });
   const [classificationSaving, setClassificationSaving] = useState({});
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const hasLoadedOnce = useRef(false);
   const priceRefreshTimer = useRef(null);
 
@@ -155,7 +188,7 @@ const Portfolio = () => {
         instrument_type_id: selectedTypeId || undefined,
         instrument_industry_id: selectedIndustryId || undefined
       };
-      const [positionsRes, summaryRes, industryRes] = await Promise.all([
+      const [positionsRes, summaryRes, industryRes, typeRes] = await Promise.all([
         positionsAPI.getAggregated(
           selectedAccountId || undefined,
           valuationDate || undefined,
@@ -169,12 +202,18 @@ const Portfolio = () => {
           account_id: selectedAccountId || undefined,
           as_of_date: valuationDate || undefined,
           ...classificationParams
+        }),
+        positionsAPI.getTypeBreakdown({
+          account_id: selectedAccountId || undefined,
+          as_of_date: valuationDate || undefined,
+          ...classificationParams
         })
       ]);
       const data = positionsRes.data || [];
       setPositions(data);
       setSummary(summaryRes.data || null);
       setIndustrySlices(industryRes.data || []);
+      setTypeSlices(typeRes.data || []);
 
       const hasPending = data.some((position) => position.price_pending);
       if (hasPending) {
@@ -193,6 +232,7 @@ const Portfolio = () => {
       setPositions([]);
       setSummary(null);
       setIndustrySlices([]);
+      setTypeSlices([]);
     } finally {
       hasLoadedOnce.current = true;
       setLoading(false);
@@ -354,6 +394,64 @@ const Portfolio = () => {
     />
   );
 
+  const showSnackbar = useCallback((message, severity = 'success') => {
+    if (!message) return;
+    setSnackbar({ open: true, message, severity });
+  }, []);
+
+  const openMetadataDialog = useCallback((tab) => {
+    setMetadataTab(tab);
+    setMetadataDialogOpen(true);
+  }, []);
+
+  const handleMetadataDialogClose = useCallback(() => {
+    setMetadataDialogOpen(false);
+    setEditingType(null);
+    setEditingIndustry(null);
+  }, []);
+
+  const renderColorOptions = useCallback((selectedColor, onSelect) => (
+    <Box>
+      <Grid container spacing={1}>
+        {COLOR_PALETTE.map((color) => (
+          <Grid item key={color}>
+            <Box
+              onClick={() => onSelect(color)}
+              sx={{
+                width: 40,
+                height: 40,
+                bgcolor: color,
+                borderRadius: 1,
+                cursor: 'pointer',
+                border: selectedColor === color ? '3px solid #000' : '1px solid #ddd',
+                boxShadow: selectedColor === color ? 3 : 0,
+                transition: 'transform 0.15s, box-shadow 0.15s',
+                '&:hover': {
+                  transform: 'scale(1.08)',
+                  boxShadow: 2
+                }
+              }}
+            />
+          </Grid>
+        ))}
+      </Grid>
+      <Box mt={1} display="flex" alignItems="center" gap={1}>
+        <Box
+          sx={{
+            width: 48,
+            height: 32,
+            bgcolor: selectedColor,
+            borderRadius: 1,
+            border: '1px solid #ddd'
+          }}
+        />
+        <Typography variant="body2" color="textSecondary">
+          {selectedColor}
+        </Typography>
+      </Box>
+    </Box>
+  ), []);
+
   const handleClassificationUpdate = useCallback(async (position, changes) => {
     const ticker = position?.ticker;
     if (!ticker) return;
@@ -402,38 +500,168 @@ const Portfolio = () => {
   }, [fetchPositions, industryLookup, typeLookup]);
 
   const handleCreateType = useCallback(async () => {
-    if (!typeForm.name.trim()) {
+    const name = newType.name.trim();
+    if (!name) {
+      showSnackbar('Type name is required', 'error');
       return;
     }
     try {
       await instrumentsAPI.createType({
-        name: typeForm.name.trim(),
-        color: typeForm.color || '#8884d8'
+        name,
+        color: newType.color || '#8884d8'
       });
-      setTypeDialogOpen(false);
-      setTypeForm({ name: '', color: '#8884d8' });
-      loadInstrumentMetadata();
+      setNewType({ name: '', color: '#8884d8' });
+      await loadInstrumentMetadata();
+      showSnackbar('Type created successfully');
     } catch (error) {
       console.error('Error creating instrument type:', error);
+      showSnackbar('Failed to create type', 'error');
     }
-  }, [loadInstrumentMetadata, typeForm]);
+  }, [loadInstrumentMetadata, newType, showSnackbar]);
+
+  const handleUpdateType = useCallback(async () => {
+    if (!editingType?.id) return;
+    const name = (editingType.name || '').trim();
+    if (!name) {
+      showSnackbar('Type name is required', 'error');
+      return;
+    }
+    try {
+      await instrumentsAPI.updateType(editingType.id, {
+        name,
+        color: editingType.color || '#8884d8'
+      });
+      setEditingType(null);
+      await loadInstrumentMetadata();
+      showSnackbar('Type updated successfully');
+    } catch (error) {
+      console.error('Error updating instrument type:', error);
+      showSnackbar('Failed to update type', 'error');
+    }
+  }, [editingType, loadInstrumentMetadata, showSnackbar]);
+
+  const handleDeleteType = useCallback(
+    async (typeId) => {
+      if (!typeId) return;
+      if (!window.confirm('Delete this instrument type? Existing positions will become unassigned.')) {
+        return;
+      }
+      try {
+        await instrumentsAPI.deleteType(typeId);
+        if (editingType?.id === typeId) {
+          setEditingType(null);
+        }
+        await loadInstrumentMetadata();
+        if (selectedTypeId === typeId) {
+          setSelectedTypeId('');
+        }
+        showSnackbar('Type deleted');
+      } catch (error) {
+        console.error('Error deleting type:', error);
+        showSnackbar('Failed to delete type', 'error');
+      }
+    },
+    [editingType, loadInstrumentMetadata, selectedTypeId, showSnackbar]
+  );
 
   const handleCreateIndustry = useCallback(async () => {
-    if (!industryForm.name.trim()) {
+    const name = newIndustry.name.trim();
+    if (!name) {
+      showSnackbar('Industry name is required', 'error');
       return;
     }
     try {
       await instrumentsAPI.createIndustry({
-        name: industryForm.name.trim(),
-        color: industryForm.color || '#82ca9d'
+        name,
+        color: newIndustry.color || '#82ca9d'
       });
-      setIndustryDialogOpen(false);
-      setIndustryForm({ name: '', color: '#82ca9d' });
-      loadInstrumentMetadata();
+      setNewIndustry({ name: '', color: '#82ca9d' });
+      await loadInstrumentMetadata();
+      showSnackbar('Industry created successfully');
     } catch (error) {
       console.error('Error creating instrument industry:', error);
+      showSnackbar('Failed to create industry', 'error');
     }
-  }, [industryForm, loadInstrumentMetadata]);
+  }, [loadInstrumentMetadata, newIndustry, showSnackbar]);
+
+  const handleEditType = useCallback((type) => {
+    if (!type) return;
+    setMetadataTab('types');
+    setEditingType({
+      id: type.id,
+      name: type.name,
+      color: type.color || '#8884d8'
+    });
+    setMetadataDialogOpen(true);
+  }, []);
+
+  const handleEditIndustry = useCallback((industry) => {
+    if (!industry) return;
+    setMetadataTab('industries');
+    setEditingIndustry({
+      id: industry.id,
+      name: industry.name,
+      color: industry.color || '#82ca9d'
+    });
+    setMetadataDialogOpen(true);
+  }, []);
+
+  const handleUpdateIndustry = useCallback(async () => {
+    if (!editingIndustry?.id) return;
+    const name = (editingIndustry.name || '').trim();
+    if (!name) {
+      showSnackbar('Industry name is required', 'error');
+      return;
+    }
+    try {
+      await instrumentsAPI.updateIndustry(editingIndustry.id, {
+        name,
+        color: editingIndustry.color || '#82ca9d'
+      });
+      setEditingIndustry(null);
+      await loadInstrumentMetadata();
+      showSnackbar('Industry updated successfully');
+    } catch (error) {
+      console.error('Error updating instrument industry:', error);
+      showSnackbar('Failed to update industry', 'error');
+    }
+  }, [editingIndustry, loadInstrumentMetadata, showSnackbar]);
+
+  const handleDeleteIndustry = useCallback(
+    async (industryId) => {
+      if (!industryId) return;
+      if (!window.confirm('Delete this industry? Existing positions will become unassigned.')) {
+        return;
+      }
+      try {
+        await instrumentsAPI.deleteIndustry(industryId);
+        if (editingIndustry?.id === industryId) {
+          setEditingIndustry(null);
+        }
+        await loadInstrumentMetadata();
+        if (selectedIndustryId === industryId) {
+          setSelectedIndustryId('');
+        }
+        showSnackbar('Industry deleted');
+      } catch (error) {
+        console.error('Error deleting industry:', error);
+        showSnackbar('Failed to delete industry', 'error');
+      }
+    },
+    [editingIndustry, loadInstrumentMetadata, selectedIndustryId, showSnackbar]
+  );
+
+  const handleIndustrySliceDoubleClick = useCallback((slice) => {
+    if (!slice) return;
+    const sliceId = slice.industry_id ?? UNCLASSIFIED_SENTINEL;
+    setSelectedIndustryId((prev) => (prev === sliceId ? '' : sliceId));
+  }, []);
+
+  const handleTypeSliceDoubleClick = useCallback((slice) => {
+    if (!slice) return;
+    const sliceId = slice.type_id ?? UNCLASSIFIED_SENTINEL;
+    setSelectedTypeId((prev) => (prev === sliceId ? '' : sliceId));
+  }, []);
 
   const hasFilters = Boolean(
     selectedAccountId ||
@@ -452,23 +680,54 @@ const Portfolio = () => {
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+      <Box
+        display="flex"
+        justifyContent="space-between"
+        flexWrap="wrap"
+        alignItems={{ xs: 'flex-start', md: 'center' }}
+        mb={3}
+        gap={2}
+      >
         <Typography variant="h4">
           Portfolio
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Refresh />}
-          onClick={handleRefreshPrices}
-          disabled={refreshing || fetching}
-        >
-          {refreshing ? 'Refreshing...' : fetching ? 'Updating...' : 'Refresh Prices'}
-        </Button>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+          <Button
+            variant="text"
+            size="small"
+            startIcon={<CategoryIcon />}
+            onClick={() => openMetadataDialog('types')}
+          >
+            Manage types
+          </Button>
+          <Button
+            variant="text"
+            size="small"
+            startIcon={<BusinessIcon />}
+            onClick={() => openMetadataDialog('industries')}
+          >
+            Manage industries
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Refresh />}
+            onClick={handleRefreshPrices}
+            disabled={refreshing || fetching}
+          >
+            {refreshing ? 'Refreshing...' : fetching ? 'Updating...' : 'Refresh Prices'}
+          </Button>
+        </Stack>
       </Box>
 
       <Paper sx={{ p: 2, mb: 3 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', md: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 220 }}>
+        <Stack
+          direction={{ xs: 'column', lg: 'row' }}
+          spacing={2}
+          useFlexGap
+          flexWrap="wrap"
+          alignItems={{ xs: 'flex-start', lg: 'center' }}
+        >
+          <FormControl size="small" sx={{ minWidth: 200 }}>
             <InputLabel id="portfolio-account-select">Account</InputLabel>
             <Select
               labelId="portfolio-account-select"
@@ -486,7 +745,8 @@ const Portfolio = () => {
               ))}
             </Select>
           </FormControl>
-          <FormControl size="small" sx={{ minWidth: 220 }}>
+
+          <FormControl size="small" sx={{ minWidth: 200 }}>
             <InputLabel id="portfolio-date-select">Valuation</InputLabel>
             <Select
               labelId="portfolio-date-select"
@@ -502,6 +762,7 @@ const Portfolio = () => {
               <MenuItem value={DATE_PRESETS.END_OF_YEAR}>End of Year</MenuItem>
             </Select>
           </FormControl>
+
           {datePreset === DATE_PRESETS.SPECIFIC_MONTH && (
             <TextField
               label="Month"
@@ -535,10 +796,8 @@ const Portfolio = () => {
               Clear selection
             </Button>
           )}
-        </Stack>
-        <Divider sx={{ my: 2 }} />
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', md: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 220 }}>
+
+          <FormControl size="small" sx={{ minWidth: 200 }}>
             <InputLabel id="portfolio-type-select">Type</InputLabel>
             <Select
               labelId="portfolio-type-select"
@@ -548,6 +807,9 @@ const Portfolio = () => {
               renderValue={(value) => {
                 if (!value) {
                   return <em>All types</em>;
+                }
+                if (value === UNCLASSIFIED_SENTINEL) {
+                  return <em>Unclassified only</em>;
                 }
                 const info = typeLookup[value];
                 return (
@@ -561,6 +823,9 @@ const Portfolio = () => {
               <MenuItem value="">
                 <em>All types</em>
               </MenuItem>
+              <MenuItem value={UNCLASSIFIED_SENTINEL}>
+                <em>Unclassified only</em>
+              </MenuItem>
               {instrumentTypes.map((type) => (
                 <MenuItem key={type.id} value={type.id}>
                   {renderColorSwatch(type.color)}
@@ -569,15 +834,7 @@ const Portfolio = () => {
               ))}
             </Select>
           </FormControl>
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<Add />}
-            onClick={() => setTypeDialogOpen(true)}
-          >
-            Add Type
-          </Button>
-          <FormControl size="small" sx={{ minWidth: 220 }}>
+          <FormControl size="small" sx={{ minWidth: 200 }}>
             <InputLabel id="portfolio-industry-select">Industry</InputLabel>
             <Select
               labelId="portfolio-industry-select"
@@ -587,6 +844,9 @@ const Portfolio = () => {
               renderValue={(value) => {
                 if (!value) {
                   return <em>All industries</em>;
+                }
+                if (value === UNCLASSIFIED_SENTINEL) {
+                  return <em>Unclassified only</em>;
                 }
                 const info = industryLookup[value];
                 return (
@@ -600,6 +860,9 @@ const Portfolio = () => {
               <MenuItem value="">
                 <em>All industries</em>
               </MenuItem>
+              <MenuItem value={UNCLASSIFIED_SENTINEL}>
+                <em>Unclassified only</em>
+              </MenuItem>
               {instrumentIndustries.map((industry) => (
                 <MenuItem key={industry.id} value={industry.id}>
                   {renderColorSwatch(industry.color)}
@@ -608,14 +871,6 @@ const Portfolio = () => {
               ))}
             </Select>
           </FormControl>
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<Add />}
-            onClick={() => setIndustryDialogOpen(true)}
-          >
-            Add Industry
-          </Button>
         </Stack>
       </Paper>
 
@@ -676,6 +931,7 @@ const Portfolio = () => {
                           <Cell
                             key={slice.industry_id || 'unclassified'}
                             fill={slice.color || '#b0bec5'}
+                            onDoubleClick={() => handleIndustrySliceDoubleClick(slice)}
                           />
                         ))}
                       </Pie>
@@ -685,7 +941,6 @@ const Portfolio = () => {
                           payload?.payload?.industry_name || name
                         ]}
                       />
-                      <Legend />
                     </PieChart>
                   </ResponsiveContainer>
                 </Box>
@@ -698,6 +953,76 @@ const Portfolio = () => {
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         {renderColorSwatch(slice.color)}
                         <Typography variant="body2">{slice.industry_name}</Typography>
+                      </Box>
+                      <Box textAlign="right">
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {formatCurrency(slice.market_value)}
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary">
+                          {slice.percentage.toFixed(1)}%
+                        </Typography>
+                      </Box>
+                    </Box>
+                  ))}
+                </Stack>
+              </>
+            )}
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom>
+              Asset Type Allocation
+            </Typography>
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+              Market value distribution by asset type
+            </Typography>
+            {typeSlices.length === 0 ? (
+              <Typography color="textSecondary">
+                Assign instrument types to see this breakdown.
+              </Typography>
+            ) : (
+              <>
+                <Box sx={{ height: 320 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={typeSlices}
+                        dataKey="market_value"
+                        nameKey="type_name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius="45%"
+                        outerRadius="80%"
+                        paddingAngle={2}
+                        labelLine={false}
+                      >
+                        {typeSlices.map((slice) => (
+                          <Cell
+                            key={slice.type_id || 'unclassified_type'}
+                            fill={slice.color || '#b0bec5'}
+                            onDoubleClick={() => handleTypeSliceDoubleClick(slice)}
+                          />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip
+                        formatter={(value, name, payload) => [
+                          formatCurrency(value),
+                          payload?.payload?.type_name || name
+                        ]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+                <Stack spacing={1} sx={{ mt: 2 }}>
+                  {typeSlices.map((slice) => (
+                    <Box
+                      key={slice.type_id || 'unclassified_type'}
+                      sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    >
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {renderColorSwatch(slice.color)}
+                        <Typography variant="body2">{slice.type_name}</Typography>
                       </Box>
                       <Box textAlign="right">
                         <Typography variant="body2" sx={{ fontWeight: 600 }}>
@@ -917,59 +1242,211 @@ const Portfolio = () => {
         </TableContainer>
       )}
 
-      <Dialog open={typeDialogOpen} onClose={() => setTypeDialogOpen(false)}>
-        <DialogTitle>Create Instrument Type</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <TextField
-              label="Name"
-              value={typeForm.name}
-              onChange={(event) => setTypeForm((prev) => ({ ...prev, name: event.target.value }))}
-              autoFocus
-            />
-            <TextField
-              label="Color"
-              type="color"
-              value={typeForm.color}
-              onChange={(event) => setTypeForm((prev) => ({ ...prev, color: event.target.value }))}
-              InputLabelProps={{ shrink: true }}
-            />
-          </Stack>
+      <Dialog open={metadataDialogOpen} onClose={handleMetadataDialogClose} maxWidth="md" fullWidth>
+        <DialogTitle>Manage Instrument Metadata</DialogTitle>
+        <DialogContent dividers>
+          <Tabs
+            value={metadataTab}
+            onChange={(_, value) => setMetadataTab(value)}
+            variant="fullWidth"
+            sx={{ mb: 2 }}
+          >
+            <Tab label="Types" value="types" />
+            <Tab label="Industries" value="industries" />
+          </Tabs>
+
+          {metadataTab === 'types' && (
+            <Stack spacing={3}>
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>Existing Types</Typography>
+                <Box display="flex" flexWrap="wrap" gap={1}>
+                  {instrumentTypes.map((type) => (
+                    <Box key={type.id} display="flex" alignItems="center" gap={0.5}>
+                      <Chip
+                        label={type.name}
+                        sx={{ bgcolor: type.color, color: '#fff' }}
+                      />
+                      <IconButton size="small" onClick={() => handleEditType(type)}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton size="small" onClick={() => handleDeleteType(type.id)} color="error">
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  ))}
+                  {instrumentTypes.length === 0 && (
+                    <Typography color="textSecondary">No types created yet.</Typography>
+                  )}
+                </Box>
+              </Box>
+
+              {editingType && (
+                <Box p={2} sx={{ bgcolor: 'grey.100', borderRadius: 1 }}>
+                  <Typography variant="subtitle1" gutterBottom>
+                    Edit Type: {editingType.name}
+                  </Typography>
+                  <Stack spacing={2}>
+                    <TextField
+                      label="Name"
+                      value={editingType.name}
+                      onChange={(event) => setEditingType((prev) => ({ ...prev, name: event.target.value }))}
+                      size="small"
+                    />
+                    <Box>
+                      <Typography variant="body2" color="textSecondary" gutterBottom>
+                        Select Color
+                      </Typography>
+                      {renderColorOptions(editingType.color, (color) =>
+                        setEditingType((prev) => ({ ...prev, color }))
+                      )}
+                    </Box>
+                    <Stack direction="row" spacing={1}>
+                      <Button variant="contained" size="small" onClick={handleUpdateType}>
+                        Save Changes
+                      </Button>
+                      <Button variant="outlined" size="small" onClick={() => setEditingType(null)}>
+                        Cancel
+                      </Button>
+                    </Stack>
+                  </Stack>
+                </Box>
+              )}
+
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>Add New Type</Typography>
+                <Stack spacing={2}>
+                  <TextField
+                    label="Name"
+                    value={newType.name}
+                    onChange={(event) => setNewType((prev) => ({ ...prev, name: event.target.value }))}
+                    size="small"
+                  />
+                  <Box>
+                    <Typography variant="body2" color="textSecondary" gutterBottom>
+                      Select Color
+                    </Typography>
+                    {renderColorOptions(newType.color, (color) =>
+                      setNewType((prev) => ({ ...prev, color }))
+                    )}
+                  </Box>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={handleCreateType}
+                    disabled={!newType.name.trim()}
+                  >
+                    Create Type
+                  </Button>
+                </Stack>
+              </Box>
+            </Stack>
+          )}
+
+          {metadataTab === 'industries' && (
+            <Stack spacing={3}>
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>Existing Industries</Typography>
+                <Box display="flex" flexWrap="wrap" gap={1}>
+                  {instrumentIndustries.map((industry) => (
+                    <Box key={industry.id} display="flex" alignItems="center" gap={0.5}>
+                      <Chip
+                        label={industry.name}
+                        sx={{ bgcolor: industry.color, color: '#fff' }}
+                      />
+                      <IconButton size="small" onClick={() => handleEditIndustry(industry)}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton size="small" onClick={() => handleDeleteIndustry(industry.id)} color="error">
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  ))}
+                  {instrumentIndustries.length === 0 && (
+                    <Typography color="textSecondary">No industries created yet.</Typography>
+                  )}
+                </Box>
+              </Box>
+
+              {editingIndustry && (
+                <Box p={2} sx={{ bgcolor: 'grey.100', borderRadius: 1 }}>
+                  <Typography variant="subtitle1" gutterBottom>
+                    Edit Industry: {editingIndustry.name}
+                  </Typography>
+                  <Stack spacing={2}>
+                    <TextField
+                      label="Name"
+                      value={editingIndustry.name}
+                      onChange={(event) => setEditingIndustry((prev) => ({ ...prev, name: event.target.value }))}
+                      size="small"
+                    />
+                    <Box>
+                      <Typography variant="body2" color="textSecondary" gutterBottom>
+                        Select Color
+                      </Typography>
+                      {renderColorOptions(editingIndustry.color, (color) =>
+                        setEditingIndustry((prev) => ({ ...prev, color }))
+                      )}
+                    </Box>
+                    <Stack direction="row" spacing={1}>
+                      <Button variant="contained" size="small" onClick={handleUpdateIndustry}>
+                        Save Changes
+                      </Button>
+                      <Button variant="outlined" size="small" onClick={() => setEditingIndustry(null)}>
+                        Cancel
+                      </Button>
+                    </Stack>
+                  </Stack>
+                </Box>
+              )}
+
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>Add New Industry</Typography>
+                <Stack spacing={2}>
+                  <TextField
+                    label="Name"
+                    value={newIndustry.name}
+                    onChange={(event) => setNewIndustry((prev) => ({ ...prev, name: event.target.value }))}
+                    size="small"
+                  />
+                  <Box>
+                    <Typography variant="body2" color="textSecondary" gutterBottom>
+                      Select Color
+                    </Typography>
+                    {renderColorOptions(newIndustry.color, (color) =>
+                      setNewIndustry((prev) => ({ ...prev, color }))
+                    )}
+                  </Box>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={handleCreateIndustry}
+                    disabled={!newIndustry.name.trim()}
+                  >
+                    Create Industry
+                  </Button>
+                </Stack>
+              </Box>
+            </Stack>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setTypeDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreateType} variant="contained">
-            Save
-          </Button>
+          <Button onClick={handleMetadataDialogClose}>Close</Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog open={industryDialogOpen} onClose={() => setIndustryDialogOpen(false)}>
-        <DialogTitle>Create Industry</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <TextField
-              label="Name"
-              value={industryForm.name}
-              onChange={(event) => setIndustryForm((prev) => ({ ...prev, name: event.target.value }))}
-              autoFocus
-            />
-            <TextField
-              label="Color"
-              type="color"
-              value={industryForm.color}
-              onChange={(event) => setIndustryForm((prev) => ({ ...prev, color: event.target.value }))}
-              InputLabelProps={{ shrink: true }}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIndustryDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreateIndustry} variant="contained">
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+      >
+        <Alert
+          onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 };

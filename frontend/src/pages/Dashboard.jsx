@@ -39,9 +39,10 @@ const DEFAULT_TILE_LAYOUT = [
   { i: 'dividends', x: 9, y: 0, w: 3, h: 1 },
   { i: 'total_gains', x: 0, y: 1, w: 3, h: 1 },
   { i: 'accounts_summary', x: 3, y: 1, w: 3, h: 1 },
-  { i: 'industry_breakdown', x: 6, y: 1, w: 3, h: 2 },
   { i: 'performance', x: 0, y: 2, w: 8, h: 3 },
-  { i: 'accounts_list', x: 8, y: 2, w: 4, h: 3 }
+  { i: 'accounts_list', x: 8, y: 2, w: 4, h: 3 },
+  { i: 'industry_breakdown', x: 0, y: 5, w: 6, h: 2 },
+  { i: 'type_breakdown', x: 6, y: 5, w: 6, h: 2 }
 ];
 
 const DEFAULT_TILE_MAP = DEFAULT_TILE_LAYOUT.reduce((acc, item) => {
@@ -57,6 +58,7 @@ const TILE_CONSTRAINTS = {
   total_gains: { minW: 2, minH: 1 },
   accounts_summary: { minW: 2, minH: 1 },
   industry_breakdown: { minW: 3, minH: 2 },
+  type_breakdown: { minW: 3, minH: 2 },
   performance: { minW: 6, minH: 2 },
   accounts_list: { minW: 4, minH: 2 }
 };
@@ -194,18 +196,38 @@ const StatCard = ({ title, value, icon, color, subtitle }) => (
       >
         {title}
       </Typography>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mt={1}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mt={1} sx={{ gap: 2 }}>
         <Box>
-          <Typography variant="h4" sx={{ fontWeight: 600 }}>
+          <Typography
+            sx={{
+              fontWeight: 600,
+              fontSize: {
+                xs: 'clamp(1.5rem, 6vw, 2.5rem)',
+                sm: 'clamp(1.4rem, 4vw, 2.8rem)',
+                lg: 'clamp(1.2rem, 2vw, 3rem)'
+              },
+              lineHeight: 1.1
+            }}
+          >
             {value}
           </Typography>
           {subtitle && (
-            <Typography variant="body2" color={color}>
+            <Typography
+              sx={{
+                color: color || 'textSecondary',
+                fontSize: {
+                  xs: 'clamp(0.75rem, 3vw, 0.95rem)',
+                  lg: 'clamp(0.8rem, 1vw, 1rem)'
+                }
+              }}
+            >
               {subtitle}
             </Typography>
           )}
         </Box>
-        <Box sx={{ color: color || 'primary.main' }}>{icon}</Box>
+        <Box sx={{ color: color || 'primary.main', display: 'flex', alignItems: 'center' }}>
+          {icon}
+        </Box>
       </Box>
     </CardContent>
   </Card>
@@ -216,6 +238,7 @@ const Dashboard = () => {
   const [accounts, setAccounts] = useState([]);
   const [dividendSummary, setDividendSummary] = useState(null);
   const [industryBreakdown, setIndustryBreakdown] = useState([]);
+  const [typeBreakdown, setTypeBreakdown] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -259,17 +282,19 @@ const Dashboard = () => {
       setFetching(true);
       try {
         const asOfParam = valuationDate || undefined;
-        const [summaryRes, accountsRes, dividendsRes, industryRes] = await Promise.all([
+        const [summaryRes, accountsRes, dividendsRes, industryRes, typeRes] = await Promise.all([
           positionsAPI.getSummary(asOfParam),
           accountsAPI.getAll(),
           dividendsAPI.getSummary(undefined, undefined, asOfParam),
-          positionsAPI.getIndustryBreakdown({ as_of_date: asOfParam })
+          positionsAPI.getIndustryBreakdown({ as_of_date: asOfParam }),
+          positionsAPI.getTypeBreakdown({ as_of_date: asOfParam })
         ]);
 
         setSummary(summaryRes.data);
         setAccounts(accountsRes.data);
         setDividendSummary(dividendsRes.data);
         setIndustryBreakdown(industryRes.data || []);
+        setTypeBreakdown(typeRes.data || []);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
@@ -441,11 +466,11 @@ const Dashboard = () => {
             ) : (
               <Box sx={{ flexGrow: 1, minHeight: ROW_HEIGHT * (layoutItem?.h || 2) - 60 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={industryBreakdown}
-                      dataKey="market_value"
-                      nameKey="industry_name"
+                    <PieChart>
+                      <Pie
+                        data={industryBreakdown}
+                        dataKey="market_value"
+                        nameKey="industry_name"
                       innerRadius="40%"
                       outerRadius="70%"
                       paddingAngle={2}
@@ -463,7 +488,50 @@ const Dashboard = () => {
                         payload?.payload?.industry_name || name
                       ]}
                     />
-                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </Box>
+            )}
+          </Paper>
+        );
+      case 'type_breakdown':
+        return (
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Typography
+              variant="caption"
+              color="textSecondary"
+              className="dashboard-tile-handle"
+              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
+            >
+              Asset Types
+            </Typography>
+            {typeBreakdown.length === 0 ? (
+              <Typography color="textSecondary">Assign instrument types to view this chart.</Typography>
+            ) : (
+              <Box sx={{ flexGrow: 1, minHeight: ROW_HEIGHT * (layoutItem?.h || 2) - 60 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={typeBreakdown}
+                      dataKey="market_value"
+                      nameKey="type_name"
+                      innerRadius="40%"
+                      outerRadius="70%"
+                      paddingAngle={2}
+                    >
+                      {typeBreakdown.map((slice) => (
+                        <Cell
+                          key={slice.type_id || 'unclassified'}
+                          fill={slice.color || '#b0bec5'}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value, name, payload) => [
+                        formatCurrency(value),
+                        payload?.payload?.type_name || name
+                      ]}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
               </Box>

@@ -10,6 +10,7 @@ from app.models.schemas import (
     PortfolioSummary,
     AggregatedPosition,
     IndustryBreakdownSlice,
+    TypeBreakdownSlice,
 )
 from app.api.auth import get_current_user
 from app.database.json_db import get_db
@@ -22,6 +23,7 @@ router = APIRouter(prefix="/positions", tags=["positions"])
 logger = logging.getLogger(__name__)
 UNCLASSIFIED_LABEL = "Unclassified"
 UNCLASSIFIED_COLOR = "#b0bec5"
+UNCLASSIFIED_SENTINEL = "__unclassified__"
 
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
@@ -342,6 +344,14 @@ def _build_aggregated_positions(
     return aggregated
 
 
+def _matches_classification(value: Optional[str], target: Optional[str]) -> bool:
+    if not target:
+        return True
+    if target == UNCLASSIFIED_SENTINEL:
+        return not value
+    return value == target
+
+
 def _filter_positions_by_classification(
     positions: List[Dict[str, float]],
     instrument_type_id: Optional[str],
@@ -352,12 +362,50 @@ def _filter_positions_by_classification(
 
     filtered: List[Dict[str, float]] = []
     for position in positions:
-        if instrument_type_id and position.get("instrument_type_id") != instrument_type_id:
+        if not _matches_classification(position.get("instrument_type_id"), instrument_type_id):
             continue
-        if instrument_industry_id and position.get("instrument_industry_id") != instrument_industry_id:
+        if not _matches_classification(position.get("instrument_industry_id"), instrument_industry_id):
             continue
         filtered.append(position)
     return filtered
+
+
+def _build_breakdown_slices(
+    positions: List[Dict[str, float]],
+    key_id: str,
+    key_name: str,
+    key_color: str,
+) -> List[Dict[str, float]]:
+    slices: Dict[str, Dict] = {}
+    total_market_value = 0.0
+
+    for position in positions:
+        if position.get("ticker") == "CASH":
+            continue
+        market_value = float(position.get("market_value") or 0.0)
+        if market_value == 0:
+            continue
+        total_market_value += market_value
+        slice_id = position.get(key_id) or UNCLASSIFIED_SENTINEL
+        entry = slices.setdefault(slice_id, {
+            "id": position.get(key_id),
+            "name": position.get(key_name) or UNCLASSIFIED_LABEL,
+            "color": position.get(key_color) or UNCLASSIFIED_COLOR,
+            "market_value": 0.0,
+            "percentage": 0.0,
+            "position_count": 0
+        })
+        entry["market_value"] += market_value
+        entry["position_count"] += 1
+
+    if total_market_value <= 0:
+        return []
+
+    for entry in slices.values():
+        entry["percentage"] = (entry["market_value"] / total_market_value) * 100
+
+    ordered = sorted(slices.values(), key=lambda item: item["market_value"], reverse=True)
+    return ordered
 
 @router.post("", response_model=Position)
 async def create_position(
@@ -533,36 +581,76 @@ async def get_industry_breakdown(
     aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
     filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
 
-    slices: Dict[str, Dict] = {}
-    total_market_value = 0.0
+    ordered = _build_breakdown_slices(
+        filtered,
+        "instrument_industry_id",
+        "instrument_industry_name",
+        "instrument_industry_color",
+    )
+    return [
+        IndustryBreakdownSlice(
+            industry_id=entry["id"],
+            industry_name=entry["name"],
+            color=entry["color"],
+            market_value=entry["market_value"],
+            percentage=entry["percentage"],
+            position_count=entry["position_count"],
+        )
+        for entry in ordered
+    ]
 
-    for position in filtered:
-        if position.get("ticker") == "CASH":
-            continue
-        market_value = float(position.get("market_value") or 0.0)
-        if market_value == 0:
-            continue
-        total_market_value += market_value
-        key = position.get("instrument_industry_id") or "__unclassified__"
-        entry = slices.setdefault(key, {
-            "industry_id": position.get("instrument_industry_id"),
-            "industry_name": position.get("instrument_industry_name") or UNCLASSIFIED_LABEL,
-            "color": position.get("instrument_industry_color") or UNCLASSIFIED_COLOR,
-            "market_value": 0.0,
-            "percentage": 0.0,
-            "position_count": 0
-        })
-        entry["market_value"] += market_value
-        entry["position_count"] += 1
 
-    if total_market_value <= 0:
-        return [IndustryBreakdownSlice(**entry) for entry in slices.values()]
+@router.get("/type-breakdown", response_model=List[TypeBreakdownSlice])
+async def get_type_breakdown(
+    account_id: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+    instrument_type_id: Optional[str] = None,
+    instrument_industry_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    db = get_db()
 
-    for entry in slices.values():
-        entry["percentage"] = (entry["market_value"] / total_market_value) * 100
+    if account_id:
+        account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+        if not account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+        account_ids = [account_id]
+    else:
+        user_accounts = db.find("accounts", {"user_id": current_user.id})
+        account_ids = [acc["id"] for acc in user_accounts]
 
-    ordered = sorted(slices.values(), key=lambda item: item["market_value"], reverse=True)
-    return [IndustryBreakdownSlice(**entry) for entry in ordered]
+    if not account_ids:
+        return []
+
+    as_of: Optional[datetime] = None
+    if as_of_date:
+        as_of = _parse_iso_datetime(as_of_date)
+        if not as_of:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
+            )
+
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
+
+    ordered = _build_breakdown_slices(
+        filtered,
+        "instrument_type_id",
+        "instrument_type_name",
+        "instrument_type_color",
+    )
+    return [
+        TypeBreakdownSlice(
+            type_id=entry["id"],
+            type_name=entry["name"],
+            color=entry["color"],
+            market_value=entry["market_value"],
+            percentage=entry["percentage"],
+            position_count=entry["position_count"],
+        )
+        for entry in ordered
+    ]
 
 @router.put("/{position_id}", response_model=Position)
 async def update_position(

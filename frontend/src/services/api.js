@@ -148,6 +148,15 @@ export const positionsAPI = {
         ...(params.instrument_type_id ? { instrument_type_id: params.instrument_type_id } : {}),
         ...(params.instrument_industry_id ? { instrument_industry_id: params.instrument_industry_id } : {})
       }
+    }),
+  getTypeBreakdown: (params = {}) =>
+    api.get('/positions/type-breakdown', {
+      params: {
+        ...(params.account_id ? { account_id: params.account_id } : {}),
+        ...(params.as_of_date ? { as_of_date: params.as_of_date } : {}),
+        ...(params.instrument_type_id ? { instrument_type_id: params.instrument_type_id } : {}),
+        ...(params.instrument_industry_id ? { instrument_industry_id: params.instrument_industry_id } : {})
+      }
     })
 };
 
