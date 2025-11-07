@@ -23,11 +23,12 @@ import {
 } from '@mui/icons-material';
 import { accountsAPI, positionsAPI, dividendsAPI, dashboardAPI } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Responsive, WidthProvider } from 'react-grid-layout';
+import { Responsive, WidthProvider, utils as RGLUtils } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
+const { compact } = RGLUtils || {};
 const ROW_HEIGHT = 120;
 const GRID_MARGIN = [16, 16];
 
@@ -62,10 +63,11 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'dividends', x: 6, y: 0, w: 3, h: 1 },
     { i: 'total_gains', x: 9, y: 0, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 1, w: 4, h: 1 },
-    { i: 'accounts_list', x: 4, y: 1, w: 8, h: 2 },
-    { i: 'performance', x: 0, y: 3, w: 12, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 6, w: 6, h: 4, minH: 4 },
-    { i: 'industry_breakdown', x: 6, y: 6, w: 6, h: 4, minH: 4 }
+    { i: 'total_value', x: 4, y: 1, w: 4, h: 1 },
+    { i: 'accounts_list', x: 0, y: 2, w: 12, h: 2 },
+    { i: 'performance', x: 0, y: 4, w: 12, h: 3 },
+    { i: 'type_breakdown', x: 0, y: 7, w: 6, h: 6, minH: 6 },
+    { i: 'industry_breakdown', x: 6, y: 7, w: 6, h: 6, minH: 6 }
   ],
   tablet_landscape: [
     { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
@@ -73,10 +75,11 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'dividends', x: 6, y: 0, w: 3, h: 1 },
     { i: 'total_gains', x: 9, y: 0, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 1, w: 4, h: 1 },
-    { i: 'accounts_list', x: 4, y: 1, w: 8, h: 2 },
-    { i: 'performance', x: 0, y: 3, w: 12, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 6, w: 6, h: 4, minH: 4 },
-    { i: 'industry_breakdown', x: 6, y: 6, w: 6, h: 4, minH: 4 }
+    { i: 'total_value', x: 4, y: 1, w: 4, h: 1 },
+    { i: 'accounts_list', x: 0, y: 2, w: 12, h: 2 },
+    { i: 'performance', x: 0, y: 4, w: 12, h: 3 },
+    { i: 'type_breakdown', x: 0, y: 7, w: 6, h: 6, minH: 6 },
+    { i: 'industry_breakdown', x: 6, y: 7, w: 6, h: 6, minH: 6 }
   ],
   tablet_portrait: [
     { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
@@ -84,10 +87,11 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'dividends', x: 0, y: 1, w: 4, h: 1 },
     { i: 'total_gains', x: 4, y: 1, w: 4, h: 1 },
     { i: 'accounts_summary', x: 0, y: 2, w: 4, h: 1 },
+    { i: 'total_value', x: 4, y: 2, w: 4, h: 1 },
     { i: 'accounts_list', x: 0, y: 3, w: 8, h: 2 },
     { i: 'performance', x: 0, y: 5, w: 8, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 8, w: 4, h: 4, minH: 4 },
-    { i: 'industry_breakdown', x: 4, y: 8, w: 4, h: 4, minH: 4 }
+    { i: 'type_breakdown', x: 0, y: 8, w: 4, h: 6, minH: 6 },
+    { i: 'industry_breakdown', x: 4, y: 8, w: 4, h: 6, minH: 6 }
   ],
   mobile_landscape: [
     { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
@@ -95,10 +99,11 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'dividends', x: 0, y: 1, w: 3, h: 1 },
     { i: 'total_gains', x: 3, y: 1, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 2, w: 3, h: 1 },
+    { i: 'total_value', x: 3, y: 2, w: 3, h: 1 },
     { i: 'accounts_list', x: 0, y: 3, w: 6, h: 2 },
     { i: 'performance', x: 0, y: 5, w: 6, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 8, w: 3, h: 4, minH: 4 },
-    { i: 'industry_breakdown', x: 3, y: 8, w: 3, h: 4, minH: 4 }
+    { i: 'type_breakdown', x: 0, y: 8, w: 6, h: 6, minH: 6 },
+    { i: 'industry_breakdown', x: 0, y: 14, w: 6, h: 6, minH: 6 }
   ],
   mobile_portrait: [
     { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
@@ -106,10 +111,11 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'dividends', x: 0, y: 2, w: 4, h: 1 },
     { i: 'total_gains', x: 0, y: 3, w: 4, h: 1 },
     { i: 'accounts_summary', x: 0, y: 4, w: 4, h: 1 },
-    { i: 'accounts_list', x: 0, y: 5, w: 4, h: 2 },
-    { i: 'performance', x: 0, y: 7, w: 4, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 10, w: 4, h: 5, minH: 5 },
-    { i: 'industry_breakdown', x: 0, y: 15, w: 4, h: 5, minH: 5 }
+    { i: 'total_value', x: 0, y: 5, w: 4, h: 1 },
+    { i: 'accounts_list', x: 0, y: 6, w: 4, h: 2 },
+    { i: 'performance', x: 0, y: 8, w: 4, h: 3 },
+    { i: 'type_breakdown', x: 0, y: 11, w: 4, h: 8, minH: 8 },
+    { i: 'industry_breakdown', x: 0, y: 19, w: 4, h: 8, minH: 8 }
   ]
 };
 
@@ -230,6 +236,17 @@ const sanitizeLayout = (layout, profile) => {
   return sanitized;
 };
 
+const normalizeLayoutForProfile = (layout, profile) => {
+  if (!layout || layout.length === 0) {
+    return getDefaultLayout(profile);
+  }
+
+  const cols = COLS[profile] || COLS.desktop;
+  const workingLayout = layout.map((item) => ({ ...item }));
+  const compacted = compact ? compact(workingLayout, 'vertical', cols) : workingLayout;
+  return sanitizeLayout(compacted, profile);
+};
+
 const convertFromServerLayout = (serverLayout, profile) => {
   if (!Array.isArray(serverLayout)) {
     return getDefaultLayout(profile);
@@ -245,7 +262,7 @@ const convertFromServerLayout = (serverLayout, profile) => {
     minH: tile?.minH
   }));
 
-  return sanitizeLayout(parsed, profile);
+  return normalizeLayoutForProfile(parsed, profile);
 };
 
 const serializeLayout = (layout = []) =>
@@ -570,7 +587,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
       if (!nextLayout) {
         return;
       }
-      const sanitized = sanitizeLayout(nextLayout, profile);
+      const sanitized = normalizeLayoutForProfile(nextLayout, profile);
       loadedProfiles.current.add(profile);
       setLayouts((prev) => ({ ...prev, [profile]: sanitized }));
       if (isReadyToPersist.current) {
@@ -695,7 +712,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
         );
       case 'industry_breakdown':
         return (
-          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
             <Typography
               variant="caption"
               color="textSecondary"
@@ -708,12 +725,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
               <Typography color="textSecondary">Classify positions to view this chart.</Typography>
             ) : (
               <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <Box
-                  sx={{
-                    flexShrink: 0,
-                    height: Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 260)
-                  }}
-                >
+                <Box sx={{ flexShrink: 0, height: Math.min(320, Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 300)) }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -740,10 +752,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     </PieChart>
                   </ResponsiveContainer>
                 </Box>
-                <Stack
-                  spacing={1}
-                  sx={{ mt: 2, flexGrow: 1, overflowY: 'auto', minHeight: 0, pr: 1 }}
-                >
+                <Stack spacing={1} sx={{ mt: 2 }}>
                   {industryBreakdown.map((slice) => (
                     <Box
                       key={slice.industry_id || 'unclassified'}
@@ -770,7 +779,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
         );
       case 'type_breakdown':
         return (
-          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
             <Typography
               variant="caption"
               color="textSecondary"
@@ -783,12 +792,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
               <Typography color="textSecondary">Assign instrument types to view this chart.</Typography>
             ) : (
               <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <Box
-                  sx={{
-                    flexShrink: 0,
-                    height: Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 260)
-                  }}
-                >
+                <Box sx={{ flexShrink: 0, height: Math.min(320, Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 300)) }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -815,10 +819,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     </PieChart>
                   </ResponsiveContainer>
                 </Box>
-                <Stack
-                  spacing={1}
-                  sx={{ mt: 2, flexGrow: 1, overflowY: 'auto', minHeight: 0, pr: 1 }}
-                >
+                <Stack spacing={1} sx={{ mt: 2 }}>
                   {typeBreakdown.map((slice) => (
                     <Box
                       key={slice.type_id || 'unclassified'}
@@ -1060,6 +1061,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
         margin={GRID_MARGIN}
         compactType={null}
         preventCollision={false}
+        allowOverlap
         draggableHandle=".dashboard-tile-handle"
         onBreakpointChange={(newBreakpoint) => {
           if (LAYOUT_PROFILES.includes(newBreakpoint)) {
