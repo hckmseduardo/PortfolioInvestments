@@ -28,16 +28,26 @@ CATEGORY_KEYWORDS = {
     "Fees": ["fee", "charge", "frais"],
 }
 
+def _parse_transaction_date(date_value: Optional[str]) -> Optional[datetime]:
+    """Parse transaction date that may include timezone suffixes."""
+    if isinstance(date_value, datetime):
+        return date_value
+    if isinstance(date_value, str) and date_value:
+        try:
+            return datetime.fromisoformat(date_value.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+    return None
 
-def _is_expense_account(account: Optional[dict]) -> bool:
-    if not account:
+
+def _dates_within_tolerance(date_a: Optional[str], date_b: Optional[str], tolerance_days: int) -> bool:
+    """Check if two dates are within the tolerance window."""
+    parsed_a = _parse_transaction_date(date_a)
+    parsed_b = _parse_transaction_date(date_b)
+    if not parsed_a or not parsed_b:
         return False
-    return account.get("account_type") in EXPENSE_ACCOUNT_TYPES
+    return abs((parsed_a - parsed_b).days) <= tolerance_days
 
-
-def _get_expense_accounts(db, user_id: str) -> List[dict]:
-    all_accounts = db.find("accounts", {"user_id": user_id})
-    return [acc for acc in all_accounts if _is_expense_account(acc)]
 
 def auto_categorize_expense(description: str, user_id: str) -> Optional[str]:
     """
@@ -87,6 +97,63 @@ def auto_categorize_expense(description: str, user_id: str) -> Optional[str]:
 
     return best_match
 
+def _is_expense_account(account: Optional[dict]) -> bool:
+    """Return True if the account type should appear in expenses."""
+    if not account:
+        return False
+    return account.get("account_type") in EXPENSE_ACCOUNT_TYPES
+
+
+def _get_expense_accounts(db, user_id: str) -> List[dict]:
+    """Return all checking/credit card accounts for the user."""
+    all_accounts = db.find("accounts", {"user_id": user_id})
+    return [acc for acc in all_accounts if _is_expense_account(acc)]
+
+
+def _looks_like_transfer_pair(
+    txn_a: dict,
+    txn_b: dict,
+    account_lookup: Dict[str, Dict[str, Any]]
+) -> bool:
+    """
+    Determine if two transactions are likely part of the same transfer.
+    Handles standard debit/credit transfers and credit-card payments where
+    institutions sometimes export both legs as withdrawals.
+    """
+    total_a = txn_a.get("total", 0) or 0
+    total_b = txn_b.get("total", 0) or 0
+    if total_a == 0 or total_b == 0:
+        return False
+
+    # Opposite signs is the classic transfer pattern
+    if total_a * total_b < 0:
+        return True
+
+    type_a = (txn_a.get("type") or "").lower()
+    type_b = (txn_b.get("type") or "").lower()
+    if "transfer" in {type_a, type_b}:
+        return True
+
+    account_a = account_lookup.get(txn_a.get("account_id"))
+    account_b = account_lookup.get(txn_b.get("account_id"))
+    account_types = {
+        account_a.get("account_type") if account_a else None,
+        account_b.get("account_type") if account_b else None,
+    }
+
+    # Checking <-> credit card payments often show up as two withdrawals
+    if account_types == {"checking", "credit_card"}:
+        return True
+
+    # Consider other bank-to-bank transfers when descriptions explicitly say so
+    description_combo = f"{txn_a.get('description','').lower()} {txn_b.get('description','').lower()}"
+    transfer_keywords = ("transfer", "interac", "etransfer", "e-transfer")
+    if any(keyword in description_combo for keyword in transfer_keywords):
+        return True
+
+    return False
+
+
 def detect_transfers(user_id: str, db, days_tolerance: int = 3) -> List[Tuple[str, str]]:
     """
     Detect transfers between accounts by finding matching debit/credit pairs.
@@ -102,6 +169,7 @@ def detect_transfers(user_id: str, db, days_tolerance: int = 3) -> List[Tuple[st
     # Get all user accounts
     accounts = db.find("accounts", {"user_id": user_id})
     account_ids = [acc["id"] for acc in accounts]
+    account_lookup = {acc["id"]: acc for acc in accounts}
 
     # Get all transactions for user
     all_transactions = []
@@ -119,68 +187,41 @@ def detect_transfers(user_id: str, db, days_tolerance: int = 3) -> List[Tuple[st
             amount_groups[amount_key].append(txn)
 
     transfers = []
+    paired_transaction_ids = set()
 
-    # For each group of same-amount transactions, find debit/credit pairs
-    for amount, txns in amount_groups.items():
+    # For each group of same-amount transactions, find matching pairs
+    for txns in amount_groups.values():
         if len(txns) < 2:
             continue
 
-        # Separate into debits and credits
-        debits = [t for t in txns if t.get("total", 0) < 0]
-        credits = [t for t in txns if t.get("total", 0) > 0]
+        sorted_txns = sorted(
+            txns,
+            key=lambda txn: _parse_transaction_date(txn.get("date")) or datetime.min
+        )
 
-        # Try to match each debit with a credit
-        for debit in debits:
-            debit_date = debit.get("date")
-            if isinstance(debit_date, str):
-                debit_date = datetime.fromisoformat(debit_date.replace('Z', '+00:00'))
+        for idx, txn_a in enumerate(sorted_txns):
+            id_a = txn_a.get("id")
+            if not id_a or id_a in paired_transaction_ids:
+                continue
 
-            debit_desc = debit.get("description", "").lower()
-            debit_account = debit.get("account_id")
-
-            for credit in credits:
-                # Skip if same account
-                if credit.get("account_id") == debit_account:
+            for txn_b in sorted_txns[idx + 1:]:
+                id_b = txn_b.get("id")
+                if not id_b or id_b in paired_transaction_ids:
                     continue
 
-                credit_date = credit.get("date")
-                if isinstance(credit_date, str):
-                    credit_date = datetime.fromisoformat(credit_date.replace('Z', '+00:00'))
-
-                # Check if dates are within tolerance
-                date_diff = abs((credit_date - debit_date).days)
-                if date_diff > days_tolerance:
+                if txn_a.get("account_id") == txn_b.get("account_id"):
                     continue
 
-                credit_desc = credit.get("description", "").lower()
+                if not _dates_within_tolerance(txn_a.get("date"), txn_b.get("date"), days_tolerance):
+                    continue
 
-                # Check if descriptions indicate a transfer
-                is_transfer = False
+                if not _looks_like_transfer_pair(txn_a, txn_b, account_lookup):
+                    continue
 
-                # Check for credit card payment patterns
-                if ("mastercard" in debit_desc or "credit card" in debit_desc) and \
-                   ("payment" in credit_desc or "payment received" in credit_desc):
-                    is_transfer = True
-                elif ("mastercard" in credit_desc or "credit card" in credit_desc) and \
-                     ("payment" in debit_desc or "payment for" in debit_desc):
-                    is_transfer = True
-
-                # Check for general transfer patterns
-                elif ("transfer" in debit_desc and "transfer" in credit_desc) or \
-                     ("interac" in debit_desc and "interac" in credit_desc):
-                    is_transfer = True
-
-                # Check for bank-to-bank transfers (e.g., Tangerine <-> NBC)
-                elif ("tangerine" in debit_desc and "tangerine" in credit_desc) or \
-                     ("nbc" in debit_desc and "nbc" in credit_desc) or \
-                     ("bnc" in debit_desc and "bnc" in credit_desc):
-                    is_transfer = True
-
-                if is_transfer:
-                    transfers.append((debit.get("id"), credit.get("id")))
-                    # Remove matched credit from list to avoid double-matching
-                    credits.remove(credit)
-                    break
+                transfers.append((id_a, id_b))
+                paired_transaction_ids.add(id_a)
+                paired_transaction_ids.add(id_b)
+                break
 
     return transfers
 
@@ -219,13 +260,21 @@ async def get_expenses(
                 detail="Account not found"
             )
         
+        if not _is_expense_account(account):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Expenses are limited to checking and credit card accounts"
+            )
+
         query = {"account_id": account_id}
         if category:
             query["category"] = category
         
         expenses = db.find("expenses", query)
     else:
-        user_accounts = db.find("accounts", {"user_id": current_user.id})
+        user_accounts = _get_expense_accounts(db, current_user.id)
+        if not user_accounts:
+            return []
         account_ids = [acc["id"] for acc in user_accounts]
         
         expenses = []
@@ -251,9 +300,21 @@ async def get_expense_summary(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Account not found"
             )
+        if not _is_expense_account(account):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Expenses are limited to checking and credit card accounts"
+            )
         expenses = db.find("expenses", {"account_id": account_id})
     else:
-        user_accounts = db.find("accounts", {"user_id": current_user.id})
+        user_accounts = _get_expense_accounts(db, current_user.id)
+        if not user_accounts:
+            return {
+                "total_expenses": 0,
+                "by_category": {},
+                "by_month": {},
+                "expense_count": 0
+            }
         account_ids = [acc["id"] for acc in user_accounts]
         
         expenses = []
@@ -493,9 +554,19 @@ async def get_monthly_expense_comparison(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Account not found"
             )
+        if not _is_expense_account(account):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Expenses are limited to checking and credit card accounts"
+            )
         expenses = db.find("expenses", {"account_id": account_id})
     else:
-        user_accounts = db.find("accounts", {"user_id": current_user.id})
+        user_accounts = _get_expense_accounts(db, current_user.id)
+        if not user_accounts:
+            return {
+                "months": [],
+                "total_months": 0
+            }
         account_ids = [acc["id"] for acc in user_accounts]
 
         expenses = []

@@ -1,5 +1,9 @@
 from pydantic_settings import BaseSettings
 from typing import List, Optional
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_DATA_PATH = BASE_DIR / "data"
 
 class Settings(BaseSettings):
     SECRET_KEY: str = "your-secret-key-change-this-in-production"
@@ -8,8 +12,8 @@ class Settings(BaseSettings):
 
     # Database configuration
     DATABASE_URL: Optional[str] = None  # PostgreSQL URL
-    DATABASE_PATH: str = "./data"  # Legacy JSON path (kept for backward compatibility)
-    LEGACY_DATA_PATH: str = "./data"  # Path to JSON files for migration
+    DATABASE_PATH: str = str(DEFAULT_DATA_PATH)  # Legacy JSON path (kept for backward compatibility)
+    LEGACY_DATA_PATH: str = str(DEFAULT_DATA_PATH)  # Path to JSON files for migration
 
     UPLOAD_PATH: str = "./uploads"
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173,http://localhost,http://localhost:80,http://app.home,https://app.home"
