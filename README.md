@@ -28,12 +28,15 @@ A comprehensive investment portfolio management platform that allows users to im
   - Category trend analysis over time
   - Accurate totals excluding inter-account transfers
 - **Real-time Market Data**: Automatic price updates using Yahoo Finance API
+- **🆕 PostgreSQL Migration**: Seamless migration from JSON to PostgreSQL with automatic data import on first login
 
 ## Tech Stack
 
 ### Backend
 - **FastAPI**: Modern Python web framework
-- **JSON Database**: Lightweight file-based storage
+- **PostgreSQL**: Production-ready relational database (with automatic migration from JSON)
+- **SQLAlchemy**: ORM for database operations
+- **JSON Database**: Legacy file-based storage (for backward compatibility)
 - **yfinance**: Real-time market data
 - **pdfplumber**: PDF parsing for statements
 - **pandas**: Data processing and analysis
@@ -49,6 +52,7 @@ A comprehensive investment portfolio management platform that allows users to im
 ### Infrastructure
 - **Docker**: Containerization
 - **Docker Compose**: Multi-container orchestration
+- **PostgreSQL 16**: Production database with automatic migration
 - **Nginx**: Frontend web server and reverse proxy
 
 ## Quick Start
@@ -70,9 +74,16 @@ cd InvestingPlataform
 cp .env.example .env
 ```
 
-3. Edit `.env` and set a secure SECRET_KEY:
+3. Edit `.env` and configure:
 ```bash
+# Security
 SECRET_KEY=your-very-long-random-secret-key-here
+
+# PostgreSQL Database (production-ready)
+DATABASE_URL=postgresql://portfolio_user:your_secure_password@postgres:5432/portfolio
+POSTGRES_USER=portfolio_user
+POSTGRES_PASSWORD=your_secure_password
+POSTGRES_DB=portfolio
 ```
 
 4. Build and start the containers:
@@ -84,6 +95,27 @@ docker-compose up --build
 - Frontend: http://localhost
 - Backend API: http://localhost:8000
 - API Documentation: http://localhost:8000/docs
+
+**Note**: On first login, your data will be automatically migrated from JSON to PostgreSQL if you have existing data.
+
+### Migrating Existing JSON Data
+
+If you have existing JSON data and want to migrate to PostgreSQL:
+
+1. **Backup your data**:
+```bash
+cp -r backend/data backend/data_backup
+```
+
+2. **Configure PostgreSQL** in `.env` (see step 3 above)
+
+3. **Start the application** - PostgreSQL will initialize automatically
+
+4. **Login** - Your data will be automatically migrated on first login
+
+5. **Verify** - Check that all your accounts, transactions, and expenses are visible
+
+See [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md) for detailed migration guide and troubleshooting.
 
 ### Development Setup (Without Docker)
 

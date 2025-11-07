@@ -1,5 +1,7 @@
 from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import logging
 from app.config import settings
 from app.api import (
     auth,
@@ -12,10 +14,37 @@ from app.api import (
     dashboard
 )
 
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle startup and shutdown events."""
+    # Startup
+    logger.info("Starting Investment Portfolio Management API")
+
+    if settings.use_postgres:
+        logger.info("Initializing PostgreSQL database...")
+        from app.database.postgres_db import init_db
+        init_db(settings.DATABASE_URL)
+        logger.info("PostgreSQL database initialized")
+    else:
+        logger.info("Using JSON database (legacy mode)")
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down...")
+    if settings.use_postgres:
+        from app.database.postgres_db import close_db
+        close_db()
+
+
 app = FastAPI(
     title="Investment Portfolio Management API",
     description="API for managing investment portfolios and tracking expenses",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 api_router = APIRouter(prefix="/api")
