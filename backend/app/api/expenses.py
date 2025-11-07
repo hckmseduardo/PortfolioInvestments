@@ -589,6 +589,24 @@ async def convert_transactions_to_expenses(
         txns = db.find("transactions", {"account_id": acc_id})
         transactions.extend([t for t in txns if t.get("type") in ["withdrawal", "fee"]])
 
+    transaction_by_id = {
+        txn.get("id"): txn
+        for txn in transactions
+        if txn.get("id")
+    }
+
+    transfer_expense_keys = set()
+    for txn_id in transfer_transaction_ids:
+        txn = transaction_by_id.get(txn_id)
+        if not txn:
+            continue
+        transfer_expense_keys.add((
+            txn.get("account_id"),
+            txn.get("date"),
+            abs(txn.get("total", 0)),
+            txn.get("description")
+        ))
+
     # Get existing expenses to avoid duplicates and preserve manual categorizations
     existing_expenses = []
     for acc_id in account_ids:
@@ -610,6 +628,33 @@ async def convert_transactions_to_expenses(
             exp.get("description")
         )
         existing_expense_keys.add(key)
+
+    # Remove stale expenses that correspond to transactions now identified as transfers
+    transfer_expenses_removed = 0
+    if transfer_transaction_ids:
+        for exp in list(existing_expenses):
+            txn_id = exp.get("transaction_id")
+            key = (
+                exp.get("account_id"),
+                exp.get("date"),
+                exp.get("amount"),
+                exp.get("description")
+            )
+
+            matches_transfer = False
+            if txn_id and txn_id in transfer_transaction_ids:
+                matches_transfer = True
+            elif key in transfer_expense_keys:
+                matches_transfer = True
+
+            if matches_transfer:
+                db.delete("expenses", {"id": exp["id"]})
+                transfer_expenses_removed += 1
+                if txn_id:
+                    existing_by_txn_id.pop(txn_id, None)
+                if key in existing_expense_keys:
+                    existing_expense_keys.remove(key)
+                existing_expenses.remove(exp)
 
     # Convert transactions to expenses (excluding transfers)
     expenses_created = 0
@@ -683,9 +728,15 @@ async def convert_transactions_to_expenses(
         expenses_created += 1
 
     return {
-        "message": f"Converted {expenses_created} new transactions to expenses, updated {expenses_updated} existing expenses ({transfers_skipped} transfers excluded)",
+        "message": (
+            f"Converted {expenses_created} new transactions to expenses, "
+            f"updated {expenses_updated} existing expenses "
+            f"({transfers_skipped} transfers excluded, "
+            f"{transfer_expenses_removed} transfer expenses removed)"
+        ),
         "expenses_created": expenses_created,
         "expenses_updated": expenses_updated,
         "transfers_excluded": transfers_skipped,
+        "transfer_expenses_removed": transfer_expenses_removed,
         "transactions_processed": len(transactions)
     }
