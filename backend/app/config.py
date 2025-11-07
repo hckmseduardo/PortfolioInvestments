@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "portfolio_user"
     POSTGRES_PASSWORD: str = "portfolio_pass_change_in_production"
 
+    # Background job / Redis configuration
+    REDIS_URL: str = "redis://redis:6379/0"
+    EXPENSE_QUEUE_NAME: str = "expense_conversion"
+    EXPENSE_JOB_TIMEOUT: int = 1800  # 30 minutes
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]

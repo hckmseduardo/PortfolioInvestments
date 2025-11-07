@@ -185,7 +185,11 @@ export const expensesAPI = {
   deleteCategory: (id) => api.delete(`/expenses/categories/${id}`),
   initDefaultCategories: () => api.post('/expenses/categories/init-defaults'),
   convertTransactions: (accountId = null) =>
-    api.post('/expenses/convert-transactions', accountId ? { params: { account_id: accountId } } : {}),
+    api.post('/expenses/convert-transactions', null, {
+      params: accountId ? { account_id: accountId } : {}
+    }),
+  getConversionJobStatus: (jobId) =>
+    api.get(`/expenses/convert-transactions/jobs/${jobId}`),
 };
 
 export const importAPI = {

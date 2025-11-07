@@ -18,6 +18,7 @@ A comprehensive investment portfolio management platform that allows users to im
   - Convert checking and credit card transactions to expenses automatically
   - Smart transfer detection: Automatically identifies and excludes transfers between accounts
   - Credit card payment matching: Links payments from checking to credit card accounts
+  - **Background expense conversion worker**: Imports now run asynchronously with live status updates
   - Smart auto-categorization with machine learning from your history
   - **Manual category persistence**: Manually assigned categories are preserved when reimporting statements
   - Inline category editing with color-coded tags
@@ -88,6 +89,8 @@ POSTGRES_DB=portfolio
 PGADMIN_DEFAULT_EMAIL=admin@example.com
 PGADMIN_DEFAULT_PASSWORD=supersecurepassword
 PGADMIN_PORT=5050
+# Redis / background jobs
+REDIS_URL=redis://redis:6379/0
 ```
 
 4. Build and start the containers:
@@ -100,9 +103,11 @@ docker-compose up --build
 - Backend API: http://localhost:8000
 - API Documentation: http://localhost:8000/docs
 - pgAdmin (PostgreSQL explorer): http://localhost:5050 (or the port set in `PGADMIN_PORT`)
+- Redis is embedded automatically for background jobs; no manual action required.
 
 **Note**: On first login, your data will be automatically migrated from JSON to PostgreSQL if you have existing data.
 
+### Exploring PostgreSQL Data with pgAdmin
 ### Exploring PostgreSQL Data with pgAdmin
 
 1. Ensure `PGADMIN_DEFAULT_EMAIL`, `PGADMIN_DEFAULT_PASSWORD`, and `PGADMIN_PORT` are set in your `.env`.
@@ -115,6 +120,16 @@ docker-compose up --build
    - **Maintenance DB**: value from `POSTGRES_DB` (default `portfolio`)
    - **Username / Password**: values from `POSTGRES_USER` / `POSTGRES_PASSWORD`
 5. Once connected, you can browse schemas, tables, and run SQL queries directly against the PostgreSQL data.
+
+### Background Expense Conversion Jobs
+
+1. A Redis instance (`redis` service) and a dedicated worker container (`expense-worker`) are part of the docker-compose stack.
+2. When you click “Import from Transactions” in the Expenses page, the backend enqueues a job instead of blocking the request.
+3. The frontend shows the live status (`queued`, `starting`, `converting_transactions`, etc.) while the worker processes data.
+4. Once the job finishes, the page automatically refreshes the expense charts. If a job fails, the UI surfaces the error.
+5. You can query job status manually via:
+   - `POST /api/expenses/convert-transactions` → returns `job_id`
+   - `GET /api/expenses/convert-transactions/jobs/{job_id}` → returns status/result/error
 
 ### Migrating Existing JSON Data
 
