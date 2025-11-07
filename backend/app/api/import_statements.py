@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Body
 from typing import List, Optional, Dict
 import os
 import aiofiles
 from pathlib import Path
 import logging
 from datetime import datetime
+from pydantic import BaseModel
+from rq.exceptions import NoSuchJobError
 from app.models.schemas import User, Statement
 from app.api.auth import get_current_user
 from app.database.json_db import get_db
@@ -12,14 +14,88 @@ from app.parsers.wealthsimple_parser import WealthsimpleParser
 from app.parsers.tangerine_parser import TangerineParser
 from app.parsers.nbc_parser import NBCParser
 from app.config import settings
+from app.services.job_queue import enqueue_statement_job, get_job_info
 
 router = APIRouter(prefix="/import", tags=["import"])
 logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {'.pdf', '.csv', '.xlsx', '.xls', '.qfx', '.ofx'}
 
+
+class StatementAccountChangeRequest(BaseModel):
+    account_id: str
+
+
+class ReprocessAllRequest(BaseModel):
+    account_id: Optional[str] = None
+
+
 def allowed_file(filename: str) -> bool:
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
+
+
+def _coerce_datetime(value):
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        normalized = value.replace("Z", "+00:00") if value.endswith("Z") else value
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_number(value):
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.replace(",", "").strip()
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
+def compute_statement_metrics(statement_id: str, db):
+    if not statement_id:
+        return {
+            "transaction_first_date": None,
+            "transaction_last_date": None,
+            "credit_volume": 0,
+            "debit_volume": 0,
+        }
+
+    transactions = db.find("transactions", {"statement_id": statement_id})
+    first_date = None
+    last_date = None
+    credit_volume = 0.0
+    debit_volume = 0.0
+
+    for txn in transactions:
+        txn_date = _coerce_datetime(txn.get("date"))
+        if txn_date:
+            if first_date is None or txn_date < first_date:
+                first_date = txn_date
+            if last_date is None or txn_date > last_date:
+                last_date = txn_date
+
+        total_value = _coerce_number(txn.get("total"))
+        if total_value is None:
+            continue
+
+        if total_value > 0:
+            credit_volume += total_value
+        elif total_value < 0:
+            debit_volume += abs(total_value)
+
+    return {
+        "transaction_first_date": first_date.isoformat() if first_date else None,
+        "transaction_last_date": last_date.isoformat() if last_date else None,
+        "credit_volume": round(credit_volume, 2),
+        "debit_volume": round(debit_volume, 2),
+    }
 
 def recalculate_positions_from_transactions(account_id: str, db):
     transactions = db.find("transactions", {"account_id": account_id})
@@ -190,6 +266,10 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
         )
 
     transactions_created = 0
+    transaction_first_date = None
+    transaction_last_date = None
+    credit_volume = 0.0
+    debit_volume = 0.0
     for transaction_data in parsed_data.get('transactions', []):
         if transaction_data.get('type') is None:
             continue
@@ -201,6 +281,20 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
             transaction_doc["statement_id"] = statement_id
         db.insert("transactions", transaction_doc)
         transactions_created += 1
+
+        txn_date = _coerce_datetime(transaction_data.get('date'))
+        if txn_date:
+            if transaction_first_date is None or txn_date < transaction_first_date:
+                transaction_first_date = txn_date
+            if transaction_last_date is None or txn_date > transaction_last_date:
+                transaction_last_date = txn_date
+
+        total_value = transaction_data.get('total')
+        if isinstance(total_value, (int, float)):
+            if total_value > 0:
+                credit_volume += total_value
+            elif total_value < 0:
+                debit_volume += abs(total_value)
 
     dividends_created = 0
     for dividend_data in parsed_data.get('dividends', []):
@@ -219,7 +313,11 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
         "account_id": account_id,
         "positions_created": positions_created,
         "transactions_created": transactions_created,
-        "dividends_created": dividends_created
+        "dividends_created": dividends_created,
+        "transaction_first_date": transaction_first_date.isoformat() if transaction_first_date else None,
+        "transaction_last_date": transaction_last_date.isoformat() if transaction_last_date else None,
+        "credit_volume": round(credit_volume, 2),
+        "debit_volume": round(debit_volume, 2)
     }
 
 @router.post("/statement")
@@ -272,7 +370,11 @@ async def import_statement(
         "uploaded_at": datetime.now().isoformat(),
         "positions_count": 0,
         "transactions_count": 0,
-        "dividends_count": 0
+        "dividends_count": 0,
+        "transaction_first_date": None,
+        "transaction_last_date": None,
+        "credit_volume": 0,
+        "debit_volume": 0
     }
     statement = db.insert("statements", statement_doc)
 
@@ -303,50 +405,38 @@ async def process_statement(
         )
 
     db.update("statements", statement_id, {
-        "status": "processing",
-        "processed_at": None
+        "status": "queued",
+        "processed_at": None,
+        "error_message": None
     })
 
-    try:
-        result = process_statement_file(
-            statement['file_path'],
-            statement.get('account_id'),
-            db,
-            current_user,
-            statement_id
-        )
+    job = enqueue_statement_job(
+        user_id=current_user.id,
+        statement_id=statement_id,
+        action="process",
+    )
 
-        db.update("statements", statement_id, {
-            "status": "completed",
-            "processed_at": datetime.now().isoformat(),
-            "account_id": result["account_id"],
-            "positions_count": result["positions_created"],
-            "transactions_count": result["transactions_created"],
-            "dividends_count": result["dividends_created"]
-        })
-
-        return {
-            "message": "Statement processed successfully",
-            "statement_id": statement_id,
-            **result
-        }
-
-    except Exception as e:
-        logger.error(f"Error processing file: {str(e)}", exc_info=True)
-        db.update("statements", statement_id, {
-            "status": "failed",
-            "processed_at": datetime.now().isoformat(),
-            "error_message": str(e)
-        })
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing file: {str(e)}"
-        )
+    return {
+        "message": "Statement queued for processing",
+        "statement_id": statement_id,
+        "job_id": job.id
+    }
 
 @router.get("/statements", response_model=List[Statement])
 async def list_statements(current_user: User = Depends(get_current_user)):
     db = get_db()
     statements = db.find("statements", {"user_id": current_user.id})
+    accounts = db.find("accounts", {"user_id": current_user.id})
+    account_lookup = {acc["id"]: acc for acc in accounts}
+
+    for statement in statements:
+        account = account_lookup.get(statement.get("account_id"))
+        if account:
+            statement["account_label"] = account.get("label") or account.get("account_number")
+            statement["account_institution"] = account.get("institution")
+        else:
+            statement["account_label"] = None
+            statement["account_institution"] = None
     return statements
 
 @router.post("/statements/{statement_id}/reprocess")
@@ -370,55 +460,25 @@ async def reprocess_statement(
         )
 
     db.update("statements", statement_id, {
-        "status": "processing",
+        "status": "queued",
         "processed_at": None,
         "error_message": None
     })
 
-    try:
-        # Only delete transactions and dividends that belong to this specific statement
-        if statement.get('account_id'):
-            db.delete_many("transactions", {"statement_id": statement_id})
-            db.delete_many("dividends", {"statement_id": statement_id})
-            # Don't delete positions - they will be recalculated from all transactions
+    job = enqueue_statement_job(
+        user_id=current_user.id,
+        statement_id=statement_id,
+        action="reprocess",
+    )
 
-        result = process_statement_file(
-            statement['file_path'],
-            statement.get('account_id'),
-            db,
-            current_user,
-            statement_id
-        )
-
-        db.update("statements", statement_id, {
-            "status": "completed",
-            "processed_at": datetime.now().isoformat(),
-            "account_id": result["account_id"],
-            "positions_count": result["positions_created"],
-            "transactions_count": result["transactions_created"],
-            "dividends_count": result["dividends_created"],
-            "error_message": None
-        })
-
-        return {
-            "message": "Statement reprocessed successfully",
-            "statement_id": statement_id,
-            **result
-        }
-
-    except Exception as e:
-        logger.error(f"Error reprocessing file: {str(e)}", exc_info=True)
-        db.update("statements", statement_id, {
-            "status": "failed",
-            "processed_at": datetime.now().isoformat(),
-            "error_message": str(e)
-        })
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error reprocessing file: {str(e)}"
-        )
+    return {
+        "message": "Statement queued for reprocessing",
+        "statement_id": statement_id,
+        "job_id": job.id
+    }
 @router.post("/statements/reprocess-all")
 async def reprocess_all_statements(
+    payload: Optional[ReprocessAllRequest] = Body(None),
     current_user: User = Depends(get_current_user)
 ):
     db = get_db()
@@ -430,84 +490,33 @@ async def reprocess_all_statements(
             detail="No statements found"
         )
 
-    # Sort statements by uploaded_at date (oldest first)
-    statements = sorted(statements, key=lambda x: x.get('uploaded_at', ''))
-
-    # Delete all transactions, dividends, and positions for this user's accounts
-    user_accounts = db.find("accounts", {"user_id": current_user.id})
-    for account in user_accounts:
-        db.delete_many("transactions", {"account_id": account['id']})
-        db.delete_many("dividends", {"account_id": account['id']})
-        db.delete_many("positions", {"account_id": account['id']})
-
-    results = []
-    failed_statements = []
+    account_scope = payload.account_id if payload else None
+    if account_scope:
+        statements = [stmt for stmt in statements if stmt.get("account_id") == account_scope]
+        if not statements:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No statements found for selected account"
+            )
 
     for statement in statements:
-        if not os.path.exists(statement['file_path']):
-            failed_statements.append({
-                "statement_id": statement['id'],
-                "filename": statement['filename'],
-                "error": "File not found on disk"
-            })
-            db.update("statements", statement['id'], {
-                "status": "failed",
-                "error_message": "File not found on disk"
-            })
-            continue
-
         db.update("statements", statement['id'], {
-            "status": "processing",
+            "status": "queued",
             "processed_at": None,
             "error_message": None
         })
 
-        try:
-            result = process_statement_file(
-                statement['file_path'],
-                statement.get('account_id'),
-                db,
-                current_user,
-                statement['id']
-            )
-
-            db.update("statements", statement['id'], {
-                "status": "completed",
-                "processed_at": datetime.now().isoformat(),
-                "account_id": result.get("account_id"),
-                "positions_count": result.get("positions_created"),
-                "transactions_count": result.get("transactions_created"),
-                "dividends_count": result.get("dividends_created"),
-                "error_message": None
-            })
-
-            results.append({
-                "statement_id": statement['id'],
-                "filename": statement['filename'],
-                "status": "success",
-                **result
-            })
-
-        except Exception as e:
-            logger.error(f"Error reprocessing statement {statement['id']}: {str(e)}", exc_info=True)
-            db.update("statements", statement['id'], {
-                "status": "failed",
-                "processed_at": datetime.now().isoformat(),
-                "error_message": str(e)
-            })
-            failed_statements.append({
-                "statement_id": statement['id'],
-                "filename": statement['filename'],
-                "error": str(e)
-            })
+    job = enqueue_statement_job(
+        user_id=current_user.id,
+        statement_id=None,
+        action="reprocess_all",
+        account_scope=account_scope,
+    )
 
     return {
-        "message": f"Reprocessed {len(results)} statements successfully",
-        "total_statements": len(statements),
-        "successful": len(results),
-        "failed": len(failed_statements),
-        "results": results,
-        "failed_statements": failed_statements
+        "message": f"Queued reprocess for {len(statements)} statement(s)",
+        "job_id": job.id,
+        "count": len(statements)
     }
 
 @router.delete("/statements/{statement_id}")
@@ -535,3 +544,84 @@ async def delete_statement(
     db.delete("statements", statement_id)
 
     return {"message": "Statement and associated data deleted successfully"}
+
+
+@router.get("/jobs/{job_id}")
+async def get_statement_job_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        info = get_job_info(job_id)
+    except NoSuchJobError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found"
+        )
+
+    job_meta = info.get("meta") or {}
+    if job_meta.get("user_id") != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found"
+        )
+
+    return info
+@router.put("/statements/{statement_id}/account")
+async def change_statement_account(
+    statement_id: str,
+    payload: StatementAccountChangeRequest,
+    current_user: User = Depends(get_current_user)
+):
+    db = get_db()
+    statement = db.find_one("statements", {"id": statement_id, "user_id": current_user.id})
+
+    if not statement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Statement not found"
+        )
+
+    new_account = db.find_one("accounts", {"id": payload.account_id, "user_id": current_user.id})
+    if not new_account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found"
+        )
+
+    if statement.get("account_id") == payload.account_id:
+        return {"message": "Statement already assigned to this account"}
+
+    # Remove existing transactions/dividends tied to this statement
+    db.delete_many("transactions", {"statement_id": statement_id})
+    db.delete_many("dividends", {"statement_id": statement_id})
+    old_account_id = statement.get("account_id")
+    if old_account_id:
+        recalculate_positions_from_transactions(old_account_id, db)
+
+    db.update("statements", statement_id, {
+        "account_id": payload.account_id,
+        "status": "queued",
+        "processed_at": None,
+        "error_message": None,
+        "positions_count": 0,
+        "transactions_count": 0,
+        "dividends_count": 0,
+        "transaction_first_date": None,
+        "transaction_last_date": None,
+        "credit_volume": 0,
+        "debit_volume": 0
+    })
+
+    job = enqueue_statement_job(
+        user_id=current_user.id,
+        statement_id=statement_id,
+        action="reprocess",
+        target_account_id=payload.account_id
+    )
+
+    return {
+        "message": "Account updated. Statement queued for reprocessing.",
+        "job_id": job.id,
+        "statement_id": statement_id
+    }

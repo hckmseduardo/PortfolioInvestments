@@ -125,7 +125,9 @@ docker-compose up --build
    - **Username / Password**: values from `POSTGRES_USER` / `POSTGRES_PASSWORD`
 5. Once connected, you can browse schemas, tables, and run SQL queries directly against the PostgreSQL data.
 
-### Background Expense Conversion Jobs
+### Background Jobs
+
+#### Expense Conversion Worker
 
 1. A Redis instance (`redis` service) and a dedicated worker container (`expense-worker`) are part of the docker-compose stack.
 2. When you click “Import from Transactions” in the Expenses page, the backend enqueues a job instead of blocking the request.
@@ -134,6 +136,14 @@ docker-compose up --build
 5. You can query job status manually via:
    - `POST /api/expenses/convert-transactions` → returns `job_id`
    - `GET /api/expenses/convert-transactions/jobs/{job_id}` → returns status/result/error
+
+#### Statement Processing Worker
+
+1. A second worker container (`statement-worker`) listens to the `statement_processing` queue (configurable via `STATEMENT_QUEUE_NAME`).
+2. Uploading a statement stores the file immediately; clicking **Process** or **Reprocess** enqueues a background job handled by the worker so the API never blocks.
+3. You can reprocess every statement (optionally scoped to one account) via `POST /api/import/statements/reprocess-all`. The worker clears prior transactions/dividends/positions for the impacted account(s) and rebuilds them in chronological order.
+4. If a file was assigned to the wrong account, `PUT /api/import/statements/{id}/account` reassigns it, removes the previously imported transactions, recalculates the old account’s positions, and queues a fresh job for the new account.
+5. Monitor any statement job via `GET /api/import/jobs/{job_id}`. Responses include queue status plus the worker result payload (counts, per-account summaries, or failure trace) so the UI can poll and surface progress.
 
 ### Migrating Existing JSON Data
 
@@ -299,7 +309,9 @@ npm run dev
 
 ### Positions
 - `GET /positions` - List all positions
+- `GET /positions/aggregated` - Get aggregated positions (supports filters: account_id, as_of_date, instrument_type_id, instrument_industry_id)
 - `GET /positions/summary` - Get portfolio summary
+- `GET /positions/industry-breakdown` - Get market value grouped by industry (same optional filters as aggregated)
 - `POST /positions` - Create position
 - `PUT /positions/{id}` - Update position
 - `POST /positions/refresh-prices` - Refresh market prices
@@ -340,7 +352,23 @@ npm run dev
 - `GET /import/statements` - List all uploaded statements
 - `POST /import/statements/{id}/process` - Process uploaded statement
 - `POST /import/statements/{id}/reprocess` - Reprocess statement
+- `POST /import/statements/reprocess-all` - Rebuild statements for every file (optionally restricted to one account)
+- `PUT /import/statements/{id}/account` - Reassign the statement to another account and queue reprocessing
 - `DELETE /import/statements/{id}` - Delete statement
+- `GET /import/jobs/{job_id}` - Poll statement processing job status/result
+
+### Instruments & Classifications
+- `GET /instruments/types` - List instrument types for the current user
+- `POST /instruments/types` - Create a new instrument type (with color)
+- `PUT /instruments/types/{id}` - Update an instrument type
+- `DELETE /instruments/types/{id}` - Delete an instrument type (existing classifications fall back to unassigned)
+- `GET /instruments/industries` - List instrument industries for the current user
+- `POST /instruments/industries` - Create a new instrument industry (with color)
+- `PUT /instruments/industries/{id}` - Update an instrument industry
+- `DELETE /instruments/industries/{id}` - Delete an instrument industry
+- `GET /instruments/classifications` - List ticker classifications (type & industry)
+- `PUT /instruments/classifications/{ticker}` - Assign/Update the type and industry for a ticker
+- `DELETE /instruments/classifications/{ticker}` - Remove stored classification for a ticker
 
 ## Data Models
 

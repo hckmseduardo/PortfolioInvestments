@@ -11,7 +11,8 @@ from app.api import (
     expenses,
     dividends,
     transactions,
-    dashboard
+    dashboard,
+    instruments,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,7 @@ api_router.include_router(expenses.router)
 api_router.include_router(dividends.router)
 api_router.include_router(transactions.router)
 api_router.include_router(dashboard.router)
+api_router.include_router(instruments.router)
 
 app.include_router(api_router)
 

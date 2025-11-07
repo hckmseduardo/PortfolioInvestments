@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Container,
   Paper,
@@ -7,12 +7,6 @@ import {
   Box,
   Alert,
   LinearProgress,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   IconButton,
   Chip,
   Dialog,
@@ -20,17 +14,60 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
-  Tooltip,
-  Collapse,
   MenuItem,
   TextField,
   List,
   ListItem,
   ListItemText,
-  ListItemSecondaryAction
+  ListItemSecondaryAction,
+  Select,
+  CircularProgress,
+  Grid,
+  Card,
+  CardContent,
+  CardHeader,
+  CardActions,
+  Divider,
+  Stack,
+  Snackbar,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  ToggleButton,
+  ToggleButtonGroup
 } from '@mui/material';
-import { CloudUpload, Refresh, Delete, Description, PlayArrow, Error as ErrorIcon, Close, RefreshOutlined } from '@mui/icons-material';
+import {
+  CloudUpload,
+  Refresh,
+  Delete,
+  Description,
+  PlayArrow,
+  Close,
+  RefreshOutlined,
+  ArrowUpward,
+  ArrowDownward,
+  ViewModule,
+  TableRows
+} from '@mui/icons-material';
 import { importAPI, accountsAPI } from '../services/api';
+
+const STATEMENT_COLUMNS = [
+  { id: 'filename', label: 'File', numeric: false },
+  { id: 'account_label', label: 'Account', numeric: false },
+  { id: 'status', label: 'Status', numeric: false },
+  { id: 'uploaded_at', label: 'Uploaded', numeric: false },
+  { id: 'transaction_first_date', label: 'First Transaction', numeric: false },
+  { id: 'transaction_last_date', label: 'Last Transaction', numeric: false },
+  { id: 'file_size', label: 'Size', numeric: true },
+  { id: 'positions_count', label: 'Positions', numeric: true },
+  { id: 'transactions_count', label: 'Transactions', numeric: true },
+  { id: 'dividends_count', label: 'Dividends', numeric: true },
+  { id: 'credit_volume', label: 'Credits', numeric: true },
+  { id: 'debit_volume', label: 'Debits', numeric: true }
+];
 
 const Import = () => {
   const [files, setFiles] = useState([]);
@@ -46,6 +83,119 @@ const Import = () => {
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [reprocessingAll, setReprocessingAll] = useState(false);
+  const [sortConfig, setSortConfig] = useState({ column: 'uploaded_at', direction: 'desc' });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState('cards');
+  const [periodStart, setPeriodStart] = useState('');
+  const [periodEnd, setPeriodEnd] = useState('');
+  const jobPollers = useRef({});
+  const [toasts, setToasts] = useState([]);
+  const previousStatusesRef = useRef({});
+  const hasLoadedOnceRef = useRef(false);
+
+  const enqueueToast = useCallback((message, severity = 'success') => {
+    if (!message) return;
+    setToasts((prev) => {
+      const toast = {
+        key: `${Date.now()}-${Math.random()}`,
+        message,
+        severity
+      };
+      const next = [...prev, toast];
+      // Avoid unbounded growth; keep the most recent 10 notifications queued.
+      if (next.length > 10) {
+        next.splice(0, next.length - 10);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToastClose = useCallback((key) => {
+    setToasts((prev) => prev.filter((toast) => toast.key !== key));
+  }, []);
+
+  const clearProcessingFlag = useCallback((statementId) => {
+    setProcessingStatements((prev) => {
+      if (!prev.has(statementId)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.delete(statementId);
+      return next;
+    });
+  }, []);
+
+  const trackStatusTransitions = useCallback((nextStatements) => {
+    if (!Array.isArray(nextStatements)) {
+      return;
+    }
+
+    if (!hasLoadedOnceRef.current) {
+      previousStatusesRef.current = nextStatements.reduce((acc, stmt) => {
+        acc[stmt.id] = stmt.status;
+        return acc;
+      }, {});
+      hasLoadedOnceRef.current = true;
+      return;
+    }
+
+    const prevStatuses = previousStatusesRef.current;
+
+    nextStatements.forEach((stmt) => {
+      const prevStatus = prevStatuses[stmt.id];
+      if (!prevStatus) {
+        return;
+      }
+
+      if (prevStatus !== 'completed' && stmt.status === 'completed') {
+        enqueueToast(`${stmt.filename} processed successfully.`, 'success');
+        clearProcessingFlag(stmt.id);
+      } else if (prevStatus !== 'failed' && stmt.status === 'failed') {
+        const message = stmt.error_message
+          ? `${stmt.filename} failed: ${stmt.error_message}`
+          : `${stmt.filename} failed to process.`;
+        enqueueToast(message, 'error');
+        clearProcessingFlag(stmt.id);
+      }
+    });
+
+    previousStatusesRef.current = nextStatements.reduce((acc, stmt) => {
+      acc[stmt.id] = stmt.status;
+      return acc;
+    }, {});
+  }, [enqueueToast, clearProcessingFlag]);
+
+  const loadStatements = useCallback(async () => {
+    try {
+      const response = await importAPI.getStatements();
+      setStatements(response.data);
+      trackStatusTransitions(response.data);
+      setProcessingStatements((prev) => {
+        const activeIds = new Set(response.data.map((statement) => statement.id));
+        let mutated = false;
+        const next = new Set();
+        prev.forEach((id) => {
+          if (activeIds.has(id)) {
+            next.add(id);
+          } else {
+            mutated = true;
+          }
+        });
+        return mutated ? next : prev;
+      });
+    } catch (err) {
+      console.error('Failed to load statements:', err);
+    }
+  }, [trackStatusTransitions]);
+
+  const loadAccounts = useCallback(async () => {
+    try {
+      const response = await accountsAPI.getAll();
+      setAccounts(response.data);
+    } catch (err) {
+      console.error('Failed to load accounts:', err);
+    }
+  }, []);
 
   useEffect(() => {
     loadStatements();
@@ -54,25 +204,212 @@ const Import = () => {
       loadStatements();
     }, 3000);
     return () => clearInterval(interval);
+  }, [loadStatements, loadAccounts]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(jobPollers.current).forEach((timer) => clearInterval(timer));
+      jobPollers.current = {};
+    };
   }, []);
 
-  const loadAccounts = async () => {
-    try {
-      const response = await accountsAPI.getAll();
-      setAccounts(response.data);
-    } catch (err) {
-      console.error('Failed to load accounts:', err);
+  const clearJobPoller = useCallback((jobId) => {
+    const timer = jobPollers.current[jobId];
+    if (timer) {
+      clearInterval(timer);
+      delete jobPollers.current[jobId];
     }
-  };
+  }, []);
 
-  const loadStatements = async () => {
-    try {
-      const response = await importAPI.getStatements();
-      setStatements(response.data);
-    } catch (err) {
-      console.error('Failed to load statements:', err);
+  const startJobPolling = useCallback(
+    (jobId, { statementIds = [], onComplete } = {}) => {
+      if (!jobId) return;
+
+      const poll = async () => {
+        try {
+          const response = await importAPI.getJobStatus(jobId);
+          const status = response.data.status;
+
+          if (status === 'finished') {
+            clearJobPoller(jobId);
+            setProcessingStatements((prev) => {
+              const next = new Set(prev);
+              statementIds.forEach((id) => next.delete(id));
+              return next;
+            });
+            setReprocessingAll(false);
+            onComplete?.(response.data.result);
+            await loadStatements();
+          } else if (status === 'failed') {
+            clearJobPoller(jobId);
+            setProcessingStatements((prev) => {
+              const next = new Set(prev);
+              statementIds.forEach((id) => next.delete(id));
+              return next;
+            });
+            setReprocessingAll(false);
+            setError('Statement job failed. Check statement status for details.');
+            await loadStatements();
+          }
+        } catch (err) {
+          console.error('Error polling statement job:', err);
+        }
+      };
+
+      poll();
+      jobPollers.current[jobId] = setInterval(poll, 4000);
+    },
+    [clearJobPoller, loadStatements]
+  );
+
+  const accountMap = useMemo(() => {
+    const map = {};
+    accounts.forEach((account) => {
+      map[account.id] = account;
+    });
+    return map;
+  }, [accounts]);
+
+  const getAccountDisplayName = useCallback(
+    (statement) => {
+      if (statement.account_label) {
+        return statement.account_label;
+      }
+      const account = accountMap[statement.account_id];
+      if (!account) {
+        return statement.account_id ? 'Unknown account' : 'Unassigned';
+      }
+      return (
+        account.label ||
+        `${account.institution || ''} ${account.account_number || ''}`.trim()
+      );
+    },
+    [accountMap]
+  );
+
+  const getColumnValue = useCallback(
+    (statement, columnId) => {
+      switch (columnId) {
+        case 'account_label':
+          return getAccountDisplayName(statement);
+        case 'uploaded_at':
+          return statement.uploaded_at;
+        case 'transaction_first_date':
+          return statement.transaction_first_date;
+        case 'transaction_last_date':
+          return statement.transaction_last_date;
+        case 'file_size':
+          return statement.file_size || 0;
+        case 'positions_count':
+        case 'transactions_count':
+        case 'dividends_count':
+        case 'credit_volume':
+        case 'debit_volume':
+          return statement[columnId] || 0;
+        case 'status':
+          return statement.status || '';
+        default:
+          return statement[columnId] || '';
+      }
+    },
+    [getAccountDisplayName]
+  );
+
+  const intersectsSelectedPeriod = useCallback((statement) => {
+    if (!periodStart && !periodEnd) {
+      return true;
     }
-  };
+
+    const firstDate = statement.transaction_first_date ? new Date(statement.transaction_first_date) : null;
+    const lastDate = statement.transaction_last_date ? new Date(statement.transaction_last_date) : null;
+
+    if (!firstDate && !lastDate) {
+      return false;
+    }
+
+    const statementStart = firstDate || lastDate;
+    const statementEnd = lastDate || firstDate;
+
+    let rangeStart = periodStart ? new Date(periodStart) : null;
+    let rangeEnd = periodEnd ? new Date(periodEnd) : null;
+
+    if (rangeStart && rangeEnd && rangeStart > rangeEnd) {
+      const temp = rangeStart;
+      rangeStart = rangeEnd;
+      rangeEnd = temp;
+    }
+
+    if (rangeStart && statementEnd < rangeStart) {
+      return false;
+    }
+
+    if (rangeEnd && statementStart > rangeEnd) {
+      return false;
+    }
+
+    return true;
+  }, [periodStart, periodEnd]);
+
+  const sortedFilteredStatements = useMemo(() => {
+    let data = [...statements];
+
+    if (selectedAccountId) {
+      data = data.filter((statement) => statement.account_id === selectedAccountId);
+    }
+
+    if (periodStart || periodEnd) {
+      data = data.filter(intersectsSelectedPeriod);
+    }
+
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (normalizedQuery) {
+      data = data.filter((statement) => {
+        const valuesToCheck = [
+          statement.filename,
+          getAccountDisplayName(statement),
+          statement.status,
+          statement.uploaded_at,
+          statement.file_size,
+          statement.positions_count,
+          statement.transactions_count,
+          statement.dividends_count,
+          statement.transaction_first_date,
+          statement.transaction_last_date,
+          statement.credit_volume,
+          statement.debit_volume
+        ];
+
+        return valuesToCheck
+          .some((value) =>
+            String(value ?? '')
+              .toLowerCase()
+              .includes(normalizedQuery)
+          );
+      });
+    }
+
+    data.sort((a, b) => {
+      const direction = sortConfig.direction === 'asc' ? 1 : -1;
+      const valueA = getColumnValue(a, sortConfig.column);
+      const valueB = getColumnValue(b, sortConfig.column);
+
+      if (['uploaded_at', 'transaction_first_date', 'transaction_last_date'].includes(sortConfig.column)) {
+        const dateA = valueA ? new Date(valueA).getTime() : 0;
+        const dateB = valueB ? new Date(valueB).getTime() : 0;
+        if (dateA === dateB) return 0;
+        return dateA > dateB ? direction : -direction;
+      }
+
+      if (typeof valueA === 'number' && typeof valueB === 'number') {
+        if (valueA === valueB) return 0;
+        return valueA > valueB ? direction : -direction;
+      }
+
+      return String(valueA).localeCompare(String(valueB)) * direction;
+    });
+
+    return data;
+  }, [statements, selectedAccountId, periodStart, periodEnd, intersectsSelectedPeriod, searchQuery, sortConfig, getColumnValue, getAccountDisplayName]);
 
   const validateFile = (file) => {
     const validTypes = [
@@ -176,19 +513,19 @@ const Import = () => {
     setResult(null);
     try {
       const response = await importAPI.processStatement(statementId);
-      setResult({
-        message: 'Statement processed successfully!',
-        ...response.data
-      });
-      loadStatements();
+      const jobId = response.data?.job_id;
+      if (jobId) {
+        startJobPolling(jobId, {
+          statementIds: [statementId],
+          onComplete: () => setResult({ message: 'Statement processed successfully!' })
+        });
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to process statement');
-      loadStatements();
-    } finally {
       setProcessingStatements(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(statementId);
-        return newSet;
+        const next = new Set(prev);
+        next.delete(statementId);
+        return next;
       });
     }
   };
@@ -199,43 +536,132 @@ const Import = () => {
     setResult(null);
     try {
       const response = await importAPI.reprocessStatement(statementId);
-      setResult({
-        message: 'Statement reprocessed successfully!',
-        ...response.data
-      });
-      loadStatements();
+      const jobId = response.data?.job_id;
+      if (jobId) {
+        startJobPolling(jobId, {
+          statementIds: [statementId],
+          onComplete: () => setResult({ message: 'Statement reprocessed successfully!' })
+        });
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to reprocess statement');
-      loadStatements();
-    } finally {
       setProcessingStatements(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(statementId);
-        return newSet;
+        const next = new Set(prev);
+        next.delete(statementId);
+        return next;
       });
     }
   };
 
   const handleReprocessAll = async () => {
-    if (!window.confirm('This will delete all existing transactions, dividends, and positions, then reprocess all statements from oldest to latest. Are you sure?')) {
+    const scopeText = selectedAccountId ? ' for the selected account' : ''
+    if (!window.confirm(`This will delete all existing transactions, dividends, and positions${scopeText}, then reprocess the statements from oldest to latest. Are you sure?`)) {
       return;
     }
 
+    const statementsInScope = statements.filter((statement) =>
+      selectedAccountId ? statement.account_id === selectedAccountId : true
+    );
+    if (statementsInScope.length === 0) {
+      setError('No statements available for the selected account.');
+      return;
+    }
+
+    const scopedIds = statementsInScope.map((statement) => statement.id);
     setReprocessingAll(true);
+    setError('');
+    setResult(null);
+    setProcessingStatements((prev) => {
+      const next = new Set(prev);
+      scopedIds.forEach((id) => next.add(id));
+      return next;
+    });
+
+    try {
+      const response = await importAPI.reprocessAllStatements(selectedAccountId || null);
+      const jobId = response.data?.job_id;
+      if (jobId) {
+        startJobPolling(jobId, {
+          statementIds: scopedIds,
+          onComplete: (result) => {
+            if (result) {
+              setResult({
+                message: response.data.message,
+                details: `Successfully processed: ${result.successful}, Failed: ${result.failed}`
+              });
+            } else {
+              setResult({ message: response.data.message });
+            }
+          }
+        });
+      } else {
+        setReprocessingAll(false);
+        setProcessingStatements((prev) => {
+          const next = new Set(prev);
+          scopedIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to reprocess all statements');
+      setReprocessingAll(false);
+      setProcessingStatements((prev) => {
+        const next = new Set(prev);
+        scopedIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } finally {
+      // Actual reset handled when job completes
+    }
+  };
+
+  const handleSortColumnChange = (columnId) => {
+    setSortConfig((prev) => ({
+      column: columnId,
+      direction: prev.column === columnId ? prev.direction : 'asc'
+    }));
+  };
+
+  const toggleSortDirection = () => {
+    setSortConfig((prev) => ({
+      ...prev,
+      direction: prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const handleSearchChange = (value) => {
+    setSearchQuery(value);
+  };
+
+  const handleViewModeChange = (event, nextView) => {
+    if (nextView) {
+      setViewMode(nextView);
+    }
+  };
+
+  const handleAccountChange = async (statementId, newAccountId) => {
+    if (!newAccountId) return;
+
+    setProcessingStatements(prev => new Set(prev).add(statementId));
     setError('');
     setResult(null);
 
     try {
-      const response = await importAPI.reprocessAllStatements();
-      setResult({
-        message: response.data.message,
-        details: `Successfully processed: ${response.data.successful}, Failed: ${response.data.failed}`
-      });
-      loadStatements();
+      const response = await importAPI.changeStatementAccount(statementId, newAccountId);
+      const jobId = response.data?.job_id;
+      if (jobId) {
+        startJobPolling(jobId, {
+          statementIds: [statementId],
+          onComplete: () => setResult({ message: 'Account updated and statement queued for reprocessing.' })
+        });
+      }
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to reprocess all statements');
-    } finally {
-      setReprocessingAll(false);
+      setError(err.response?.data?.detail || 'Failed to change statement account');
+      setProcessingStatements(prev => {
+        const next = new Set(prev);
+        next.delete(statementId);
+        return next;
+      });
     }
   };
 
@@ -267,11 +693,36 @@ const Import = () => {
   };
 
   const formatDate = (dateString) => {
+    if (!dateString) {
+      return '—';
+    }
     return new Date(dateString).toLocaleString();
   };
 
+  const formatDateOnly = (dateString) => {
+    if (!dateString) {
+      return '—';
+    }
+    return new Date(dateString).toLocaleDateString();
+  };
+
   const formatFileSize = (bytes) => {
-    return (bytes / 1024).toFixed(2) + ' KB';
+    if (!bytes) {
+      return '0 KB';
+    }
+    return `${(bytes / 1024).toFixed(2)} KB`;
+  };
+
+  const formatCurrency = (value) => {
+    if (value === null || value === undefined) {
+      return '—';
+    }
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: 'CAD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value);
   };
 
   const getStatusColor = (status) => {
@@ -279,6 +730,7 @@ const Import = () => {
       case 'completed':
         return 'success';
       case 'processing':
+      case 'queued':
         return 'info';
       case 'pending':
         return 'warning';
@@ -295,6 +747,8 @@ const Import = () => {
         return 'Processed';
       case 'processing':
         return 'Processing...';
+      case 'queued':
+        return 'Queued';
       case 'pending':
         return 'Pending';
       case 'failed':
@@ -303,10 +757,6 @@ const Import = () => {
         return status;
     }
   };
-
-  const filteredStatements = selectedAccountId
-    ? statements.filter(statement => statement.account_id === selectedAccountId)
-    : statements;
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -473,119 +923,401 @@ const Import = () => {
           </Box>
         </Box>
 
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Filename</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Uploaded</TableCell>
-                <TableCell>Size</TableCell>
-                <TableCell>Positions</TableCell>
-                <TableCell>Transactions</TableCell>
-                <TableCell>Dividends</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {statements.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} align="center">
-                    <Typography variant="body2" color="textSecondary">
-                      No statements uploaded yet
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : filteredStatements.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} align="center">
-                    <Typography variant="body2" color="textSecondary">
-                      No statements for the selected account
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredStatements.map((statement) => (
-                  <React.Fragment key={statement.id}>
-                    <TableRow>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <Description sx={{ mr: 1, color: 'text.secondary' }} />
-                          {statement.filename}
-                        </Box>
-                      </TableCell>
-                      <TableCell>
+        <Stack spacing={2} sx={{ mb: 3 }}>
+          <Stack
+            direction={{ xs: 'column', lg: 'row' }}
+            spacing={2}
+            alignItems={{ xs: 'stretch', lg: 'center' }}
+          >
+            <TextField
+              select
+              label="Sort by"
+              value={sortConfig.column}
+              onChange={(event) => handleSortColumnChange(event.target.value)}
+              sx={{ minWidth: { xs: '100%', md: 200 } }}
+            >
+              {STATEMENT_COLUMNS.map((column) => (
+                <MenuItem key={column.id} value={column.id}>
+                  {column.label}
+                </MenuItem>
+              ))}
+            </TextField>
+            <Button
+              variant="outlined"
+              startIcon={sortConfig.direction === 'asc' ? <ArrowUpward /> : <ArrowDownward />}
+              onClick={toggleSortDirection}
+              sx={{ alignSelf: { xs: 'stretch', md: 'center' } }}
+            >
+              {sortConfig.direction === 'asc' ? 'Ascending' : 'Descending'}
+            </Button>
+            <ToggleButtonGroup
+              value={viewMode}
+              exclusive
+              onChange={handleViewModeChange}
+              size="small"
+              sx={{ alignSelf: { xs: 'stretch', md: 'center' } }}
+            >
+              <ToggleButton value="cards" aria-label="Card view">
+                <ViewModule fontSize="small" sx={{ mr: 1 }} />
+                Cards
+              </ToggleButton>
+              <ToggleButton value="table" aria-label="Table view">
+                <TableRows fontSize="small" sx={{ mr: 1 }} />
+                Table
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Stack>
+
+          <Stack
+            direction={{ xs: 'column', lg: 'row' }}
+            spacing={2}
+            alignItems={{ xs: 'stretch', lg: 'center' }}
+          >
+            <TextField
+              label="Search statements"
+              placeholder="Filter by filename, status, totals, dates..."
+              value={searchQuery}
+              onChange={(event) => handleSearchChange(event.target.value)}
+              fullWidth
+              size="small"
+            />
+            <TextField
+              label="Period start"
+              type="date"
+              value={periodStart}
+              onChange={(event) => setPeriodStart(event.target.value)}
+              InputLabelProps={{ shrink: true }}
+              size="small"
+              sx={{ minWidth: { xs: '100%', md: 200 } }}
+            />
+            <TextField
+              label="Period end"
+              type="date"
+              value={periodEnd}
+              onChange={(event) => setPeriodEnd(event.target.value)}
+              InputLabelProps={{ shrink: true }}
+              size="small"
+              sx={{ minWidth: { xs: '100%', md: 200 } }}
+            />
+          </Stack>
+        </Stack>
+
+        {statements.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <Typography variant="body2" color="textSecondary">
+              No statements uploaded yet
+            </Typography>
+          </Box>
+        ) : sortedFilteredStatements.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 6 }}>
+            <Typography variant="body2" color="textSecondary">
+              No statements match the selected filters
+            </Typography>
+          </Box>
+        ) : viewMode === 'cards' ? (
+          <Grid container spacing={3}>
+            {sortedFilteredStatements.map((statement) => {
+              const isProcessing = processingStatements.has(statement.id);
+              return (
+                <Grid item xs={12} sm={6} lg={4} key={statement.id}>
+                  <Card
+                    variant="outlined"
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      height: '100%'
+                    }}
+                  >
+                    <CardHeader
+                      avatar={<Description color="action" />}
+                      title={statement.filename}
+                      subheader={`Uploaded ${formatDate(statement.uploaded_at)}`}
+                      action={
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <Chip
                             label={getStatusLabel(statement.status)}
                             color={getStatusColor(statement.status)}
                             size="small"
                           />
-                          {statement.status === 'failed' && statement.error_message && (
-                            <Tooltip title={statement.error_message}>
-                              <ErrorIcon color="error" fontSize="small" />
-                            </Tooltip>
-                          )}
+                          {isProcessing && <CircularProgress size={16} />}
                         </Box>
-                      </TableCell>
-                      <TableCell>{formatDate(statement.uploaded_at)}</TableCell>
-                      <TableCell>{formatFileSize(statement.file_size)}</TableCell>
-                      <TableCell>{statement.positions_count}</TableCell>
-                      <TableCell>{statement.transactions_count}</TableCell>
-                      <TableCell>{statement.dividends_count}</TableCell>
-                      <TableCell align="right">
-                        {statement.status === 'pending' && (
-                          <Tooltip title="Process statement">
+                      }
+                    />
+                    <Divider />
+                    <CardContent>
+                      <Stack spacing={2}>
+                        <Box>
+                          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                            Account
+                          </Typography>
+                          <Select
+                            size="small"
+                            fullWidth
+                            value={statement.account_id || ''}
+                            displayEmpty
+                            onChange={(event) => handleAccountChange(statement.id, event.target.value)}
+                            disabled={isProcessing || reprocessingAll}
+                          >
+                            <MenuItem value="">
+                              <em>Unassigned</em>
+                            </MenuItem>
+                            {accounts.map((account) => (
+                              <MenuItem key={account.id} value={account.id}>
+                                {account.label || `${account.institution || ''} ${account.account_number || ''}`.trim()}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </Box>
+
+                        <Grid container spacing={2}>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary">
+                              File Size
+                            </Typography>
+                            <Typography variant="subtitle1">{formatFileSize(statement.file_size)}</Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary">
+                              Positions Imported
+                            </Typography>
+                            <Typography variant="subtitle1">{statement.positions_count || 0}</Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary">
+                              Transactions Imported
+                            </Typography>
+                            <Typography variant="subtitle1">{statement.transactions_count || 0}</Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary">
+                              Dividends Imported
+                            </Typography>
+                            <Typography variant="subtitle1">{statement.dividends_count || 0}</Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary">
+                              First Transaction
+                            </Typography>
+                            <Typography variant="subtitle1">
+                              {formatDateOnly(statement.transaction_first_date)}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary">
+                              Last Transaction
+                            </Typography>
+                            <Typography variant="subtitle1">
+                              {formatDateOnly(statement.transaction_last_date)}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary">
+                              Credit Volume
+                            </Typography>
+                            <Typography variant="subtitle1">{formatCurrency(statement.credit_volume)}</Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary">
+                              Debit Volume
+                            </Typography>
+                            <Typography variant="subtitle1">{formatCurrency(statement.debit_volume)}</Typography>
+                          </Grid>
+                        </Grid>
+                      </Stack>
+                    </CardContent>
+                    {statement.status === 'failed' && statement.error_message && (
+                      <Box sx={{ px: 2, pb: 1 }}>
+                        <Alert severity="error" sx={{ mb: 1 }}>
+                          <Typography variant="caption">
+                            <strong>Error:</strong> {statement.error_message}
+                          </Typography>
+                        </Alert>
+                      </Box>
+                    )}
+                    <CardActions sx={{ mt: 'auto', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                        {statement.status === 'pending' ? (
+                          <Button
+                            startIcon={<PlayArrow />}
+                            size="small"
+                            variant="contained"
+                            onClick={() => handleProcess(statement.id)}
+                            disabled={isProcessing || reprocessingAll}
+                          >
+                            Process
+                          </Button>
+                        ) : (
+                          <Button
+                            startIcon={<Refresh />}
+                            size="small"
+                            variant="outlined"
+                            onClick={() => handleReprocess(statement.id)}
+                            disabled={isProcessing || reprocessingAll}
+                          >
+                            Reprocess
+                          </Button>
+                        )}
+                        <Button
+                          startIcon={<Delete />}
+                          size="small"
+                          color="error"
+                          variant="text"
+                          onClick={() => handleDeleteClick(statement)}
+                          disabled={loading || isProcessing || reprocessingAll}
+                        >
+                          Delete
+                        </Button>
+                      </Box>
+                    </CardActions>
+                  </Card>
+                </Grid>
+              );
+            })}
+          </Grid>
+        ) : (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  {STATEMENT_COLUMNS.map((column) => (
+                    <TableCell key={column.id} align={column.numeric ? 'right' : 'left'}>
+                      {column.label}
+                    </TableCell>
+                  ))}
+                  <TableCell align="right">Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {sortedFilteredStatements.map((statement) => {
+                  const isProcessing = processingStatements.has(statement.id);
+                  return (
+                    <React.Fragment key={statement.id}>
+                      <TableRow hover>
+                        {STATEMENT_COLUMNS.map((column) => {
+                          const { id, numeric } = column;
+                          let content = statement[id] || '';
+
+                          switch (id) {
+                            case 'filename':
+                              content = (
+                                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                  <Description sx={{ mr: 1, color: 'text.secondary' }} />
+                                  {statement.filename}
+                                </Box>
+                              );
+                              break;
+                            case 'account_label':
+                              content = (
+                                <Select
+                                  size="small"
+                                  fullWidth
+                                  value={statement.account_id || ''}
+                                  displayEmpty
+                                  onChange={(event) => handleAccountChange(statement.id, event.target.value)}
+                                  disabled={isProcessing || reprocessingAll}
+                                >
+                                  <MenuItem value="">
+                                    <em>Unassigned</em>
+                                  </MenuItem>
+                                  {accounts.map((account) => (
+                                    <MenuItem key={account.id} value={account.id}>
+                                      {account.label || `${account.institution || ''} ${account.account_number || ''}`.trim()}
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+                              );
+                              break;
+                            case 'status':
+                              content = (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <Chip
+                                    label={getStatusLabel(statement.status)}
+                                    color={getStatusColor(statement.status)}
+                                    size="small"
+                                  />
+                                  {isProcessing && <CircularProgress size={14} />}
+                                </Box>
+                              );
+                              break;
+                            case 'uploaded_at':
+                              content = formatDate(statement.uploaded_at);
+                              break;
+                            case 'transaction_first_date':
+                              content = formatDateOnly(statement.transaction_first_date);
+                              break;
+                            case 'transaction_last_date':
+                              content = formatDateOnly(statement.transaction_last_date);
+                              break;
+                            case 'file_size':
+                              content = formatFileSize(statement.file_size);
+                              break;
+                            case 'positions_count':
+                            case 'transactions_count':
+                            case 'dividends_count':
+                              content = statement[id] || 0;
+                              break;
+                            case 'credit_volume':
+                            case 'debit_volume':
+                              content = formatCurrency(statement[id]);
+                              break;
+                            default:
+                              content = statement[id] || '';
+                          }
+
+                          return (
+                            <TableCell key={id} align={numeric ? 'right' : 'left'}>
+                              {content}
+                            </TableCell>
+                          );
+                        })}
+                        <TableCell align="right">
+                          {statement.status === 'pending' ? (
                             <IconButton
                               color="primary"
+                              size="small"
                               onClick={() => handleProcess(statement.id)}
-                              disabled={processingStatements.has(statement.id)}
+                              disabled={isProcessing || reprocessingAll}
                             >
-                              <PlayArrow />
+                              <PlayArrow fontSize="small" />
                             </IconButton>
-                          </Tooltip>
-                        )}
-                        {(statement.status === 'completed' || statement.status === 'failed') && (
-                          <Tooltip title="Reprocess statement">
+                          ) : (
                             <IconButton
                               color="primary"
+                              size="small"
                               onClick={() => handleReprocess(statement.id)}
-                              disabled={processingStatements.has(statement.id)}
+                              disabled={isProcessing || reprocessingAll}
                             >
-                              <Refresh />
+                              <Refresh fontSize="small" />
                             </IconButton>
-                          </Tooltip>
-                        )}
-                        <Tooltip title="Delete statement">
+                          )}
                           <IconButton
                             color="error"
+                            size="small"
                             onClick={() => handleDeleteClick(statement)}
-                            disabled={loading || processingStatements.has(statement.id)}
+                            disabled={loading || isProcessing || reprocessingAll}
                           >
-                            <Delete />
+                            <Delete fontSize="small" />
                           </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                    {statement.status === 'failed' && statement.error_message && (
-                      <TableRow>
-                        <TableCell colSpan={8} sx={{ py: 0, borderBottom: 'none' }}>
-                          <Collapse in={true}>
+                        </TableCell>
+                      </TableRow>
+                      {statement.status === 'failed' && statement.error_message && (
+                        <TableRow>
+                          <TableCell colSpan={STATEMENT_COLUMNS.length + 1} sx={{ py: 0, borderBottom: 'none' }}>
                             <Alert severity="error" sx={{ my: 1 }}>
                               <Typography variant="caption">
                                 <strong>Error:</strong> {statement.error_message}
                               </Typography>
                             </Alert>
-                          </Collapse>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </React.Fragment>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
       </Paper>
 
       <Dialog
@@ -607,6 +1339,30 @@ const Import = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {toasts.slice(0, 2).map((toast, index) => (
+        <Snackbar
+          key={toast.key}
+          open
+          autoHideDuration={5000}
+          onClose={(event, reason) => {
+            if (reason === 'clickaway') return;
+            handleToastClose(toast.key);
+          }}
+          anchorOrigin={{
+            vertical: 'bottom',
+            horizontal: index % 2 === 0 ? 'left' : 'right'
+          }}
+        >
+          <Alert
+            onClose={() => handleToastClose(toast.key)}
+            severity={toast.severity}
+            sx={{ width: '100%' }}
+          >
+            {toast.message}
+          </Alert>
+        </Snackbar>
+      ))}
     </Container>
   );
 };

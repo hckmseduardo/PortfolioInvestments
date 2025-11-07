@@ -22,7 +22,7 @@ import {
   Refresh
 } from '@mui/icons-material';
 import { accountsAPI, positionsAPI, dividendsAPI, dashboardAPI } from '../services/api';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import RGL, { WidthProvider } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -39,6 +39,7 @@ const DEFAULT_TILE_LAYOUT = [
   { i: 'dividends', x: 9, y: 0, w: 3, h: 1 },
   { i: 'total_gains', x: 0, y: 1, w: 3, h: 1 },
   { i: 'accounts_summary', x: 3, y: 1, w: 3, h: 1 },
+  { i: 'industry_breakdown', x: 6, y: 1, w: 3, h: 2 },
   { i: 'performance', x: 0, y: 2, w: 8, h: 3 },
   { i: 'accounts_list', x: 8, y: 2, w: 4, h: 3 }
 ];
@@ -55,6 +56,7 @@ const TILE_CONSTRAINTS = {
   dividends: { minW: 2, minH: 1 },
   total_gains: { minW: 2, minH: 1 },
   accounts_summary: { minW: 2, minH: 1 },
+  industry_breakdown: { minW: 3, minH: 2 },
   performance: { minW: 6, minH: 2 },
   accounts_list: { minW: 4, minH: 2 }
 };
@@ -213,6 +215,7 @@ const Dashboard = () => {
   const [summary, setSummary] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [dividendSummary, setDividendSummary] = useState(null);
+  const [industryBreakdown, setIndustryBreakdown] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -256,15 +259,17 @@ const Dashboard = () => {
       setFetching(true);
       try {
         const asOfParam = valuationDate || undefined;
-        const [summaryRes, accountsRes, dividendsRes] = await Promise.all([
+        const [summaryRes, accountsRes, dividendsRes, industryRes] = await Promise.all([
           positionsAPI.getSummary(asOfParam),
           accountsAPI.getAll(),
-          dividendsAPI.getSummary(undefined, undefined, asOfParam)
+          dividendsAPI.getSummary(undefined, undefined, asOfParam),
+          positionsAPI.getIndustryBreakdown({ as_of_date: asOfParam })
         ]);
 
         setSummary(summaryRes.data);
         setAccounts(accountsRes.data);
         setDividendSummary(dividendsRes.data);
+        setIndustryBreakdown(industryRes.data || []);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
@@ -328,15 +333,17 @@ const Dashboard = () => {
       await positionsAPI.refreshPrices();
       // Refetch all data after refreshing prices
       const asOfParam = valuationDate || undefined;
-      const [summaryRes, accountsRes, dividendsRes] = await Promise.all([
+      const [summaryRes, accountsRes, dividendsRes, industryRes] = await Promise.all([
         positionsAPI.getSummary(asOfParam),
         accountsAPI.getAll(),
-        dividendsAPI.getSummary(undefined, undefined, asOfParam)
+        dividendsAPI.getSummary(undefined, undefined, asOfParam),
+        positionsAPI.getIndustryBreakdown({ as_of_date: asOfParam })
       ]);
 
       setSummary(summaryRes.data);
       setAccounts(accountsRes.data);
       setDividendSummary(dividendsRes.data);
+      setIndustryBreakdown(industryRes.data || []);
     } catch (error) {
       console.error('Error refreshing prices:', error);
     } finally {
@@ -417,6 +424,51 @@ const Dashboard = () => {
             color="info.main"
             subtitle={`${summary?.positions_count || 0} positions`}
           />
+        );
+      case 'industry_breakdown':
+        return (
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Typography
+              variant="caption"
+              color="textSecondary"
+              className="dashboard-tile-handle"
+              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
+            >
+              Industry Breakdown
+            </Typography>
+            {industryBreakdown.length === 0 ? (
+              <Typography color="textSecondary">Classify positions to view this chart.</Typography>
+            ) : (
+              <Box sx={{ flexGrow: 1, minHeight: ROW_HEIGHT * (layoutItem?.h || 2) - 60 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={industryBreakdown}
+                      dataKey="market_value"
+                      nameKey="industry_name"
+                      innerRadius="40%"
+                      outerRadius="70%"
+                      paddingAngle={2}
+                    >
+                      {industryBreakdown.map((slice) => (
+                        <Cell
+                          key={slice.industry_id || 'unclassified'}
+                          fill={slice.color || '#b0bec5'}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value, name, payload) => [
+                        formatCurrency(value),
+                        payload?.payload?.industry_name || name
+                      ]}
+                    />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </Box>
+            )}
+          </Paper>
         );
       case 'performance':
         return (

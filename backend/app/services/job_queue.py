@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 _redis_connection: Optional[Redis] = None
 _expense_queue: Optional[Queue] = None
 _price_queue: Optional[Queue] = None
+_statement_queue: Optional[Queue] = None
 
 
 def _get_redis_connection() -> Redis:
@@ -72,6 +73,57 @@ def enqueue_price_fetch_job(tickers: List[str], as_of_date: Optional[str] = None
         job_timeout=settings.PRICE_JOB_TIMEOUT,
     )
     logger.info("Enqueued price fetch job %s for %s tickers", job.id, len(tickers))
+    return job
+
+
+def get_statement_queue() -> Queue:
+    global _statement_queue
+    if _statement_queue is None:
+        _statement_queue = Queue(
+            settings.STATEMENT_QUEUE_NAME,
+            connection=_get_redis_connection(),
+            default_timeout=settings.STATEMENT_JOB_TIMEOUT,
+        )
+    return _statement_queue
+
+
+def enqueue_statement_job(
+    user_id: str,
+    statement_id: Optional[str],
+    action: str,
+    target_account_id: Optional[str] = None,
+    account_scope: Optional[str] = None,
+) -> Job:
+    from app.tasks.statements import run_statement_job
+
+    queue = get_statement_queue()
+    job = queue.enqueue(
+        run_statement_job,
+        action,
+        user_id,
+        statement_id,
+        target_account_id,
+        account_scope,
+        job_timeout=settings.STATEMENT_JOB_TIMEOUT,
+    )
+    job.meta = job.meta or {}
+    job.meta.update(
+        {
+            "user_id": user_id,
+            "statement_id": statement_id,
+            "action": action,
+            "target_account_id": target_account_id,
+            "account_scope": account_scope,
+        }
+    )
+    job.save_meta()
+    logger.info(
+        "Enqueued statement job %s for user %s (action=%s, statement=%s)",
+        job.id,
+        user_id,
+        action,
+        statement_id,
+    )
     return job
 
 

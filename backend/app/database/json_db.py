@@ -20,6 +20,9 @@ class JSONDatabase:
             'categories': self.db_path / 'categories.json',
             'statements': self.db_path / 'statements.json',
             'dashboard_layouts': self.db_path / 'dashboard_layouts.json',
+            'instrument_types': self.db_path / 'instrument_types.json',
+            'instrument_industries': self.db_path / 'instrument_industries.json',
+            'instrument_metadata': self.db_path / 'instrument_metadata.json',
         }
         
         for collection_file in self.collections.values():

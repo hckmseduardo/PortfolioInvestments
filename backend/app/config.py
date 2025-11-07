@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     EXPENSE_JOB_TIMEOUT: int = 1800  # 30 minutes
     PRICE_QUEUE_NAME: str = "price_fetch"
     PRICE_JOB_TIMEOUT: int = 600  # 10 minutes
+    STATEMENT_QUEUE_NAME: str = "statement_processing"
+    STATEMENT_JOB_TIMEOUT: int = 3600  # 60 minutes
     PRICE_FETCH_MAX_ATTEMPTS: int = 3
 
     # Market data providers

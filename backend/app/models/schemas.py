@@ -102,6 +102,13 @@ class AggregatedPosition(BaseModel):
     price_fetched_at: Optional[datetime] = None
     has_live_price: bool = False
     price_pending: bool = False
+    price_failed: bool = False
+    instrument_type_id: Optional[str] = None
+    instrument_type_name: Optional[str] = None
+    instrument_type_color: Optional[str] = None
+    instrument_industry_id: Optional[str] = None
+    instrument_industry_name: Optional[str] = None
+    instrument_industry_color: Optional[str] = None
 
 class TransactionBase(BaseModel):
     date: datetime
@@ -193,6 +200,58 @@ class DividendSummary(BaseModel):
     period_start: Optional[str] = None
     period_end: Optional[str] = None
 
+class InstrumentTypeBase(BaseModel):
+    name: str
+    color: str = "#8884d8"
+
+class InstrumentTypeCreate(InstrumentTypeBase):
+    pass
+
+class InstrumentType(InstrumentTypeBase):
+    id: str
+    user_id: str
+
+    class Config:
+        from_attributes = True
+
+class InstrumentIndustryBase(BaseModel):
+    name: str
+    color: str = "#82ca9d"
+
+class InstrumentIndustryCreate(InstrumentIndustryBase):
+    pass
+
+class InstrumentIndustry(InstrumentIndustryBase):
+    id: str
+    user_id: str
+
+    class Config:
+        from_attributes = True
+
+class InstrumentClassificationBase(BaseModel):
+    ticker: str
+    instrument_type_id: Optional[str] = None
+    instrument_industry_id: Optional[str] = None
+
+class InstrumentClassification(InstrumentClassificationBase):
+    id: str
+    user_id: str
+
+    class Config:
+        from_attributes = True
+
+class InstrumentClassificationUpdate(BaseModel):
+    instrument_type_id: Optional[str] = None
+    instrument_industry_id: Optional[str] = None
+
+class IndustryBreakdownSlice(BaseModel):
+    industry_id: Optional[str] = None
+    industry_name: str
+    color: str
+    market_value: float
+    percentage: float
+    position_count: int
+
 class StatementBase(BaseModel):
     filename: str
     file_path: str
@@ -208,11 +267,17 @@ class Statement(StatementBase):
     id: str
     user_id: str
     account_id: Optional[str] = None
+    account_label: Optional[str] = None
+    account_institution: Optional[str] = None
     uploaded_at: datetime
     processed_at: Optional[datetime] = None
     positions_count: int = 0
     transactions_count: int = 0
     dividends_count: int = 0
+    transaction_first_date: Optional[datetime] = None
+    transaction_last_date: Optional[datetime] = None
+    credit_volume: float = 0
+    debit_volume: float = 0
 
     class Config:
         from_attributes = True

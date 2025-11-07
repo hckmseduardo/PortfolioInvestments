@@ -16,6 +16,7 @@ DEFAULT_LAYOUT: List[dict[str, int]] = [
     {"id": "dividends", "x": 9, "y": 0, "w": 3, "h": 1},
     {"id": "total_gains", "x": 0, "y": 1, "w": 3, "h": 1},
     {"id": "accounts_summary", "x": 3, "y": 1, "w": 3, "h": 1},
+    {"id": "industry_breakdown", "x": 6, "y": 1, "w": 3, "h": 2},
     {"id": "performance", "x": 0, "y": 2, "w": 8, "h": 3},
     {"id": "accounts_list", "x": 8, "y": 2, "w": 4, "h": 3}
 ]

@@ -95,6 +95,27 @@ services:
       - LEGACY_DATA_PATH=/app/data
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
+      - QUEUE_LIST=${EXPENSE_QUEUE_LIST:-expense_conversion,price_fetch}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  statement-worker:
+    build: ./backend
+    container_name: portfolio-statement-worker
+    command: ["python", "worker.py"]
+    volumes:
+      - ./backend/data:/app/data
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-portfolio_user}:${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}@postgres:5432/${POSTGRES_DB:-portfolio}
+      - LEGACY_DATA_PATH=/app/data
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
+      - QUEUE_LIST=statement_processing
     depends_on:
       postgres:
         condition: service_healthy

@@ -8,7 +8,8 @@ from app.models.schemas import (
     PositionCreate,
     User,
     PortfolioSummary,
-    AggregatedPosition
+    AggregatedPosition,
+    IndustryBreakdownSlice,
 )
 from app.api.auth import get_current_user
 from app.database.json_db import get_db
@@ -19,6 +20,8 @@ from app.services import price_cache
 
 router = APIRouter(prefix="/positions", tags=["positions"])
 logger = logging.getLogger(__name__)
+UNCLASSIFIED_LABEL = "Unclassified"
+UNCLASSIFIED_COLOR = "#b0bec5"
 
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
@@ -216,7 +219,12 @@ def _aggregate_position_maps(position_maps: List[Dict[str, Dict[str, float]]]) -
     return result
 
 
-def _build_aggregated_positions(db, account_ids: List[str], as_of: Optional[datetime]) -> List[Dict[str, float]]:
+def _build_aggregated_positions(
+    db,
+    account_ids: List[str],
+    as_of: Optional[datetime],
+    user_id: Optional[str] = None
+) -> List[Dict[str, float]]:
     position_maps: List[Dict[str, Dict[str, float]]] = []
 
     if as_of:
@@ -298,11 +306,58 @@ def _build_aggregated_positions(db, account_ids: List[str], as_of: Optional[date
             if not position['price_failed']:
                 missing_tickers.append(ticker)
 
+    metadata_lookup: Dict[str, Dict] = {}
+    type_lookup: Dict[str, Dict] = {}
+    industry_lookup: Dict[str, Dict] = {}
+
+    if user_id:
+        for record in db.find("instrument_types", {"user_id": user_id}):
+            type_lookup[record["id"]] = record
+        for record in db.find("instrument_industries", {"user_id": user_id}):
+            industry_lookup[record["id"]] = record
+        for record in db.find("instrument_metadata", {"user_id": user_id}):
+            ticker_key = (record.get("ticker") or "").upper()
+            if ticker_key:
+                metadata_lookup[ticker_key] = record
+
+    for position in aggregated:
+        ticker_key = (position.get("ticker") or "").upper()
+        meta = metadata_lookup.get(ticker_key)
+        type_id = meta.get("instrument_type_id") if meta else None
+        industry_id = meta.get("instrument_industry_id") if meta else None
+        type_info = type_lookup.get(type_id) if type_id else None
+        industry_info = industry_lookup.get(industry_id) if industry_id else None
+
+        position["instrument_type_id"] = type_id
+        position["instrument_type_name"] = type_info.get("name") if type_info else None
+        position["instrument_type_color"] = type_info.get("color") if type_info else None
+        position["instrument_industry_id"] = industry_id
+        position["instrument_industry_name"] = industry_info.get("name") if industry_info else None
+        position["instrument_industry_color"] = industry_info.get("color") if industry_info else None
+
     if missing_tickers:
         unique = sorted({t.upper() for t in missing_tickers})
         enqueue_price_fetch_job(unique, as_of.isoformat() if as_of else None)
 
     return aggregated
+
+
+def _filter_positions_by_classification(
+    positions: List[Dict[str, float]],
+    instrument_type_id: Optional[str],
+    instrument_industry_id: Optional[str]
+) -> List[Dict[str, float]]:
+    if not instrument_type_id and not instrument_industry_id:
+        return positions
+
+    filtered: List[Dict[str, float]] = []
+    for position in positions:
+        if instrument_type_id and position.get("instrument_type_id") != instrument_type_id:
+            continue
+        if instrument_industry_id and position.get("instrument_industry_id") != instrument_industry_id:
+            continue
+        filtered.append(position)
+    return filtered
 
 @router.post("", response_model=Position)
 async def create_position(
@@ -327,6 +382,8 @@ async def create_position(
 async def get_aggregated_positions(
     account_id: Optional[str] = None,
     as_of_date: Optional[str] = None,
+    instrument_type_id: Optional[str] = None,
+    instrument_industry_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
     db = get_db()
@@ -355,8 +412,9 @@ async def get_aggregated_positions(
                 detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
             )
 
-    aggregated = _build_aggregated_positions(db, account_ids, as_of)
-    return [AggregatedPosition(**position) for position in aggregated]
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
+    return [AggregatedPosition(**position) for position in filtered]
 
 @router.get("", response_model=List[Position])
 async def get_positions(
@@ -385,14 +443,24 @@ async def get_positions(
 
 @router.get("/summary", response_model=PortfolioSummary)
 async def get_portfolio_summary(
+    account_id: Optional[str] = None,
     as_of_date: Optional[str] = None,
+    instrument_type_id: Optional[str] = None,
+    instrument_industry_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
     db = get_db()
-    
-    user_accounts = db.find("accounts", {"user_id": current_user.id})
+
+    if account_id:
+        account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+        if not account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+        user_accounts = [account]
+    else:
+        user_accounts = db.find("accounts", {"user_id": current_user.id})
+
     account_ids = [acc["id"] for acc in user_accounts]
-    
+
     if not account_ids:
         return PortfolioSummary(
             total_market_value=0.0,
@@ -412,15 +480,15 @@ async def get_portfolio_summary(
                 detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
             )
 
-    aggregated = _build_aggregated_positions(db, account_ids, as_of)
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
 
-    total_market_value = sum((pos.get("market_value") or 0) for pos in aggregated)
-    total_book_value = sum((pos.get("book_value") or 0) for pos in aggregated)
+    total_market_value = sum((pos.get("market_value") or 0) for pos in filtered)
+    total_book_value = sum((pos.get("book_value") or 0) for pos in filtered)
     total_gain_loss = total_market_value - total_book_value
     total_gain_loss_percent = (total_gain_loss / total_book_value * 100) if total_book_value > 0 else 0
-    positions_count = len([pos for pos in aggregated if pos.get("ticker") != "CASH"])
-    
-    
+    positions_count = len([pos for pos in filtered if pos.get("ticker") != "CASH"])
+
     return PortfolioSummary(
         total_market_value=total_market_value,
         total_book_value=total_book_value,
@@ -429,6 +497,72 @@ async def get_portfolio_summary(
         positions_count=positions_count,
         accounts_count=len(user_accounts)
     )
+
+
+@router.get("/industry-breakdown", response_model=List[IndustryBreakdownSlice])
+async def get_industry_breakdown(
+    account_id: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+    instrument_type_id: Optional[str] = None,
+    instrument_industry_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    db = get_db()
+
+    if account_id:
+        account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+        if not account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+        account_ids = [account_id]
+    else:
+        user_accounts = db.find("accounts", {"user_id": current_user.id})
+        account_ids = [acc["id"] for acc in user_accounts]
+
+    if not account_ids:
+        return []
+
+    as_of: Optional[datetime] = None
+    if as_of_date:
+        as_of = _parse_iso_datetime(as_of_date)
+        if not as_of:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
+            )
+
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
+
+    slices: Dict[str, Dict] = {}
+    total_market_value = 0.0
+
+    for position in filtered:
+        if position.get("ticker") == "CASH":
+            continue
+        market_value = float(position.get("market_value") or 0.0)
+        if market_value == 0:
+            continue
+        total_market_value += market_value
+        key = position.get("instrument_industry_id") or "__unclassified__"
+        entry = slices.setdefault(key, {
+            "industry_id": position.get("instrument_industry_id"),
+            "industry_name": position.get("instrument_industry_name") or UNCLASSIFIED_LABEL,
+            "color": position.get("instrument_industry_color") or UNCLASSIFIED_COLOR,
+            "market_value": 0.0,
+            "percentage": 0.0,
+            "position_count": 0
+        })
+        entry["market_value"] += market_value
+        entry["position_count"] += 1
+
+    if total_market_value <= 0:
+        return [IndustryBreakdownSlice(**entry) for entry in slices.values()]
+
+    for entry in slices.values():
+        entry["percentage"] = (entry["market_value"] / total_market_value) * 100
+
+    ordered = sorted(slices.values(), key=lambda item: item["market_value"], reverse=True)
+    return [IndustryBreakdownSlice(**entry) for entry in ordered]
 
 @router.put("/{position_id}", response_model=Position)
 async def update_position(

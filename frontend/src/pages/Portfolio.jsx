@@ -20,10 +20,17 @@ import {
   Stack,
   LinearProgress,
   Tooltip,
-  CircularProgress
+  CircularProgress,
+  Grid,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Divider
 } from '@mui/material';
-import { Refresh, ErrorOutline } from '@mui/icons-material';
-import { positionsAPI, accountsAPI } from '../services/api';
+import { Refresh, ErrorOutline, Add } from '@mui/icons-material';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
+import { positionsAPI, accountsAPI, instrumentsAPI } from '../services/api';
 
 const DATE_PRESETS = {
   CURRENT: 'current',
@@ -86,6 +93,17 @@ const Portfolio = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [summary, setSummary] = useState(null);
+  const [industrySlices, setIndustrySlices] = useState([]);
+  const [instrumentTypes, setInstrumentTypes] = useState([]);
+  const [instrumentIndustries, setInstrumentIndustries] = useState([]);
+  const [selectedTypeId, setSelectedTypeId] = useState('');
+  const [selectedIndustryId, setSelectedIndustryId] = useState('');
+  const [typeDialogOpen, setTypeDialogOpen] = useState(false);
+  const [industryDialogOpen, setIndustryDialogOpen] = useState(false);
+  const [typeForm, setTypeForm] = useState({ name: '', color: '#8884d8' });
+  const [industryForm, setIndustryForm] = useState({ name: '', color: '#82ca9d' });
+  const [classificationSaving, setClassificationSaving] = useState({});
   const hasLoadedOnce = useRef(false);
   const priceRefreshTimer = useRef(null);
 
@@ -93,6 +111,38 @@ const Portfolio = () => {
     () => computeValuationDate(datePreset, specificMonth, endOfYear),
     [datePreset, specificMonth, endOfYear]
   );
+  const loadInstrumentMetadata = useCallback(async () => {
+    try {
+      const [typesRes, industriesRes] = await Promise.all([
+        instrumentsAPI.getTypes(),
+        instrumentsAPI.getIndustries()
+      ]);
+      setInstrumentTypes(typesRes.data || []);
+      setInstrumentIndustries(industriesRes.data || []);
+    } catch (error) {
+      console.error('Error loading instrument metadata:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadInstrumentMetadata();
+  }, [loadInstrumentMetadata]);
+
+  const typeLookup = useMemo(() => {
+    const map = {};
+    instrumentTypes.forEach((item) => {
+      map[item.id] = item;
+    });
+    return map;
+  }, [instrumentTypes]);
+
+  const industryLookup = useMemo(() => {
+    const map = {};
+    instrumentIndustries.forEach((item) => {
+      map[item.id] = item;
+    });
+    return map;
+  }, [instrumentIndustries]);
 
   const fetchPositions = useCallback(async () => {
     if (!hasLoadedOnce.current) {
@@ -101,12 +151,30 @@ const Portfolio = () => {
       setFetching(true);
     }
     try {
-      const response = await positionsAPI.getAggregated(
-        selectedAccountId || undefined,
-        valuationDate || undefined
-      );
-      const data = response.data || [];
+      const classificationParams = {
+        instrument_type_id: selectedTypeId || undefined,
+        instrument_industry_id: selectedIndustryId || undefined
+      };
+      const [positionsRes, summaryRes, industryRes] = await Promise.all([
+        positionsAPI.getAggregated(
+          selectedAccountId || undefined,
+          valuationDate || undefined,
+          classificationParams
+        ),
+        positionsAPI.getSummary(valuationDate || undefined, {
+          account_id: selectedAccountId || undefined,
+          ...classificationParams
+        }),
+        positionsAPI.getIndustryBreakdown({
+          account_id: selectedAccountId || undefined,
+          as_of_date: valuationDate || undefined,
+          ...classificationParams
+        })
+      ]);
+      const data = positionsRes.data || [];
       setPositions(data);
+      setSummary(summaryRes.data || null);
+      setIndustrySlices(industryRes.data || []);
 
       const hasPending = data.some((position) => position.price_pending);
       if (hasPending) {
@@ -123,12 +191,14 @@ const Portfolio = () => {
     } catch (error) {
       console.error('Error fetching positions:', error);
       setPositions([]);
+      setSummary(null);
+      setIndustrySlices([]);
     } finally {
       hasLoadedOnce.current = true;
       setLoading(false);
       setFetching(false);
     }
-  }, [selectedAccountId, valuationDate]);
+  }, [selectedAccountId, selectedTypeId, selectedIndustryId, valuationDate]);
 
   useEffect(() => {
     fetchPositions();
@@ -178,7 +248,7 @@ const Portfolio = () => {
     return new Intl.NumberFormat('en-CA', {
       style: 'currency',
       currency: 'CAD'
-    }).format(value);
+    }).format(value ?? 0);
   };
 
   const formatNumber = (value, fractionDigits = 2) => {
@@ -188,7 +258,10 @@ const Portfolio = () => {
     }).format(value);
   };
 
-  const formatPercent = (value) => {
+  const formatPercent = (value = 0) => {
+    if (!Number.isFinite(value)) {
+      return '0.00%';
+    }
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
   };
 
@@ -239,6 +312,136 @@ const Portfolio = () => {
     }
   };
 
+  const summaryCards = useMemo(() => ([
+    {
+      title: 'Total Market Value',
+      value: summary ? formatCurrency(summary.total_market_value || 0) : '—',
+      subtitle: summary ? `${summary.positions_count} positions` : 'No data',
+      color: 'primary.main'
+    },
+    {
+      title: 'Total Book Value',
+      value: summary ? formatCurrency(summary.total_book_value || 0) : '—',
+      subtitle: summary ? `${summary.accounts_count} account(s)` : '',
+      color: 'text.secondary'
+    },
+    {
+      title: 'Total Gain / Loss',
+      value: summary ? formatCurrency(summary.total_gain_loss || 0) : '—',
+      subtitle: '',
+      color: (summary?.total_gain_loss || 0) >= 0 ? 'success.main' : 'error.main'
+    },
+    {
+      title: 'Gain / Loss %',
+      value: summary ? formatPercent(summary.total_gain_loss_percent || 0) : '—',
+      subtitle: '',
+      color: (summary?.total_gain_loss_percent || 0) >= 0 ? 'success.main' : 'error.main'
+    }
+  ]), [summary]);
+
+  const renderColorSwatch = (color) => (
+    <Box
+      component="span"
+      sx={{
+        width: 12,
+        height: 12,
+        borderRadius: '50%',
+        display: 'inline-flex',
+        mr: 1,
+        border: '1px solid rgba(0,0,0,0.12)',
+        backgroundColor: color || '#b0bec5'
+      }}
+    />
+  );
+
+  const handleClassificationUpdate = useCallback(async (position, changes) => {
+    const ticker = position?.ticker;
+    if (!ticker) return;
+    setClassificationSaving((prev) => ({ ...prev, [ticker]: true }));
+    try {
+      const payload = {
+        instrument_type_id: changes.instrument_type_id !== undefined
+          ? changes.instrument_type_id || null
+          : position.instrument_type_id || null,
+        instrument_industry_id: changes.instrument_industry_id !== undefined
+          ? changes.instrument_industry_id || null
+          : position.instrument_industry_id || null
+      };
+      await instrumentsAPI.updateClassification(ticker, payload);
+      setPositions((prev) =>
+        prev.map((item) => {
+          if (item.ticker !== ticker) {
+            return item;
+          }
+          const next = { ...item };
+          if (changes.instrument_type_id !== undefined) {
+            const typeInfo = typeLookup[changes.instrument_type_id] || null;
+            next.instrument_type_id = changes.instrument_type_id || null;
+            next.instrument_type_name = typeInfo?.name || null;
+            next.instrument_type_color = typeInfo?.color || null;
+          }
+          if (changes.instrument_industry_id !== undefined) {
+            const industryInfo = industryLookup[changes.instrument_industry_id] || null;
+            next.instrument_industry_id = changes.instrument_industry_id || null;
+            next.instrument_industry_name = industryInfo?.name || null;
+            next.instrument_industry_color = industryInfo?.color || null;
+          }
+          return next;
+        })
+      );
+      fetchPositions();
+    } catch (error) {
+      console.error('Error updating classification:', error);
+    } finally {
+      setClassificationSaving((prev) => {
+        const next = { ...prev };
+        delete next[ticker];
+        return next;
+      });
+    }
+  }, [fetchPositions, industryLookup, typeLookup]);
+
+  const handleCreateType = useCallback(async () => {
+    if (!typeForm.name.trim()) {
+      return;
+    }
+    try {
+      await instrumentsAPI.createType({
+        name: typeForm.name.trim(),
+        color: typeForm.color || '#8884d8'
+      });
+      setTypeDialogOpen(false);
+      setTypeForm({ name: '', color: '#8884d8' });
+      loadInstrumentMetadata();
+    } catch (error) {
+      console.error('Error creating instrument type:', error);
+    }
+  }, [loadInstrumentMetadata, typeForm]);
+
+  const handleCreateIndustry = useCallback(async () => {
+    if (!industryForm.name.trim()) {
+      return;
+    }
+    try {
+      await instrumentsAPI.createIndustry({
+        name: industryForm.name.trim(),
+        color: industryForm.color || '#82ca9d'
+      });
+      setIndustryDialogOpen(false);
+      setIndustryForm({ name: '', color: '#82ca9d' });
+      loadInstrumentMetadata();
+    } catch (error) {
+      console.error('Error creating instrument industry:', error);
+    }
+  }, [industryForm, loadInstrumentMetadata]);
+
+  const hasFilters = Boolean(
+    selectedAccountId ||
+    valuationDate ||
+    selectedTypeId ||
+    selectedIndustryId
+  );
+
   if (loading && positions.length === 0) {
     return (
       <Container>
@@ -264,7 +467,7 @@ const Portfolio = () => {
       </Box>
 
       <Paper sx={{ p: 2, mb: 3 }}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', md: 'center' }}>
           <FormControl size="small" sx={{ minWidth: 220 }}>
             <InputLabel id="portfolio-account-select">Account</InputLabel>
             <Select
@@ -320,16 +523,198 @@ const Portfolio = () => {
             />
           )}
           {datePreset !== DATE_PRESETS.CURRENT && (
-            <Button variant="text" size="small" onClick={() => {
-              setDatePreset(DATE_PRESETS.CURRENT);
-              setSpecificMonth('');
-              setEndOfYear('');
-            }}>
+            <Button
+              variant="text"
+              size="small"
+              onClick={() => {
+                setDatePreset(DATE_PRESETS.CURRENT);
+                setSpecificMonth('');
+                setEndOfYear('');
+              }}
+            >
               Clear selection
             </Button>
           )}
         </Stack>
+        <Divider sx={{ my: 2 }} />
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', md: 'center' }}>
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel id="portfolio-type-select">Type</InputLabel>
+            <Select
+              labelId="portfolio-type-select"
+              value={selectedTypeId}
+              label="Type"
+              onChange={(event) => setSelectedTypeId(event.target.value)}
+              renderValue={(value) => {
+                if (!value) {
+                  return <em>All types</em>;
+                }
+                const info = typeLookup[value];
+                return (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {renderColorSwatch(info?.color)}
+                    <span>{info?.name || 'Unknown'}</span>
+                  </Box>
+                );
+              }}
+            >
+              <MenuItem value="">
+                <em>All types</em>
+              </MenuItem>
+              {instrumentTypes.map((type) => (
+                <MenuItem key={type.id} value={type.id}>
+                  {renderColorSwatch(type.color)}
+                  {type.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<Add />}
+            onClick={() => setTypeDialogOpen(true)}
+          >
+            Add Type
+          </Button>
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel id="portfolio-industry-select">Industry</InputLabel>
+            <Select
+              labelId="portfolio-industry-select"
+              value={selectedIndustryId}
+              label="Industry"
+              onChange={(event) => setSelectedIndustryId(event.target.value)}
+              renderValue={(value) => {
+                if (!value) {
+                  return <em>All industries</em>;
+                }
+                const info = industryLookup[value];
+                return (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {renderColorSwatch(info?.color)}
+                    <span>{info?.name || 'Unknown'}</span>
+                  </Box>
+                );
+              }}
+            >
+              <MenuItem value="">
+                <em>All industries</em>
+              </MenuItem>
+              {instrumentIndustries.map((industry) => (
+                <MenuItem key={industry.id} value={industry.id}>
+                  {renderColorSwatch(industry.color)}
+                  {industry.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<Add />}
+            onClick={() => setIndustryDialogOpen(true)}
+          >
+            Add Industry
+          </Button>
+        </Stack>
       </Paper>
+
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        {summaryCards.map((card) => (
+          <Grid item xs={12} sm={6} md={3} key={card.title}>
+            <Paper sx={{ p: 2 }}>
+              <Typography
+                variant="caption"
+                color="textSecondary"
+                sx={{ letterSpacing: '.08em', textTransform: 'uppercase' }}
+              >
+                {card.title}
+              </Typography>
+              <Typography variant="h5" sx={{ fontWeight: 600, color: card.color, mt: 1 }}>
+                {card.value}
+              </Typography>
+              {card.subtitle && (
+                <Typography variant="body2" color="textSecondary">
+                  {card.subtitle}
+                </Typography>
+              )}
+            </Paper>
+          </Grid>
+        ))}
+      </Grid>
+
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom>
+              Industry Allocation
+            </Typography>
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+              Market value distribution by industry
+            </Typography>
+            {industrySlices.length === 0 ? (
+              <Typography color="textSecondary">
+                Classify your positions to see the breakdown by industry.
+              </Typography>
+            ) : (
+              <>
+                <Box sx={{ height: 320 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={industrySlices}
+                        dataKey="market_value"
+                        nameKey="industry_name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius="45%"
+                        outerRadius="80%"
+                        paddingAngle={2}
+                        labelLine={false}
+                      >
+                        {industrySlices.map((slice) => (
+                          <Cell
+                            key={slice.industry_id || 'unclassified'}
+                            fill={slice.color || '#b0bec5'}
+                          />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip
+                        formatter={(value, name, payload) => [
+                          formatCurrency(value),
+                          payload?.payload?.industry_name || name
+                        ]}
+                      />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+                <Stack spacing={1} sx={{ mt: 2 }}>
+                  {industrySlices.map((slice) => (
+                    <Box
+                      key={slice.industry_id || 'unclassified'}
+                      sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    >
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {renderColorSwatch(slice.color)}
+                        <Typography variant="body2">{slice.industry_name}</Typography>
+                      </Box>
+                      <Box textAlign="right">
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {formatCurrency(slice.market_value)}
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary">
+                          {slice.percentage.toFixed(1)}%
+                        </Typography>
+                      </Box>
+                    </Box>
+                  ))}
+                </Stack>
+              </>
+            )}
+          </Paper>
+        </Grid>
+      </Grid>
 
       {valuationDate && (
         <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
@@ -340,11 +725,11 @@ const Portfolio = () => {
       {positions.length === 0 ? (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography variant="h6" color="textSecondary">
-            No positions found{(selectedAccountId || selectedDate) ? ' for the selected criteria' : ''}
+            No positions found{hasFilters ? ' for the selected criteria' : ''}
           </Typography>
           <Typography color="textSecondary">
-            {(selectedAccountId || selectedDate)
-              ? 'Try adjusting the account or date filters.'
+            {hasFilters
+              ? 'Try adjusting the account, date, type, or industry filters.'
               : 'Import a statement to see your portfolio'}
           </Typography>
         </Paper>
@@ -356,6 +741,8 @@ const Portfolio = () => {
               <TableRow>
                 <TableCell><strong>Ticker</strong></TableCell>
                 <TableCell><strong>Name</strong></TableCell>
+                <TableCell><strong>Type</strong></TableCell>
+                <TableCell><strong>Industry</strong></TableCell>
                 <TableCell align="right"><strong>Price</strong></TableCell>
                 <TableCell align="right"><strong>Quantity</strong></TableCell>
                 <TableCell align="right"><strong>Book Value</strong></TableCell>
@@ -385,6 +772,85 @@ const Portfolio = () => {
                       />
                     </TableCell>
                     <TableCell>{position.name}</TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <FormControl size="small" sx={{ minWidth: 140 }}>
+                          <Select
+                            size="small"
+                            displayEmpty
+                            value={position.instrument_type_id || ''}
+                            onChange={(event) =>
+                              handleClassificationUpdate(position, {
+                                instrument_type_id: event.target.value || null
+                              })
+                            }
+                            disabled={classificationSaving[position.ticker]}
+                            renderValue={(value) => {
+                              if (!value) {
+                                return <em>Unassigned</em>;
+                              }
+                              const info = typeLookup[value];
+                              return (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  {renderColorSwatch(info?.color)}
+                                  <span>{info?.name || 'Unknown'}</span>
+                                </Box>
+                              );
+                            }}
+                          >
+                            <MenuItem value="">
+                              <em>Unassigned</em>
+                            </MenuItem>
+                            {instrumentTypes.map((type) => (
+                              <MenuItem key={type.id} value={type.id}>
+                                {renderColorSwatch(type.color)}
+                                {type.name}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        {classificationSaving[position.ticker] && <CircularProgress size={16} />}
+                      </Box>
+                    </TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <FormControl size="small" sx={{ minWidth: 160 }}>
+                          <Select
+                            size="small"
+                            displayEmpty
+                            value={position.instrument_industry_id || ''}
+                            onChange={(event) =>
+                              handleClassificationUpdate(position, {
+                                instrument_industry_id: event.target.value || null
+                              })
+                            }
+                            disabled={classificationSaving[position.ticker]}
+                            renderValue={(value) => {
+                              if (!value) {
+                                return <em>Unassigned</em>;
+                              }
+                              const info = industryLookup[value];
+                              return (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  {renderColorSwatch(info?.color)}
+                                  <span>{info?.name || 'Unknown'}</span>
+                                </Box>
+                              );
+                            }}
+                          >
+                            <MenuItem value="">
+                              <em>Unassigned</em>
+                            </MenuItem>
+                            {instrumentIndustries.map((industry) => (
+                              <MenuItem key={industry.id} value={industry.id}>
+                                {renderColorSwatch(industry.color)}
+                                {industry.name}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </Box>
+                    </TableCell>
                     <TableCell align="right">
                       {livePrice ? (
                         <Tooltip
@@ -450,6 +916,60 @@ const Portfolio = () => {
           </Table>
         </TableContainer>
       )}
+
+      <Dialog open={typeDialogOpen} onClose={() => setTypeDialogOpen(false)}>
+        <DialogTitle>Create Instrument Type</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <TextField
+              label="Name"
+              value={typeForm.name}
+              onChange={(event) => setTypeForm((prev) => ({ ...prev, name: event.target.value }))}
+              autoFocus
+            />
+            <TextField
+              label="Color"
+              type="color"
+              value={typeForm.color}
+              onChange={(event) => setTypeForm((prev) => ({ ...prev, color: event.target.value }))}
+              InputLabelProps={{ shrink: true }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTypeDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleCreateType} variant="contained">
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={industryDialogOpen} onClose={() => setIndustryDialogOpen(false)}>
+        <DialogTitle>Create Industry</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <TextField
+              label="Name"
+              value={industryForm.name}
+              onChange={(event) => setIndustryForm((prev) => ({ ...prev, name: event.target.value }))}
+              autoFocus
+            />
+            <TextField
+              label="Color"
+              type="color"
+              value={industryForm.color}
+              onChange={(event) => setIndustryForm((prev) => ({ ...prev, color: event.target.value }))}
+              InputLabelProps={{ shrink: true }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIndustryDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleCreateIndustry} variant="contained">
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };

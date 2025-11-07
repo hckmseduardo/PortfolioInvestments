@@ -118,21 +118,37 @@ export const accountsAPI = {
 export const positionsAPI = {
   getAll: (accountId) =>
     api.get('/positions', { params: accountId ? { account_id: accountId } : {} }),
-  getAggregated: (accountId, asOfDate) =>
+  getAggregated: (accountId, asOfDate, options = {}) =>
     api.get('/positions/aggregated', {
       params: {
         ...(accountId ? { account_id: accountId } : {}),
-        ...(asOfDate ? { as_of_date: asOfDate } : {})
+        ...(asOfDate ? { as_of_date: asOfDate } : {}),
+        ...(options.instrument_type_id ? { instrument_type_id: options.instrument_type_id } : {}),
+        ...(options.instrument_industry_id ? { instrument_industry_id: options.instrument_industry_id } : {})
       }
     }),
-  getSummary: (asOfDate) =>
+  getSummary: (asOfDate, options = {}) =>
     api.get('/positions/summary', {
-      params: asOfDate ? { as_of_date: asOfDate } : {}
+      params: {
+        ...(options.account_id ? { account_id: options.account_id } : {}),
+        ...(asOfDate ? { as_of_date: asOfDate } : {}),
+        ...(options.instrument_type_id ? { instrument_type_id: options.instrument_type_id } : {}),
+        ...(options.instrument_industry_id ? { instrument_industry_id: options.instrument_industry_id } : {})
+      }
     }),
   create: (data) => api.post('/positions', data),
   update: (id, data) => api.put(`/positions/${id}`, data),
   delete: (id) => api.delete(`/positions/${id}`),
   refreshPrices: () => api.post('/positions/refresh-prices'),
+  getIndustryBreakdown: (params = {}) =>
+    api.get('/positions/industry-breakdown', {
+      params: {
+        ...(params.account_id ? { account_id: params.account_id } : {}),
+        ...(params.as_of_date ? { as_of_date: params.as_of_date } : {}),
+        ...(params.instrument_type_id ? { instrument_type_id: params.instrument_type_id } : {}),
+        ...(params.instrument_industry_id ? { instrument_industry_id: params.instrument_industry_id } : {})
+      }
+    })
 };
 
 export const dashboardAPI = {
@@ -209,6 +225,24 @@ export const importAPI = {
   reprocessAllStatements: (accountId) =>
     api.post('/import/statements/reprocess-all', accountId ? { account_id: accountId } : {}),
   deleteStatement: (statementId) => api.delete(`/import/statements/${statementId}`),
+  changeStatementAccount: (statementId, accountId) =>
+    api.put(`/import/statements/${statementId}/account`, { account_id: accountId }),
+  getJobStatus: (jobId) => api.get(`/import/jobs/${jobId}`),
+};
+
+export const instrumentsAPI = {
+  getTypes: () => api.get('/instruments/types'),
+  createType: (data) => api.post('/instruments/types', data),
+  updateType: (id, data) => api.put(`/instruments/types/${id}`, data),
+  deleteType: (id) => api.delete(`/instruments/types/${id}`),
+  getIndustries: () => api.get('/instruments/industries'),
+  createIndustry: (data) => api.post('/instruments/industries', data),
+  updateIndustry: (id, data) => api.put(`/instruments/industries/${id}`, data),
+  deleteIndustry: (id) => api.delete(`/instruments/industries/${id}`),
+  listClassifications: () => api.get('/instruments/classifications'),
+  updateClassification: (ticker, data) =>
+    api.put(`/instruments/classifications/${encodeURIComponent(ticker)}`, data),
+  deleteClassification: (ticker) => api.delete(`/instruments/classifications/${encodeURIComponent(ticker)}`)
 };
 
 export const transactionsAPI = {
