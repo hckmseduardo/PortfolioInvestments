@@ -589,14 +589,20 @@ async def convert_transactions_to_expenses(
         txns = db.find("transactions", {"account_id": acc_id})
         transactions.extend([t for t in txns if t.get("type") in ["withdrawal", "fee"]])
 
-    # Get existing expenses to avoid duplicates
+    # Get existing expenses to avoid duplicates and preserve manual categorizations
     existing_expenses = []
     for acc_id in account_ids:
         existing_expenses.extend(db.find("expenses", {"account_id": acc_id}))
 
-    # Create a set of (account_id, date, amount, description) tuples to check for duplicates
+    # Build maps for existing expenses:
+    # 1. By transaction_id (for direct matching)
+    # 2. By (account_id, date, amount, description) for legacy expenses without transaction_id
+    existing_by_txn_id = {}
     existing_expense_keys = set()
     for exp in existing_expenses:
+        if exp.get("transaction_id"):
+            existing_by_txn_id[exp.get("transaction_id")] = exp
+
         key = (
             exp.get("account_id"),
             exp.get("date"),
@@ -607,6 +613,7 @@ async def convert_transactions_to_expenses(
 
     # Convert transactions to expenses (excluding transfers)
     expenses_created = 0
+    expenses_updated = 0
     transfers_skipped = 0
     for txn in transactions:
         # Skip if this transaction is part of a transfer
@@ -614,7 +621,28 @@ async def convert_transactions_to_expenses(
             transfers_skipped += 1
             continue
 
-        # Check if this transaction is already an expense
+        txn_id = txn.get("id")
+
+        # Check if expense already exists for this transaction
+        if txn_id and txn_id in existing_by_txn_id:
+            # Expense exists - update it but preserve manual category
+            existing_exp = existing_by_txn_id[txn_id]
+
+            # Update expense with latest transaction data, but keep manual category
+            update_data = {
+                "date": txn.get("date"),
+                "description": txn.get("description", ""),
+                "amount": abs(txn.get("total", 0)),
+                # Keep existing category (it may have been manually set)
+                "category": existing_exp.get("category", "Uncategorized"),
+                "transaction_id": txn_id
+            }
+
+            db.update("expenses", {"id": existing_exp["id"]}, update_data)
+            expenses_updated += 1
+            continue
+
+        # Check legacy duplicate detection (for expenses without transaction_id)
         txn_key = (
             txn.get("account_id"),
             txn.get("date"),
@@ -622,25 +650,42 @@ async def convert_transactions_to_expenses(
             txn.get("description")
         )
 
-        if txn_key not in existing_expense_keys:
-            # Auto-categorize the expense
-            category = auto_categorize_expense(txn.get("description", ""), current_user.id)
+        if txn_key in existing_expense_keys:
+            # Legacy expense exists - update it to add transaction_id and preserve category
+            matching_exp = next((e for e in existing_expenses
+                               if e.get("account_id") == txn.get("account_id")
+                               and e.get("date") == txn.get("date")
+                               and e.get("amount") == abs(txn.get("total", 0))
+                               and e.get("description") == txn.get("description")), None)
 
-            expense_doc = {
-                "date": txn.get("date"),
-                "description": txn.get("description", ""),
-                "amount": abs(txn.get("total", 0)),
-                "category": category or "Uncategorized",
-                "account_id": txn.get("account_id"),
-                "notes": f"Imported from transaction (type: {txn.get('type')})"
-            }
+            if matching_exp:
+                update_data = {
+                    "transaction_id": txn_id
+                }
+                db.update("expenses", {"id": matching_exp["id"]}, update_data)
+                expenses_updated += 1
+            continue
 
-            db.insert("expenses", expense_doc)
-            expenses_created += 1
+        # New expense - auto-categorize
+        category = auto_categorize_expense(txn.get("description", ""), current_user.id)
+
+        expense_doc = {
+            "date": txn.get("date"),
+            "description": txn.get("description", ""),
+            "amount": abs(txn.get("total", 0)),
+            "category": category or "Uncategorized",
+            "account_id": txn.get("account_id"),
+            "transaction_id": txn_id,
+            "notes": f"Imported from transaction (type: {txn.get('type')})"
+        }
+
+        db.insert("expenses", expense_doc)
+        expenses_created += 1
 
     return {
-        "message": f"Converted {expenses_created} transactions to expenses ({transfers_skipped} transfers excluded)",
+        "message": f"Converted {expenses_created} new transactions to expenses, updated {expenses_updated} existing expenses ({transfers_skipped} transfers excluded)",
         "expenses_created": expenses_created,
+        "expenses_updated": expenses_updated,
         "transfers_excluded": transfers_skipped,
         "transactions_processed": len(transactions)
     }

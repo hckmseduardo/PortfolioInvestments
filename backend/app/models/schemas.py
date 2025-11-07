@@ -141,6 +141,7 @@ class ExpenseBase(BaseModel):
     amount: float
     category: Optional[str] = None
     notes: Optional[str] = None
+    transaction_id: Optional[str] = None  # Link to source transaction
 
 class ExpenseCreate(ExpenseBase):
     account_id: str

@@ -19,8 +19,11 @@ A comprehensive investment portfolio management platform that allows users to im
   - Smart transfer detection: Automatically identifies and excludes transfers between accounts
   - Credit card payment matching: Links payments from checking to credit card accounts
   - Smart auto-categorization with machine learning from your history
+  - **Manual category persistence**: Manually assigned categories are preserved when reimporting statements
   - Inline category editing with color-coded tags
-  - Custom category creation with budget limits
+  - Visual color picker for category creation and editing
+  - Custom category creation with budget limits, all categories can be edited/deleted
+  - **Flexible time period filtering**: View expenses by current month, last month, specific month, quarters, or custom ranges
   - Monthly expense comparison with stacked charts
   - Category trend analysis over time
   - Accurate totals excluding inter-account transfers

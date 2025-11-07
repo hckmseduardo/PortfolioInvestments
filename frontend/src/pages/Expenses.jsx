@@ -57,7 +57,8 @@ const Expenses = () => {
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [dateRange, setDateRange] = useState('current_month'); // current_month, last_month, last_3_months, last_6_months, last_year, all_time
+  const [dateRange, setDateRange] = useState('current_month'); // current_month, last_month, last_3_months, last_6_months, last_year, all_time, specific_month
+  const [specificMonth, setSpecificMonth] = useState(''); // Format: YYYY-MM
   const [loading, setLoading] = useState(true);
   const [editingExpense, setEditingExpense] = useState(null);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
@@ -74,7 +75,7 @@ const Expenses = () => {
       fetchExpenses();
       fetchSummary();
     }
-  }, [selectedAccount, selectedCategory, dateRange]);
+  }, [selectedAccount, selectedCategory, dateRange, specificMonth]);
 
   const fetchInitialData = async () => {
     try {
@@ -133,6 +134,15 @@ const Expenses = () => {
         break;
       case 'year_to_date':
         startDate = new Date(now.getFullYear(), 0, 1);
+        break;
+      case 'specific_month':
+        if (specificMonth) {
+          const [year, month] = specificMonth.split('-').map(Number);
+          startDate = new Date(year, month - 1, 1);
+          endDate = new Date(year, month, 0);
+        } else {
+          return { startDate: null, endDate: null };
+        }
         break;
       case 'all_time':
       default:
@@ -394,7 +404,7 @@ const Expenses = () => {
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2}>
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={3}>
             <FormControl fullWidth>
               <InputLabel>Time Period</InputLabel>
               <Select
@@ -408,11 +418,26 @@ const Expenses = () => {
                 <MenuItem value="last_6_months">Last 6 Months</MenuItem>
                 <MenuItem value="year_to_date">Year to Date</MenuItem>
                 <MenuItem value="last_year">Last Year</MenuItem>
+                <MenuItem value="specific_month">Specific Month</MenuItem>
                 <MenuItem value="all_time">All Time</MenuItem>
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12} md={4}>
+          {dateRange === 'specific_month' && (
+            <Grid item xs={12} md={3}>
+              <TextField
+                fullWidth
+                type="month"
+                label="Select Month"
+                value={specificMonth}
+                onChange={(e) => setSpecificMonth(e.target.value)}
+                InputLabelProps={{
+                  shrink: true,
+                }}
+              />
+            </Grid>
+          )}
+          <Grid item xs={12} md={dateRange === 'specific_month' ? 3 : 4}>
             <FormControl fullWidth>
               <InputLabel>Account</InputLabel>
               <Select
@@ -429,7 +454,7 @@ const Expenses = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={dateRange === 'specific_month' ? 3 : 4}>
             <FormControl fullWidth>
               <InputLabel>Category</InputLabel>
               <Select
