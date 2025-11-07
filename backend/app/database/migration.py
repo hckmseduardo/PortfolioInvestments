@@ -114,6 +114,10 @@ class JSONToPostgresMigration:
 
             user_id = user_json.get("id")
 
+            password_hash = user_json.get("hashed_password") or user_json.get("password_hash")
+            if not password_hash:
+                raise ValueError(f"User {email} missing password hash in legacy data")
+
             # Check if user already exists in PostgreSQL
             existing_user = self.db.query(User).filter(User.id == user_id).first()
 
@@ -124,6 +128,8 @@ class JSONToPostgresMigration:
 
                 # User exists but wasn't migrated yet - just mark as migrated
                 existing_user.migrated_from_json = datetime.utcnow()
+                if not getattr(existing_user, "hashed_password", None):
+                    existing_user.hashed_password = password_hash
                 user_db = existing_user
                 logger.info(f"Marking existing user {email} as migrated")
             else:
@@ -131,7 +137,7 @@ class JSONToPostgresMigration:
                 user_db = User(
                     id=user_id,
                     email=user_json.get("email"),
-                    hashed_password=user_json.get("hashed_password"),
+                    hashed_password=password_hash,
                     created_at=self._parse_datetime(user_json.get("created_at")),
                     migrated_from_json=datetime.utcnow()
                 )

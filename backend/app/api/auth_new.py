@@ -84,8 +84,36 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db = Depends(g
     from JSON files to PostgreSQL database.
     """
     user_doc = db.find_one("users", {"email": form_data.username})
+    stored_hash = (user_doc or {}).get("hashed_password") or (user_doc or {}).get("password_hash")
 
-    if not user_doc or not verify_password(form_data.password, user_doc.get("hashed_password") or user_doc.get("password_hash", "")):
+    if settings.use_postgres and not stored_hash:
+        try:
+            from app.database.json_db import JSONDatabase
+
+            legacy_db = JSONDatabase(settings.LEGACY_DATA_PATH)
+            legacy_user_doc = legacy_db.find_one("users", {"email": form_data.username})
+        except Exception as legacy_error:
+            logger.error(
+                "Failed to read legacy user data for %s: %s",
+                form_data.username,
+                legacy_error,
+                exc_info=True,
+            )
+        else:
+            if legacy_user_doc:
+                legacy_hash = legacy_user_doc.get("hashed_password") or legacy_user_doc.get("password_hash")
+                if legacy_hash:
+                    stored_hash = legacy_hash
+                    if not user_doc:
+                        user_doc = legacy_user_doc
+                    logger.info("Authenticating %s using legacy JSON data", form_data.username)
+
+    try:
+        password_valid = bool(user_doc) and stored_hash and verify_password(form_data.password, stored_hash)
+    except ValueError:
+        password_valid = False
+
+    if not password_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",

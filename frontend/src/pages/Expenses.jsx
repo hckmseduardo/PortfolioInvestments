@@ -48,6 +48,11 @@ const COLOR_PALETTE = [
   '#607D8B', '#795548', '#9E9E9E', '#757575', '#424242', '#212121'
 ];
 
+const ALLOWED_EXPENSE_ACCOUNT_TYPES = ['checking', 'credit_card'];
+
+const isAllowedExpenseAccount = (account = {}) =>
+  ALLOWED_EXPENSE_ACCOUNT_TYPES.includes(String(account.account_type || '').toLowerCase());
+
 const Expenses = () => {
   const [tabValue, setTabValue] = useState(0);
   const [expenses, setExpenses] = useState([]);
@@ -155,9 +160,17 @@ const Expenses = () => {
   const fetchAccounts = async () => {
     try {
       const response = await accountsAPI.getAll();
-      setAccounts(response.data);
+      const filteredAccounts = (response.data || []).filter(isAllowedExpenseAccount);
+      setAccounts(filteredAccounts);
+
+      if (selectedAccount && !filteredAccounts.some(account => account.id === selectedAccount)) {
+        setSelectedAccount('');
+      }
+
+      return filteredAccounts;
     } catch (error) {
       console.error('Error fetching accounts:', error);
+      return [];
     }
   };
 

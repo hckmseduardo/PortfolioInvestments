@@ -9,6 +9,8 @@ from app.database.json_db import get_db
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
+EXPENSE_ACCOUNT_TYPES = {"checking", "credit_card"}
+
 # Default category keywords for auto-categorization
 CATEGORY_KEYWORDS = {
     "Groceries": ["grocery", "supermarket", "food", "market", "produce", "walmart", "costco", "loblaws", "metro", "sobeys"],
@@ -71,6 +73,19 @@ def auto_categorize_expense(description: str, user_id: str) -> Optional[str]:
             best_match = category
 
     return best_match
+
+def _is_expense_account(account: Optional[dict]) -> bool:
+    """Return True if the account type should appear in expenses."""
+    if not account:
+        return False
+    return account.get("account_type") in EXPENSE_ACCOUNT_TYPES
+
+
+def _get_expense_accounts(db, user_id: str) -> List[dict]:
+    """Return all checking/credit card accounts for the user."""
+    all_accounts = db.find("accounts", {"user_id": user_id})
+    return [acc for acc in all_accounts if _is_expense_account(acc)]
+
 
 def detect_transfers(user_id: str, db, days_tolerance: int = 3) -> List[Tuple[str, str]]:
     """
@@ -204,13 +219,21 @@ async def get_expenses(
                 detail="Account not found"
             )
         
+        if not _is_expense_account(account):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Expenses are limited to checking and credit card accounts"
+            )
+
         query = {"account_id": account_id}
         if category:
             query["category"] = category
         
         expenses = db.find("expenses", query)
     else:
-        user_accounts = db.find("accounts", {"user_id": current_user.id})
+        user_accounts = _get_expense_accounts(db, current_user.id)
+        if not user_accounts:
+            return []
         account_ids = [acc["id"] for acc in user_accounts]
         
         expenses = []
@@ -236,9 +259,21 @@ async def get_expense_summary(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Account not found"
             )
+        if not _is_expense_account(account):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Expenses are limited to checking and credit card accounts"
+            )
         expenses = db.find("expenses", {"account_id": account_id})
     else:
-        user_accounts = db.find("accounts", {"user_id": current_user.id})
+        user_accounts = _get_expense_accounts(db, current_user.id)
+        if not user_accounts:
+            return {
+                "total_expenses": 0,
+                "by_category": {},
+                "by_month": {},
+                "expense_count": 0
+            }
         account_ids = [acc["id"] for acc in user_accounts]
         
         expenses = []
@@ -478,9 +513,19 @@ async def get_monthly_expense_comparison(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Account not found"
             )
+        if not _is_expense_account(account):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Expenses are limited to checking and credit card accounts"
+            )
         expenses = db.find("expenses", {"account_id": account_id})
     else:
-        user_accounts = db.find("accounts", {"user_id": current_user.id})
+        user_accounts = _get_expense_accounts(db, current_user.id)
+        if not user_accounts:
+            return {
+                "months": [],
+                "total_months": 0
+            }
         account_ids = [acc["id"] for acc in user_accounts]
 
         expenses = []
