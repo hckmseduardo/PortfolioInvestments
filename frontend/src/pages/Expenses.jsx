@@ -61,6 +61,7 @@ const Expenses = () => {
   const [loading, setLoading] = useState(true);
   const [editingExpense, setEditingExpense] = useState(null);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
   const [newCategory, setNewCategory] = useState({ name: '', type: 'expense', color: '#4CAF50', budget_limit: '' });
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
@@ -269,6 +270,47 @@ const Expenses = () => {
     } catch (error) {
       console.error('Error creating category:', error);
       showSnackbar('Error creating category', 'error');
+    }
+  };
+
+  const handleEditCategory = (category) => {
+    setEditingCategory({
+      id: category.id,
+      name: category.name,
+      type: category.type || 'expense',
+      color: category.color,
+      budget_limit: category.budget_limit || ''
+    });
+  };
+
+  const handleUpdateCategory = async () => {
+    try {
+      const categoryData = {
+        name: editingCategory.name,
+        type: editingCategory.type,
+        color: editingCategory.color,
+        budget_limit: editingCategory.budget_limit ? parseFloat(editingCategory.budget_limit) : null
+      };
+      await expensesAPI.updateCategory(editingCategory.id, categoryData);
+      showSnackbar('Category updated successfully', 'success');
+      setEditingCategory(null);
+      await fetchCategories();
+    } catch (error) {
+      console.error('Error updating category:', error);
+      showSnackbar('Error updating category', 'error');
+    }
+  };
+
+  const handleDeleteCategory = async (categoryId) => {
+    if (window.confirm('Are you sure you want to delete this category?')) {
+      try {
+        await expensesAPI.deleteCategory(categoryId);
+        showSnackbar('Category deleted successfully', 'success');
+        await fetchCategories();
+      } catch (error) {
+        console.error('Error deleting category:', error);
+        showSnackbar('Error deleting category', 'error');
+      }
     }
   };
 
@@ -668,18 +710,121 @@ const Expenses = () => {
         <DialogContent>
           <Box mb={3}>
             <Typography variant="subtitle1" gutterBottom>Existing Categories</Typography>
-            {categories.map(category => (
-              <Chip
-                key={category.id}
-                label={category.name}
-                sx={{
-                  m: 0.5,
-                  bgcolor: category.color,
-                  color: 'white'
-                }}
-              />
-            ))}
+            <Box display="flex" flexWrap="wrap" gap={1}>
+              {categories.map(category => (
+                <Box key={category.id} display="flex" alignItems="center">
+                  <Chip
+                    label={category.name}
+                    sx={{
+                      bgcolor: category.color,
+                      color: 'white'
+                    }}
+                  />
+                  <IconButton
+                    size="small"
+                    onClick={() => handleEditCategory(category)}
+                    sx={{ ml: 0.5 }}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                  <IconButton
+                    size="small"
+                    onClick={() => handleDeleteCategory(category.id)}
+                    sx={{ ml: 0.5 }}
+                    color="error"
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+              ))}
+            </Box>
           </Box>
+
+          {editingCategory && (
+            <Box mb={3} p={2} sx={{ bgcolor: 'grey.100', borderRadius: 1 }}>
+              <Typography variant="subtitle1" gutterBottom>
+                Edit Category: {editingCategory.name}
+              </Typography>
+              <TextField
+                fullWidth
+                label="Category Name"
+                value={editingCategory.name}
+                onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
+                margin="normal"
+                size="small"
+              />
+              <FormControl fullWidth margin="normal" size="small">
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={editingCategory.type}
+                  onChange={(e) => setEditingCategory({ ...editingCategory, type: e.target.value })}
+                  label="Type"
+                >
+                  <MenuItem value="expense">Expense</MenuItem>
+                  <MenuItem value="transfer">Transfer</MenuItem>
+                </Select>
+              </FormControl>
+              <Box mt={2} mb={2}>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  Select Color
+                </Typography>
+                <Grid container spacing={1}>
+                  {COLOR_PALETTE.map((color) => (
+                    <Grid item key={color}>
+                      <Box
+                        onClick={() => setEditingCategory({ ...editingCategory, color })}
+                        sx={{
+                          width: 36,
+                          height: 36,
+                          bgcolor: color,
+                          borderRadius: 1,
+                          cursor: 'pointer',
+                          border: editingCategory.color === color ? '3px solid #000' : '1px solid #ddd',
+                          boxShadow: editingCategory.color === color ? 2 : 0,
+                          transition: 'all 0.2s',
+                          '&:hover': {
+                            transform: 'scale(1.1)',
+                            boxShadow: 2
+                          }
+                        }}
+                      />
+                    </Grid>
+                  ))}
+                </Grid>
+                <Box mt={1} display="flex" alignItems="center" gap={2}>
+                  <Box
+                    sx={{
+                      width: 50,
+                      height: 36,
+                      bgcolor: editingCategory.color,
+                      borderRadius: 1,
+                      border: '1px solid #ddd'
+                    }}
+                  />
+                  <Typography variant="body2" color="text.secondary">
+                    {editingCategory.color}
+                  </Typography>
+                </Box>
+              </Box>
+              <TextField
+                fullWidth
+                label="Budget Limit (optional)"
+                type="number"
+                value={editingCategory.budget_limit}
+                onChange={(e) => setEditingCategory({ ...editingCategory, budget_limit: e.target.value })}
+                margin="normal"
+                size="small"
+              />
+              <Box display="flex" gap={1} mt={2}>
+                <Button onClick={handleUpdateCategory} variant="contained" size="small">
+                  Save Changes
+                </Button>
+                <Button onClick={() => setEditingCategory(null)} variant="outlined" size="small">
+                  Cancel
+                </Button>
+              </Box>
+            </Box>
+          )}
 
           <Typography variant="subtitle1" gutterBottom>Add New Category</Typography>
           <TextField
