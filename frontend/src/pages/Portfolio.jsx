@@ -721,11 +721,11 @@ const Portfolio = () => {
 
       <Paper sx={{ p: 2, mb: 3 }}>
         <Stack
-          direction={{ xs: 'column', lg: 'row' }}
+          direction={{ xs: 'column', md: 'row' }}
           spacing={2}
           useFlexGap
           flexWrap="wrap"
-          alignItems={{ xs: 'flex-start', lg: 'center' }}
+          alignItems={{ xs: 'flex-start', md: 'center' }}
         >
           <FormControl size="small" sx={{ minWidth: 200 }}>
             <InputLabel id="portfolio-account-select">Account</InputLabel>

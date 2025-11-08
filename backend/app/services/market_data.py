@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple, List
 
+from app.config import settings
+from app.services.alpha_vantage_client import alpha_vantage_client
 from app.services.tradingview_client import tradingview_client
 from app.services.yahoo_client import yahoo_client
 from app.services.stooq_client import stooq_client
@@ -20,10 +22,26 @@ class PriceQuote:
     fetched_at: Optional[datetime] = None
     is_live: bool = False
 
+
 class MarketDataService:
+    DEFAULT_PRIORITY = ["tradingview", "yfinance", "alpha_vantage", "twelvedata", "stooq"]
+
     def __init__(self):
-        # In-memory cache is no longer needed, using database cache instead
-        pass
+        self._current_fetchers = {
+            "tradingview": tradingview_client.get_latest_price,
+            "yfinance": self._fetch_yahoo_latest,
+            "alpha_vantage": alpha_vantage_client.get_latest_price,
+            "twelvedata": twelvedata_client.get_latest_price,
+            "stooq": self._fetch_stooq_latest,
+        }
+        self._historical_fetchers = {
+            "tradingview": tradingview_client.get_price_on,
+            "yfinance": self._fetch_yahoo_historical,
+            "alpha_vantage": alpha_vantage_client.get_price_on,
+            "twelvedata": twelvedata_client.get_price_on,
+            "stooq": self._fetch_stooq_historical,
+        }
+        self._source_priority = self._resolve_source_priority()
 
     def get_current_price_quote(self, ticker: str, use_cache: bool = True) -> PriceQuote:
         """
@@ -63,7 +81,6 @@ class MarketDataService:
             except Exception as e:
                 logger.warning(f"Failed to get cached price for {ticker}: {e}")
 
-        # Fetch fresh price from market
         price, source = self._fetch_current_price_from_market(ticker)
 
         # Cache the result if we got a valid price
@@ -85,30 +102,23 @@ class MarketDataService:
         return self.get_current_price_quote(ticker, use_cache=use_cache).price
 
     def _fetch_current_price_from_market(self, ticker: str) -> Tuple[Optional[float], Optional[str]]:
-        """Fetch current price from market data sources."""
-        tv_price = tradingview_client.get_latest_price(ticker)
-        if tv_price is not None:
-            if tv_price >= 1:
-                return tv_price, "tradingview"
-            yahoo_price = self._fetch_yahoo_latest(ticker)
-            if yahoo_price is not None:
-                return yahoo_price, "yfinance"
-            stooq_price = self._fetch_stooq_latest(ticker)
-            if stooq_price is not None:
-                return stooq_price, "stooq"
-            return tv_price, "tradingview"
+        """Fetch current price from market data sources in configured order."""
+        tradingview_fallback: Optional[Tuple[float, str]] = None
 
-        yahoo_price = self._fetch_yahoo_latest(ticker)
-        if yahoo_price is not None:
-            return yahoo_price, "yfinance"
+        for source in self._source_priority:
+            fetcher = self._current_fetchers.get(source)
+            if not fetcher:
+                continue
+            price = fetcher(ticker)
+            if price is None:
+                continue
+            if source == "tradingview" and price < 1:
+                tradingview_fallback = (price, source)
+                continue
+            return price, source
 
-        td_price = twelvedata_client.get_latest_price(ticker)
-        if td_price is not None:
-            return td_price, "twelvedata"
-
-        stooq_price = self._fetch_stooq_latest(ticker)
-        if stooq_price is not None:
-            return stooq_price, "stooq"
+        if tradingview_fallback:
+            return tradingview_fallback
 
         logger.warning("No market price found for %s", ticker)
         return None, None
@@ -161,29 +171,7 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Failed to get cached historical price for {ticker}: {e}")
 
-        # Fetch from market data sources
-        price = None
-        source = None
-
-        yahoo_price = self._fetch_yahoo_historical(ticker, target_midnight)
-        if yahoo_price is not None:
-            price = yahoo_price
-            source = "yfinance"
-        else:
-            td_price = twelvedata_client.get_price_on(ticker, target_midnight)
-            if td_price is not None:
-                price = td_price
-                source = "twelvedata"
-            else:
-                stooq_price = self._fetch_stooq_historical(ticker, target_midnight)
-                if stooq_price is not None:
-                    price = stooq_price
-                    source = "stooq"
-                else:
-                    tv_price = tradingview_client.get_price_on(ticker, target_midnight)
-                    if tv_price is not None:
-                        price = tv_price
-                        source = "tradingview"
+        price, source = self._fetch_historical_price_from_market(ticker, target_midnight)
 
         if price is not None:
             try:
@@ -237,7 +225,37 @@ class MarketDataService:
     def _is_live_source(source: Optional[str]) -> bool:
         if not source:
             return False
-        return source.lower() in {"yfinance", "tradingview", "twelvedata", "cash"}
+        return source.lower() in {"yfinance", "tradingview", "twelvedata", "cash", "alpha_vantage"}
+
+    def _resolve_source_priority(self) -> List[str]:
+        configured = settings.price_source_priority
+        priority: List[str] = []
+        available = set(self._current_fetchers.keys()) | set(self._historical_fetchers.keys())
+        for source in configured:
+            key = source.strip().lower()
+            if key in available and key not in priority:
+                priority.append(key)
+        for source in self.DEFAULT_PRIORITY:
+            if source in available and source not in priority:
+                priority.append(source)
+        for source in available:
+            if source not in priority:
+                priority.append(source)
+        return priority
+
+    def _fetch_historical_price_from_market(
+        self,
+        ticker: str,
+        target_date: datetime
+    ) -> Tuple[Optional[float], Optional[str]]:
+        for source in self._source_priority:
+            fetcher = self._historical_fetchers.get(source)
+            if not fetcher:
+                continue
+            price = fetcher(ticker, target_date)
+            if price is not None:
+                return price, source
+        return None, None
 
     def _fetch_stooq_latest(self, ticker: str) -> Optional[float]:
         for symbol in self._generate_stooq_symbols(ticker):

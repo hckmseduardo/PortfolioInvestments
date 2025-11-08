@@ -29,8 +29,8 @@ A comprehensive investment portfolio management platform that allows users to im
   - Monthly expense comparison with stacked charts
   - Category trend analysis over time
   - Accurate totals excluding inter-account transfers
-- **Real-time Market Data**: Automatic price updates using Yahoo Finance API
-- **Expanded Price Providers**: Automatic fallback to TradingView, Stooq, and TwelveData (optional API key) for improved Canadian coverage
+- **Real-time Market Data**: Automatic price updates with configurable fallbacks (TradingView, Yahoo Finance, Alpha Vantage, TwelveData, Stooq)
+- **Expanded Price Providers**: Alpha Vantage fallback plus TradingView, Stooq, and TwelveData (optional API keys) for improved Canadian coverage
 - **🆕 PostgreSQL Migration**: Seamless migration from JSON to PostgreSQL with automatic data import on first login
 
 ## Tech Stack
@@ -93,6 +93,9 @@ PGADMIN_DEFAULT_PASSWORD=supersecurepassword
 PGADMIN_PORT=5050
 # Optional market data providers
 TWELVEDATA_API_KEY=your_twelvedata_key_optional
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key_optional
+# Comma-separated fallback order, earliest wins
+PRICE_SOURCE_PRIORITY=tradingview,yfinance,alpha_vantage,twelvedata,stooq
 # Redis / background jobs
 REDIS_URL=redis://redis:6379/0
 ```
@@ -110,6 +113,12 @@ docker-compose up --build
 - Redis is embedded automatically for background jobs; no manual action required.
 
 **Note**: On first login, your data will be automatically migrated from JSON to PostgreSQL if you have existing data.
+
+### Market Data Providers
+
+- Add optional API keys (`TWELVEDATA_API_KEY`, `ALPHA_VANTAGE_API_KEY`) to your backend `.env`. The file is already gitignored so the keys stay local.
+- Control the fallback order with `PRICE_SOURCE_PRIORITY` (comma-separated). Any providers you omit fall back to the remaining defaults.
+- Default order prioritizes TradingView, then Yahoo Finance, Alpha Vantage, TwelveData, and finally Stooq. Historical price lookups reuse the same order.
 
 ### Exploring PostgreSQL Data with pgAdmin
 ### Exploring PostgreSQL Data with pgAdmin

@@ -9,20 +9,29 @@ import {
   CardContent,
   Paper,
   Typography,
+  Grid,
   FormControl,
   InputLabel,
   MenuItem,
-  Select
+  Select,
+  IconButton,
+  Menu,
+  useTheme,
+  useMediaQuery,
+  Tooltip
 } from '@mui/material';
 import {
   TrendingUp,
   TrendingDown,
   AccountBalance,
   AttachMoney,
-  Refresh
+  Refresh,
+  Lock,
+  LockOpen,
+  Menu as MenuIcon
 } from '@mui/icons-material';
 import { accountsAPI, positionsAPI, dividendsAPI, dashboardAPI } from '../services/api';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Responsive, WidthProvider, utils as RGLUtils } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -31,6 +40,7 @@ const ResponsiveGridLayout = WidthProvider(Responsive);
 const { compact } = RGLUtils || {};
 const ROW_HEIGHT = 120;
 const GRID_MARGIN = [16, 16];
+const DRAG_START_DELAY = 300;
 
 const LAYOUT_PROFILES = [
   'desktop',
@@ -66,8 +76,10 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_value', x: 4, y: 1, w: 4, h: 1 },
     { i: 'accounts_list', x: 0, y: 2, w: 12, h: 2 },
     { i: 'performance', x: 0, y: 4, w: 12, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 7, w: 6, h: 6, minH: 6 },
-    { i: 'industry_breakdown', x: 6, y: 7, w: 6, h: 6, minH: 6 }
+    { i: 'type_breakdown', x: 0, y: 7, w: 6, h: 3, minH: 3 },
+    { i: 'type_breakdown_table', x: 0, y: 10, w: 6, h: 3, minH: 3 },
+    { i: 'industry_breakdown', x: 6, y: 7, w: 6, h: 3, minH: 3 },
+    { i: 'industry_breakdown_table', x: 6, y: 10, w: 6, h: 3, minH: 3 }
   ],
   tablet_landscape: [
     { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
@@ -78,8 +90,10 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_value', x: 4, y: 1, w: 4, h: 1 },
     { i: 'accounts_list', x: 0, y: 2, w: 12, h: 2 },
     { i: 'performance', x: 0, y: 4, w: 12, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 7, w: 6, h: 6, minH: 6 },
-    { i: 'industry_breakdown', x: 6, y: 7, w: 6, h: 6, minH: 6 }
+    { i: 'type_breakdown', x: 0, y: 7, w: 6, h: 3, minH: 3 },
+    { i: 'type_breakdown_table', x: 0, y: 10, w: 6, h: 3, minH: 3 },
+    { i: 'industry_breakdown', x: 6, y: 7, w: 6, h: 3, minH: 3 },
+    { i: 'industry_breakdown_table', x: 6, y: 10, w: 6, h: 3, minH: 3 }
   ],
   tablet_portrait: [
     { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
@@ -90,8 +104,10 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_value', x: 4, y: 2, w: 4, h: 1 },
     { i: 'accounts_list', x: 0, y: 3, w: 8, h: 2 },
     { i: 'performance', x: 0, y: 5, w: 8, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 8, w: 4, h: 6, minH: 6 },
-    { i: 'industry_breakdown', x: 4, y: 8, w: 4, h: 6, minH: 6 }
+    { i: 'type_breakdown', x: 0, y: 8, w: 8, h: 3, minH: 3 },
+    { i: 'type_breakdown_table', x: 0, y: 11, w: 8, h: 3, minH: 3 },
+    { i: 'industry_breakdown', x: 0, y: 14, w: 8, h: 3, minH: 3 },
+    { i: 'industry_breakdown_table', x: 0, y: 17, w: 8, h: 3, minH: 3 }
   ],
   mobile_landscape: [
     { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
@@ -102,8 +118,10 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_value', x: 3, y: 2, w: 3, h: 1 },
     { i: 'accounts_list', x: 0, y: 3, w: 6, h: 2 },
     { i: 'performance', x: 0, y: 5, w: 6, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 8, w: 6, h: 6, minH: 6 },
-    { i: 'industry_breakdown', x: 0, y: 14, w: 6, h: 6, minH: 6 }
+    { i: 'type_breakdown', x: 0, y: 8, w: 6, h: 3, minH: 3 },
+    { i: 'type_breakdown_table', x: 0, y: 11, w: 6, h: 3, minH: 3 },
+    { i: 'industry_breakdown', x: 0, y: 14, w: 6, h: 3, minH: 3 },
+    { i: 'industry_breakdown_table', x: 0, y: 17, w: 6, h: 3, minH: 3 }
   ],
   mobile_portrait: [
     { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
@@ -114,8 +132,10 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_value', x: 0, y: 5, w: 4, h: 1 },
     { i: 'accounts_list', x: 0, y: 6, w: 4, h: 2 },
     { i: 'performance', x: 0, y: 8, w: 4, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 11, w: 4, h: 8, minH: 8 },
-    { i: 'industry_breakdown', x: 0, y: 19, w: 4, h: 8, minH: 8 }
+    { i: 'type_breakdown', x: 0, y: 11, w: 4, h: 3, minH: 3 },
+    { i: 'type_breakdown_table', x: 0, y: 14, w: 4, h: 4, minH: 4 },
+    { i: 'industry_breakdown', x: 0, y: 18, w: 4, h: 3, minH: 3 },
+    { i: 'industry_breakdown_table', x: 0, y: 21, w: 4, h: 4, minH: 4 }
   ]
 };
 
@@ -446,6 +466,11 @@ const Dashboard = () => {
   const [performanceYear, setPerformanceYear] = useState('');
   const [performanceData, setPerformanceData] = useState([]);
   const [performanceLoading, setPerformanceLoading] = useState(false);
+  const theme = useTheme();
+  const isCompactToolbar = useMediaQuery(theme.breakpoints.down('sm'));
+  const [toolbarMenuAnchor, setToolbarMenuAnchor] = useState(null);
+  const isToolbarMenuOpen = Boolean(toolbarMenuAnchor);
+  const [isLayoutLocked, setIsLayoutLocked] = useState(true);
 
   const valuationDate = useMemo(
     () => computeValuationDate(datePreset, specificMonth, endOfYear),
@@ -486,6 +511,14 @@ const Dashboard = () => {
     }
     fetchLayoutForProfile(currentProfile);
   }, [currentProfile, fetchLayoutForProfile]);
+
+  const handleToolbarMenuOpen = useCallback((event) => {
+    setToolbarMenuAnchor(event.currentTarget);
+  }, []);
+
+  const handleToolbarMenuClose = useCallback(() => {
+    setToolbarMenuAnchor(null);
+  }, []);
 
   const fetchPerformanceSeries = useCallback(async () => {
     const dates = computePerformanceDates(performanceRange, performanceMonth, performanceYear);
@@ -582,12 +615,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
     }
   }, []);
 
-  const handleLayoutCommit = useCallback(
-    (profile, nextLayout) => {
-      if (!nextLayout) {
-        return;
-      }
-      const sanitized = normalizeLayoutForProfile(nextLayout, profile);
+  const dragTimeout = useRef(null);
+
+  const commitLayout = useCallback(
+    (profile, layout) => {
+      const sanitized = normalizeLayoutForProfile(layout, profile);
       loadedProfiles.current.add(profile);
       setLayouts((prev) => ({ ...prev, [profile]: sanitized }));
       if (isReadyToPersist.current) {
@@ -595,6 +627,33 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
       }
     },
     [persistLayout]
+  );
+
+  const handleDragStart = useCallback(() => {
+    if (isLayoutLocked) {
+      return;
+    }
+    if (dragTimeout.current) {
+      clearTimeout(dragTimeout.current);
+    }
+    dragTimeout.current = setTimeout(() => {
+      dragTimeout.current = null;
+    }, DRAG_START_DELAY);
+  }, [isLayoutLocked]);
+
+  const handleDragStopCommit = useCallback(
+    (profile, layout) => {
+      if (isLayoutLocked) {
+        return;
+      }
+      if (dragTimeout.current) {
+        clearTimeout(dragTimeout.current);
+        dragTimeout.current = null;
+        return;
+      }
+      commitLayout(profile, layout);
+    },
+    [commitLayout, isLayoutLocked]
   );
 
   const handleResetLayout = async () => {
@@ -635,6 +694,98 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
       setRefreshing(false);
     }
   };
+
+  const handleRefreshClick = useCallback(() => {
+    if (isCompactToolbar) {
+      handleToolbarMenuClose();
+    }
+    handleRefreshPrices();
+  }, [isCompactToolbar, handleRefreshPrices, handleToolbarMenuClose]);
+
+  const handleResetClick = useCallback(() => {
+    if (isCompactToolbar) {
+      handleToolbarMenuClose();
+    }
+    handleResetLayout();
+  }, [isCompactToolbar, handleToolbarMenuClose, handleResetLayout]);
+
+  const handleToggleLock = useCallback(() => {
+    if (isCompactToolbar) {
+      handleToolbarMenuClose();
+    }
+    setIsLayoutLocked((prev) => !prev);
+  }, [isCompactToolbar, handleToolbarMenuClose]);
+
+  const toolbarControls = (
+    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+      <FormControl size="small" sx={{ minWidth: 220 }}>
+        <InputLabel id="dashboard-date-select">Valuation</InputLabel>
+        <Select
+          labelId="dashboard-date-select"
+          value={datePreset}
+          label="Valuation"
+          onChange={(event) => setDatePreset(event.target.value)}
+        >
+          <MenuItem value={DATE_PRESETS.CURRENT}>Current Price</MenuItem>
+          <MenuItem value={DATE_PRESETS.LAST_MONTH}>Last Month</MenuItem>
+          <MenuItem value={DATE_PRESETS.SPECIFIC_MONTH}>Specific Month</MenuItem>
+          <MenuItem value={DATE_PRESETS.LAST_QUARTER}>Last Quarter</MenuItem>
+          <MenuItem value={DATE_PRESETS.LAST_YEAR}>Last Year</MenuItem>
+          <MenuItem value={DATE_PRESETS.END_OF_YEAR}>End of Year</MenuItem>
+        </Select>
+      </FormControl>
+      {datePreset === DATE_PRESETS.SPECIFIC_MONTH && (
+        <TextField
+          label="Month"
+          type="month"
+          size="small"
+          value={specificMonth}
+          onChange={(event) => setSpecificMonth(event.target.value)}
+          InputLabelProps={{ shrink: true }}
+        />
+      )}
+      {datePreset === DATE_PRESETS.END_OF_YEAR && (
+        <TextField
+          label="Year"
+          type="number"
+          size="small"
+          value={endOfYear}
+          onChange={(event) => setEndOfYear(event.target.value)}
+          InputProps={{ inputProps: { min: 1900, max: 9999 } }}
+        />
+      )}
+      {datePreset !== DATE_PRESETS.CURRENT && (
+        <Button
+          variant="text"
+          size="small"
+          onClick={() => {
+            setDatePreset(DATE_PRESETS.CURRENT);
+            setSpecificMonth('');
+            setEndOfYear('');
+          }}
+        >
+          Clear selection
+        </Button>
+      )}
+      <Button
+        variant="contained"
+        size="small"
+        startIcon={<Refresh />}
+        onClick={handleRefreshClick}
+        disabled={refreshing || fetching}
+      >
+        {refreshing ? 'Refreshing...' : fetching ? 'Updating...' : 'Refresh Prices'}
+      </Button>
+      <Button variant="outlined" size="small" onClick={handleResetClick}>
+        Reset Layout
+      </Button>
+      <Tooltip title={isLayoutLocked ? 'Unlock layout editing' : 'Lock layout editing'}>
+        <IconButton size="small" onClick={handleToggleLock} color={isLayoutLocked ? 'default' : 'primary'}>
+          {isLayoutLocked ? <Lock /> : <LockOpen />}
+        </IconButton>
+      </Tooltip>
+    </Stack>
+  );
 
   if (loading || layoutLoading) {
     return (
@@ -724,65 +875,71 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             {industryBreakdown.length === 0 ? (
               <Typography color="textSecondary">Classify positions to view this chart.</Typography>
             ) : (
-              <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <Box sx={{ height: Math.min(320, Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 260)) }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={industryBreakdown}
-                        dataKey="market_value"
-                        nameKey="industry_name"
-                        innerRadius="40%"
-                        outerRadius="70%"
-                        paddingAngle={2}
-                      >
-                        {industryBreakdown.map((slice) => (
-                          <Cell
-                            key={slice.industry_id || 'unclassified'}
-                            fill={slice.color || '#b0bec5'}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value, name, payload) => [
-                          `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
-                          payload?.payload?.industry_name || name
-                        ]}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </Box>
-                <Stack
-                  spacing={1}
-                  sx={{
-                    mt: 2,
-                    flexGrow: 1,
-                    overflowY: 'auto',
-                    pr: 1,
-                    minHeight: 0
-                  }}
-                >
-                  {industryBreakdown.map((slice) => (
-                    <Box
-                      key={slice.industry_id || 'unclassified'}
-                      sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              <Box sx={{ flexGrow: 1, minHeight: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={industryBreakdown}
+                      dataKey="market_value"
+                      nameKey="industry_name"
+                      innerRadius="40%"
+                      outerRadius="70%"
+                      paddingAngle={2}
                     >
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {renderColorSwatch(slice.color)}
-                        <Typography variant="body2">{slice.industry_name}</Typography>
-                      </Box>
-                      <Box textAlign="right">
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {formatCurrency(slice.market_value)}
-                        </Typography>
-                        <Typography variant="caption" color="textSecondary">
-                          {formatPercent(slice.percentage)}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  ))}
-                </Stack>
+                      {industryBreakdown.map((slice) => (
+                        <Cell
+                          key={slice.industry_id || 'unclassified'}
+                          fill={slice.color || '#b0bec5'}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value, name, payload) => [
+                        `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
+                        payload?.payload?.industry_name || name
+                      ]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
               </Box>
+            )}
+          </Paper>
+        );
+      case 'industry_breakdown_table':
+        return (
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Typography
+              variant="caption"
+              color="textSecondary"
+              className="dashboard-tile-handle"
+              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
+            >
+              Industry Breakdown (Details)
+            </Typography>
+            {industryBreakdown.length === 0 ? (
+              <Typography color="textSecondary">Classify positions to view this table.</Typography>
+            ) : (
+              <Stack spacing={1.25} sx={{ flexGrow: 1, overflowY: 'auto', pr: 1 }}>
+                {industryBreakdown.map((slice) => (
+                  <Box
+                    key={slice.industry_id || 'unclassified'}
+                    sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {renderColorSwatch(slice.color)}
+                      <Typography variant="body2">{slice.industry_name}</Typography>
+                    </Box>
+                    <Box textAlign="right">
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {formatCurrency(slice.market_value)}
+                      </Typography>
+                      <Typography variant="caption" color="textSecondary">
+                        {formatPercent(slice.percentage)}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ))}
+              </Stack>
             )}
           </Paper>
         );
@@ -800,65 +957,71 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             {typeBreakdown.length === 0 ? (
               <Typography color="textSecondary">Assign instrument types to view this chart.</Typography>
             ) : (
-              <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <Box sx={{ height: Math.min(320, Math.max(220, ROW_HEIGHT * (layoutItem?.h || 2) - 260)) }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={typeBreakdown}
-                        dataKey="market_value"
-                        nameKey="type_name"
-                        innerRadius="40%"
-                        outerRadius="70%"
-                        paddingAngle={2}
-                      >
-                        {typeBreakdown.map((slice) => (
-                          <Cell
-                            key={slice.type_id || 'unclassified'}
-                            fill={slice.color || '#b0bec5'}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value, name, payload) => [
-                          `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
-                          payload?.payload?.type_name || name
-                        ]}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </Box>
-                <Stack
-                  spacing={1}
-                  sx={{
-                    mt: 2,
-                    flexGrow: 1,
-                    overflowY: 'auto',
-                    pr: 1,
-                    minHeight: 0
-                  }}
-                >
-                  {typeBreakdown.map((slice) => (
-                    <Box
-                      key={slice.type_id || 'unclassified'}
-                      sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              <Box sx={{ flexGrow: 1, minHeight: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={typeBreakdown}
+                      dataKey="market_value"
+                      nameKey="type_name"
+                      innerRadius="40%"
+                      outerRadius="70%"
+                      paddingAngle={2}
                     >
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {renderColorSwatch(slice.color)}
-                        <Typography variant="body2">{slice.type_name}</Typography>
-                      </Box>
-                      <Box textAlign="right">
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {formatCurrency(slice.market_value)}
-                        </Typography>
-                        <Typography variant="caption" color="textSecondary">
-                          {formatPercent(slice.percentage)}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  ))}
-                </Stack>
+                      {typeBreakdown.map((slice) => (
+                        <Cell
+                          key={slice.type_id || 'unclassified'}
+                          fill={slice.color || '#b0bec5'}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value, name, payload) => [
+                        `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
+                        payload?.payload?.type_name || name
+                      ]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
               </Box>
+            )}
+          </Paper>
+        );
+      case 'type_breakdown_table':
+        return (
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Typography
+              variant="caption"
+              color="textSecondary"
+              className="dashboard-tile-handle"
+              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
+            >
+              Asset Types (Details)
+            </Typography>
+            {typeBreakdown.length === 0 ? (
+              <Typography color="textSecondary">Assign instrument types to view this table.</Typography>
+            ) : (
+              <Stack spacing={1.25} sx={{ flexGrow: 1, overflowY: 'auto', pr: 1 }}>
+                {typeBreakdown.map((slice) => (
+                  <Box
+                    key={slice.type_id || 'unclassified'}
+                    sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {renderColorSwatch(slice.color)}
+                      <Typography variant="body2">{slice.type_name}</Typography>
+                    </Box>
+                    <Box textAlign="right">
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {formatCurrency(slice.market_value)}
+                      </Typography>
+                      <Typography variant="caption" color="textSecondary">
+                        {formatPercent(slice.percentage)}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ))}
+              </Stack>
             )}
           </Paper>
         );
@@ -930,7 +1093,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" />
                     <YAxis />
-                    <Tooltip formatter={(value) => formatCurrency(value)} />
+                    <RechartsTooltip formatter={(value) => formatCurrency(value)} />
                     <Legend />
                     <Line
                       type="monotone"
@@ -972,19 +1135,42 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                   No accounts yet. Import a statement to get started.
                 </Typography>
               ) : (
-                accounts.map((account) => (
-                  <Box key={account.id} sx={{ mb: 2, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-                    <Typography variant="subtitle1">
-                      {account.institution}
-                    </Typography>
-                    <Typography variant="body2" color="textSecondary">
-                      {account.account_type} - {account.account_number}
-                    </Typography>
-                    <Typography variant="h6" color="primary">
-                      {formatCurrency(account.balance)}
-                    </Typography>
-                  </Box>
-                ))
+                <Grid container spacing={2}>
+                  {accounts.map((account) => (
+                    <Grid item xs={12} sm={6} md={4} key={account.id}>
+                      <Paper
+                        variant="outlined"
+                        sx={{
+                          p: 2,
+                          height: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 0.5
+                        }}
+                      >
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                          {account.label || account.institution}
+                        </Typography>
+                        <Typography variant="body2" color="textSecondary">
+                          {account.institution} · {account.account_type}
+                        </Typography>
+                        {account.account_number && (
+                          <Typography variant="caption" color="textSecondary">
+                            #{account.account_number}
+                          </Typography>
+                        )}
+                        <Box sx={{ mt: 1, display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                          <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
+                            {formatCurrency(account.balance ?? 0)}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary">
+                            balance
+                          </Typography>
+                        </Box>
+                      </Paper>
+                    </Grid>
+                  ))}
+                </Grid>
               )}
             </Box>
           </Paper>
@@ -1005,69 +1191,23 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             As of {asOfLabel}
           </Typography>
         </Box>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 220 }}>
-            <InputLabel id="dashboard-date-select">Valuation</InputLabel>
-            <Select
-              labelId="dashboard-date-select"
-              value={datePreset}
-              label="Valuation"
-              onChange={(event) => setDatePreset(event.target.value)}
+        {isCompactToolbar ? (
+          <>
+            <IconButton size="small" onClick={handleToolbarMenuOpen}>
+              <MenuIcon />
+            </IconButton>
+            <Menu
+              anchorEl={toolbarMenuAnchor}
+              open={isToolbarMenuOpen}
+              onClose={handleToolbarMenuClose}
+              keepMounted
             >
-              <MenuItem value={DATE_PRESETS.CURRENT}>Current Price</MenuItem>
-              <MenuItem value={DATE_PRESETS.LAST_MONTH}>Last Month</MenuItem>
-              <MenuItem value={DATE_PRESETS.SPECIFIC_MONTH}>Specific Month</MenuItem>
-              <MenuItem value={DATE_PRESETS.LAST_QUARTER}>Last Quarter</MenuItem>
-              <MenuItem value={DATE_PRESETS.LAST_YEAR}>Last Year</MenuItem>
-              <MenuItem value={DATE_PRESETS.END_OF_YEAR}>End of Year</MenuItem>
-            </Select>
-          </FormControl>
-          {datePreset === DATE_PRESETS.SPECIFIC_MONTH && (
-            <TextField
-              label="Month"
-              type="month"
-              size="small"
-              value={specificMonth}
-              onChange={(event) => setSpecificMonth(event.target.value)}
-              InputLabelProps={{ shrink: true }}
-            />
-          )}
-          {datePreset === DATE_PRESETS.END_OF_YEAR && (
-            <TextField
-              label="Year"
-              type="number"
-              size="small"
-              value={endOfYear}
-              onChange={(event) => setEndOfYear(event.target.value)}
-              InputProps={{ inputProps: { min: 1900, max: 9999 } }}
-            />
-          )}
-          {datePreset !== DATE_PRESETS.CURRENT && (
-            <Button
-              variant="text"
-              size="small"
-              onClick={() => {
-                setDatePreset(DATE_PRESETS.CURRENT);
-                setSpecificMonth('');
-                setEndOfYear('');
-              }}
-            >
-              Clear selection
-            </Button>
-          )}
-          <Button
-            variant="contained"
-            size="small"
-            startIcon={<Refresh />}
-            onClick={handleRefreshPrices}
-            disabled={refreshing || fetching}
-          >
-            {refreshing ? 'Refreshing...' : 'Refresh Prices'}
-          </Button>
-          <Button variant="outlined" size="small" onClick={handleResetLayout}>
-            Reset Layout
-          </Button>
-        </Stack>
+              <Box sx={{ p: 2, maxWidth: 300 }}>{toolbarControls}</Box>
+            </Menu>
+          </>
+        ) : (
+          toolbarControls
+        )}
       </Box>
 
       <ResponsiveGridLayout
@@ -1080,14 +1220,17 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
         compactType={null}
         preventCollision={false}
         allowOverlap
+        isDraggable={!isLayoutLocked}
+        isResizable={!isLayoutLocked}
         draggableHandle=".dashboard-tile-handle"
         onBreakpointChange={(newBreakpoint) => {
           if (LAYOUT_PROFILES.includes(newBreakpoint)) {
             setCurrentProfile(newBreakpoint);
           }
         }}
-        onDragStop={(layout) => handleLayoutCommit(currentProfile, layout)}
-        onResizeStop={(layout) => handleLayoutCommit(currentProfile, layout)}
+        onDragStart={!isLayoutLocked ? () => handleDragStart() : undefined}
+        onDragStop={!isLayoutLocked ? (layout) => handleDragStopCommit(currentProfile, layout) : undefined}
+        onResizeStop={!isLayoutLocked ? (layout) => commitLayout(currentProfile, layout) : undefined}
       >
         {(layouts[currentProfile] || []).map((item) => (
           <div key={item.i}>

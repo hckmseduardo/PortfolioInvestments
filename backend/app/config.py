@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import Field, field_validator
 from typing import List, Optional
 from pathlib import Path
 
@@ -37,6 +38,46 @@ class Settings(BaseSettings):
 
     # Market data providers
     TWELVEDATA_API_KEY: Optional[str] = None
+    ALPHA_VANTAGE_API_KEY: Optional[str] = None
+    PRICE_SOURCE_PRIORITY: List[str] = Field(
+        default_factory=lambda: [
+            "tradingview",
+            "yfinance",
+            "alpha_vantage",
+            "twelvedata",
+            "stooq",
+        ]
+    )
+
+    @field_validator("PRICE_SOURCE_PRIORITY", mode="before")
+    @classmethod
+    def _split_price_priority(cls, value):
+        if value is None:
+            return value
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(value, (list, tuple)):
+            cleaned = []
+            for item in value:
+                if item is None:
+                    continue
+                text = str(item).strip()
+                if text:
+                    cleaned.append(text)
+            return cleaned
+        return value
+
+    @property
+    def price_source_priority(self) -> List[str]:
+        normalized = []
+        seen = set()
+        for entry in self.PRICE_SOURCE_PRIORITY or []:
+            key = entry.strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            normalized.append(key)
+        return normalized
 
     @property
     def cors_origins_list(self) -> List[str]:
