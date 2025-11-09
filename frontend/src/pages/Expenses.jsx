@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Container,
   Paper,
@@ -27,7 +27,8 @@ import {
   Snackbar,
   Tabs,
   Tab,
-  CircularProgress
+  CircularProgress,
+  Stack
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -53,6 +54,28 @@ const ALLOWED_EXPENSE_ACCOUNT_TYPES = ['checking', 'credit_card'];
 const isAllowedExpenseAccount = (account = {}) =>
   ALLOWED_EXPENSE_ACCOUNT_TYPES.includes(String(account.account_type || '').toLowerCase());
 
+const PRESET_OPTIONS = [
+  { value: '7d', label: '7D' },
+  { value: '30d', label: '30D' },
+  { value: 'thisMonth', label: 'This Mo' },
+  { value: 'lastMonth', label: 'Last Mo' },
+  { value: 'last3Months', label: '3M' },
+  { value: 'last6Months', label: '6M' },
+  { value: 'last12Months', label: '12M' },
+  { value: 'thisYear', label: 'YTD' },
+  { value: 'lastYear', label: 'Last Yr' },
+  { value: 'all', label: 'All' }
+];
+
+const DEFAULT_PRESET = 'thisMonth';
+
+const formatDateToInput = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const Expenses = () => {
   const [tabValue, setTabValue] = useState(0);
   const [expenses, setExpenses] = useState([]);
@@ -62,8 +85,9 @@ const Expenses = () => {
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [dateRange, setDateRange] = useState('current_month'); // current_month, last_month, last_3_months, last_6_months, last_year, all_time, specific_month
-  const [specificMonth, setSpecificMonth] = useState(''); // Format: YYYY-MM
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState(DEFAULT_PRESET);
   const [loading, setLoading] = useState(true);
   const [editingExpense, setEditingExpense] = useState(null);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
@@ -77,16 +101,90 @@ const Expenses = () => {
   const conversionPollRef = useRef(null);
   const conversionJobIdRef = useRef(null);
 
+  const applyPreset = useCallback((presetValue) => {
+    const today = new Date();
+    const presets = {
+      '7d': () => {
+        const start = new Date(today);
+        start.setDate(today.getDate() - 6);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      '30d': () => {
+        const start = new Date(today);
+        start.setDate(today.getDate() - 29);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      thisMonth: () => {
+        const start = new Date(today.getFullYear(), today.getMonth(), 1);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      lastMonth: () => {
+        const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const end = new Date(today.getFullYear(), today.getMonth(), 0);
+        return { start: formatDateToInput(start), end: formatDateToInput(end) };
+      },
+      last3Months: () => {
+        const start = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      last6Months: () => {
+        const start = new Date(today.getFullYear(), today.getMonth() - 5, 1);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      last12Months: () => {
+        const start = new Date(today.getFullYear(), today.getMonth() - 11, 1);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      thisYear: () => {
+        const start = new Date(today.getFullYear(), 0, 1);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      lastYear: () => {
+        const start = new Date(today.getFullYear() - 1, 0, 1);
+        const end = new Date(today.getFullYear() - 1, 11, 31);
+        return { start: formatDateToInput(start), end: formatDateToInput(end) };
+      },
+      all: () => ({ start: '', end: '' })
+    };
+
+    const range = presets[presetValue] ? presets[presetValue]() : presets.all();
+    setSelectedPreset(presetValue);
+    setStartDate(range.start);
+    setEndDate(range.end);
+  }, []);
+
+  const handleStartDateChange = (event) => {
+    const value = event.target.value;
+    setSelectedPreset('custom');
+    setStartDate(value);
+    if (value && endDate && value > endDate) {
+      setEndDate(value);
+    }
+  };
+
+  const handleEndDateChange = (event) => {
+    const value = event.target.value;
+    setSelectedPreset('custom');
+    setEndDate(value);
+    if (value && startDate && value < startDate) {
+      setStartDate(value);
+    }
+  };
+
   useEffect(() => {
     fetchInitialData();
   }, []);
+
+  useEffect(() => {
+    applyPreset(DEFAULT_PRESET);
+  }, [applyPreset]);
 
   useEffect(() => {
     if (!loading) {
       fetchExpenses();
       fetchSummary();
     }
-  }, [selectedAccount, selectedCategory, dateRange, specificMonth]);
+  }, [selectedAccount, selectedCategory, startDate, endDate, loading]);
 
   const fetchInitialData = async () => {
     try {
@@ -123,44 +221,18 @@ const Expenses = () => {
   };
 
   const getDateRangeFilter = () => {
-    const now = new Date();
-    let startDate, endDate = now;
+    const parsedStart = startDate ? new Date(startDate) : null;
+    const parsedEnd = endDate ? new Date(endDate) : null;
 
-    switch (dateRange) {
-      case 'current_month':
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        break;
-      case 'last_month':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        endDate = new Date(now.getFullYear(), now.getMonth(), 0);
-        break;
-      case 'last_3_months':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-        break;
-      case 'last_6_months':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 6, 1);
-        break;
-      case 'last_year':
-        startDate = new Date(now.getFullYear() - 1, now.getMonth(), 1);
-        break;
-      case 'year_to_date':
-        startDate = new Date(now.getFullYear(), 0, 1);
-        break;
-      case 'specific_month':
-        if (specificMonth) {
-          const [year, month] = specificMonth.split('-').map(Number);
-          startDate = new Date(year, month - 1, 1);
-          endDate = new Date(year, month, 0);
-        } else {
-          return { startDate: null, endDate: null };
-        }
-        break;
-      case 'all_time':
-      default:
-        return { startDate: null, endDate: null };
+    if (parsedStart) {
+      parsedStart.setHours(0, 0, 0, 0);
     }
 
-    return { startDate, endDate };
+    if (parsedEnd) {
+      parsedEnd.setHours(23, 59, 59, 999);
+    }
+
+    return { startDate: parsedStart, endDate: parsedEnd };
   };
 
   const fetchAccounts = async () => {
@@ -183,14 +255,16 @@ const Expenses = () => {
   const fetchExpenses = async () => {
     try {
       const response = await expensesAPI.getAll(selectedAccount || null, selectedCategory || null);
-      const { startDate, endDate } = getDateRangeFilter();
+      const { startDate: filterStart, endDate: filterEnd } = getDateRangeFilter();
 
       // Filter expenses by date range
       let filteredExpenses = response.data;
-      if (startDate && endDate) {
+      if (filterStart || filterEnd) {
         filteredExpenses = response.data.filter(expense => {
           const expenseDate = new Date(expense.date);
-          return expenseDate >= startDate && expenseDate <= endDate;
+          const isAfterStart = filterStart ? expenseDate >= filterStart : true;
+          const isBeforeEnd = filterEnd ? expenseDate <= filterEnd : true;
+          return isAfterStart && isBeforeEnd;
         });
       }
 
@@ -203,15 +277,17 @@ const Expenses = () => {
   const fetchSummary = async () => {
     try {
       const response = await expensesAPI.getSummary(selectedAccount || null);
-      const { startDate, endDate } = getDateRangeFilter();
+      const { startDate: filterStart, endDate: filterEnd } = getDateRangeFilter();
 
       // Filter summary by date range if needed
-      if (startDate && endDate) {
+      if (filterStart || filterEnd) {
         // Recalculate summary for the filtered date range
         const allExpenses = await expensesAPI.getAll(selectedAccount || null, null);
         const filteredExpenses = allExpenses.data.filter(expense => {
           const expenseDate = new Date(expense.date);
-          return expenseDate >= startDate && expenseDate <= endDate;
+          const isAfterStart = filterStart ? expenseDate >= filterStart : true;
+          const isBeforeEnd = filterEnd ? expenseDate <= filterEnd : true;
+          return isAfterStart && isBeforeEnd;
         });
 
         const totalExpenses = filteredExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
@@ -533,75 +609,82 @@ const Expenses = () => {
 
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 3 }}>
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={3}>
-            <FormControl fullWidth>
-              <InputLabel>Time Period</InputLabel>
-              <Select
-                value={dateRange}
-                onChange={(e) => setDateRange(e.target.value)}
-                label="Time Period"
-              >
-                <MenuItem value="current_month">Current Month</MenuItem>
-                <MenuItem value="last_month">Last Month</MenuItem>
-                <MenuItem value="last_3_months">Last 3 Months</MenuItem>
-                <MenuItem value="last_6_months">Last 6 Months</MenuItem>
-                <MenuItem value="year_to_date">Year to Date</MenuItem>
-                <MenuItem value="last_year">Last Year</MenuItem>
-                <MenuItem value="specific_month">Specific Month</MenuItem>
-                <MenuItem value="all_time">All Time</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          {dateRange === 'specific_month' && (
-            <Grid item xs={12} md={3}>
-              <TextField
-                fullWidth
-                type="month"
-                label="Select Month"
-                value={specificMonth}
-                onChange={(e) => setSpecificMonth(e.target.value)}
-                InputLabelProps={{
-                  shrink: true,
-                }}
-              />
+        <Stack spacing={2}>
+          <Box>
+            <Typography variant="subtitle1" sx={{ mb: 1 }}>
+              Filter by period
+            </Typography>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ gap: 0.5 }}>
+              {PRESET_OPTIONS.map((preset) => (
+                <Button
+                  key={preset.value}
+                  variant={selectedPreset === preset.value ? 'contained' : 'outlined'}
+                  size="small"
+                  onClick={() => applyPreset(preset.value)}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+            </Stack>
+          </Box>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+            <TextField
+              label="Start date"
+              type="date"
+              size="small"
+              value={startDate}
+              onChange={handleStartDateChange}
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              label="End date"
+              type="date"
+              size="small"
+              value={endDate}
+              onChange={handleEndDateChange}
+              InputLabelProps={{ shrink: true }}
+            />
+            <Button variant="text" size="small" onClick={() => applyPreset('all')}>
+              Clear filters
+            </Button>
+          </Stack>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel>Account</InputLabel>
+                <Select
+                  value={selectedAccount}
+                  onChange={(e) => setSelectedAccount(e.target.value)}
+                  label="Account"
+                >
+                  <MenuItem value="">All Accounts</MenuItem>
+                  {accounts.map(account => (
+                    <MenuItem key={account.id} value={account.id}>
+                      {account.label} ({account.institution})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Grid>
-          )}
-          <Grid item xs={12} md={dateRange === 'specific_month' ? 3 : 4}>
-            <FormControl fullWidth>
-              <InputLabel>Account</InputLabel>
-              <Select
-                value={selectedAccount}
-                onChange={(e) => setSelectedAccount(e.target.value)}
-                label="Account"
-              >
-                <MenuItem value="">All Accounts</MenuItem>
-                {accounts.map(account => (
-                  <MenuItem key={account.id} value={account.id}>
-                    {account.label} ({account.institution})
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel>Category</InputLabel>
+                <Select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  label="Category"
+                >
+                  <MenuItem value="">All Categories</MenuItem>
+                  {categories.map(category => (
+                    <MenuItem key={category.id} value={category.name}>
+                      {category.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
           </Grid>
-          <Grid item xs={12} md={dateRange === 'specific_month' ? 3 : 4}>
-            <FormControl fullWidth>
-              <InputLabel>Category</InputLabel>
-              <Select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                label="Category"
-              >
-                <MenuItem value="">All Categories</MenuItem>
-                {categories.map(category => (
-                  <MenuItem key={category.id} value={category.name}>
-                    {category.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-        </Grid>
+        </Stack>
       </Paper>
 
       <Tabs value={tabValue} onChange={(e, newValue) => setTabValue(newValue)} sx={{ mb: 3 }}>
@@ -813,8 +896,13 @@ const Expenses = () => {
                         data={monthlyTrendData}
                         onDoubleClick={(e) => {
                           if (!e?.activeLabel) return;
-                          setSpecificMonth(e.activeLabel);
-                          setDateRange('specific_month');
+                          const [year, month] = String(e.activeLabel).split('-').map(Number);
+                          if (!year || !month) return;
+                          const start = formatDateToInput(new Date(year, month - 1, 1));
+                          const end = formatDateToInput(new Date(year, month, 0));
+                          setSelectedPreset('custom');
+                          setStartDate(start);
+                          setEndDate(end);
                           setTabValue(0);
                         }}
                       >
