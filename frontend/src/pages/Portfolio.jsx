@@ -39,7 +39,8 @@ import {
   Category as CategoryIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  Business as BusinessIcon
+  Business as BusinessIcon,
+  FilterAlt as FilterIcon
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { positionsAPI, accountsAPI, instrumentsAPI } from '../services/api';
@@ -663,6 +664,14 @@ const Portfolio = () => {
     setSelectedTypeId((prev) => (prev === sliceId ? '' : sliceId));
   }, []);
 
+  const clearIndustryFilter = useCallback(() => {
+    setSelectedIndustryId('');
+  }, []);
+
+  const clearTypeFilter = useCallback(() => {
+    setSelectedTypeId('');
+  }, []);
+
   const hasFilters = Boolean(
     selectedAccountId ||
     valuationDate ||
@@ -901,12 +910,31 @@ const Portfolio = () => {
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3, height: '100%' }}>
-            <Typography variant="h6" gutterBottom>
-              Industry Allocation
-            </Typography>
-            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-              Market value distribution by industry
-            </Typography>
+            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
+              <Box>
+                <Typography variant="h6" gutterBottom>
+                  Industry Allocation
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  Market value distribution by industry
+                </Typography>
+              </Box>
+              {selectedIndustryId && (
+                <Tooltip title="Clear industry filter">
+                  <IconButton
+                    size="small"
+                    onClick={clearIndustryFilter}
+                    sx={{
+                      bgcolor: 'primary.main',
+                      color: 'white',
+                      '&:hover': { bgcolor: 'primary.dark' }
+                    }}
+                  >
+                    <FilterIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
             {industrySlices.length === 0 ? (
               <Typography color="textSecondary">
                 Classify your positions to see the breakdown by industry.
@@ -948,12 +976,31 @@ const Portfolio = () => {
         </Grid>
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3, height: '100%' }}>
-            <Typography variant="h6" gutterBottom>
-              Asset Type Allocation
-            </Typography>
-            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-              Market value distribution by asset type
-            </Typography>
+            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
+              <Box>
+                <Typography variant="h6" gutterBottom>
+                  Asset Type Allocation
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  Market value distribution by asset type
+                </Typography>
+              </Box>
+              {selectedTypeId && (
+                <Tooltip title="Clear type filter">
+                  <IconButton
+                    size="small"
+                    onClick={clearTypeFilter}
+                    sx={{
+                      bgcolor: 'primary.main',
+                      color: 'white',
+                      '&:hover': { bgcolor: 'primary.dark' }
+                    }}
+                  >
+                    <FilterIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
             {typeSlices.length === 0 ? (
               <Typography color="textSecondary">
                 Assign instrument types to see this breakdown.
