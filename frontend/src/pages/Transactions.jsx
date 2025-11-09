@@ -11,7 +11,6 @@ import {
   TableHead,
   TableRow,
   FormControl,
-  InputLabel,
   Select,
   MenuItem,
   TextField,
@@ -226,8 +225,31 @@ const Transactions = () => {
       </Typography>
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={4}>
-          <Card>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Account
+              </Typography>
+              <FormControl fullWidth size="small">
+                <Select
+                  value={selectedAccount}
+                  onChange={(e) => setSelectedAccount(e.target.value)}
+                  displayEmpty
+                >
+                  <MenuItem value="">All Accounts</MenuItem>
+                  {accounts.map((account) => (
+                    <MenuItem key={account.id} value={account.id}>
+                      {account.institution} - {account.account_number}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 Account Balance
@@ -241,8 +263,8 @@ const Transactions = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={4}>
-          <Card>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 Total Transactions
@@ -253,8 +275,8 @@ const Transactions = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={4}>
-          <Card>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 Imported Statements
@@ -307,25 +329,6 @@ const Transactions = () => {
               Clear filters
             </Button>
           </Stack>
-          <Grid container spacing={2}>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Account</InputLabel>
-                <Select
-                  value={selectedAccount}
-                  label="Account"
-                  onChange={(e) => setSelectedAccount(e.target.value)}
-                >
-                  <MenuItem value="">All Accounts</MenuItem>
-                  {accounts.map((account) => (
-                    <MenuItem key={account.id} value={account.id}>
-                      {account.institution} - {account.account_number}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-          </Grid>
         </Stack>
       </Paper>
 
