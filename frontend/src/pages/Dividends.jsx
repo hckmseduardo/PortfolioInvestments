@@ -23,7 +23,7 @@ import {
   Tab
 } from '@mui/material';
 import { dividendsAPI, accountsAPI, instrumentsAPI } from '../services/api';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Line, ComposedChart } from 'recharts';
 
 const PIE_COLORS = [
   '#0088FE',
@@ -57,8 +57,12 @@ const Dividends = () => {
   const [endDate, setEndDate] = useState('');
   const [selectedPreset, setSelectedPreset] = useState('all');
   const [selectedMonth, setSelectedMonth] = useState('');
+  const [selectedTicker, setSelectedTicker] = useState('');
+  const [selectedType, setSelectedType] = useState('');
+  const [selectedIndustry, setSelectedIndustry] = useState('');
   const [instrumentTypes, setInstrumentTypes] = useState([]);
   const [instrumentIndustries, setInstrumentIndustries] = useState([]);
+  const [instrumentMetadata, setInstrumentMetadata] = useState([]);
   const [selectedTypeId, setSelectedTypeId] = useState('');
   const [selectedIndustryId, setSelectedIndustryId] = useState('');
   const [activeTab, setActiveTab] = useState(0);
@@ -127,12 +131,14 @@ const Dividends = () => {
 
   const loadInstrumentMetadata = useCallback(async () => {
     try {
-      const [typesRes, industriesRes] = await Promise.all([
+      const [typesRes, industriesRes, metadataRes] = await Promise.all([
         instrumentsAPI.getTypes(),
-        instrumentsAPI.getIndustries()
+        instrumentsAPI.getIndustries(),
+        instrumentsAPI.listClassifications()
       ]);
       setInstrumentTypes(typesRes.data || []);
       setInstrumentIndustries(industriesRes.data || []);
+      setInstrumentMetadata(metadataRes.data || []);
     } catch (error) {
       console.error('Error loading instrument metadata:', error);
     }
@@ -235,7 +241,7 @@ const Dividends = () => {
     if (!summary?.dividends_by_month) return [];
     const formatter = new Intl.DateTimeFormat('en-CA', { month: 'short', year: 'numeric' });
 
-    return Object.entries(summary.dividends_by_month)
+    const sortedData = Object.entries(summary.dividends_by_month)
       .map(([monthKey, amount]) => {
         const [year, month] = monthKey.split('-').map(Number);
         const date = new Date(year, (month || 1) - 1, 1);
@@ -246,6 +252,19 @@ const Dividends = () => {
         };
       })
       .sort((a, b) => new Date(`${a.month}-01`) - new Date(`${b.month}-01`));
+
+    // Calculate 12-month moving average
+    return sortedData.map((item, index) => {
+      // Get the last 12 months including current month
+      const start = Math.max(0, index - 11);
+      const last12Months = sortedData.slice(start, index + 1);
+      const movingAvg = last12Months.reduce((sum, m) => sum + m.amount, 0) / last12Months.length;
+
+      return {
+        ...item,
+        movingAverage: movingAvg
+      };
+    });
   }, [summary]);
 
   const typeLookup = useMemo(() => {
@@ -316,6 +335,21 @@ const Dividends = () => {
     setSelectedMonth((prev) => (prev === clickedMonth ? '' : clickedMonth));
   }, []);
 
+  const handleTickerPieClick = useCallback((data) => {
+    if (!data || !data.name) return;
+    setSelectedTicker((prev) => (prev === data.name ? '' : data.name));
+  }, []);
+
+  const handleTypePieClick = useCallback((data) => {
+    if (!data || !data.name) return;
+    setSelectedType((prev) => (prev === data.name ? '' : data.name));
+  }, []);
+
+  const handleIndustryPieClick = useCallback((data) => {
+    if (!data || !data.name) return;
+    setSelectedIndustry((prev) => (prev === data.name ? '' : data.name));
+  }, []);
+
   const statementRows = useMemo(() => {
     let filtered = dividends;
 
@@ -333,6 +367,35 @@ const Dividends = () => {
       });
     }
 
+    // Filter by selected ticker from pie chart
+    if (selectedTicker) {
+      filtered = filtered.filter((dividend) => dividend.ticker === selectedTicker);
+    }
+
+    // Filter by selected type from pie chart
+    if (selectedType) {
+      const typeObj = instrumentTypes.find(t => t.name === selectedType);
+      if (typeObj) {
+        // Get all tickers with this type
+        const tickersWithType = instrumentMetadata
+          .filter(m => m.instrument_type_id === typeObj.id)
+          .map(m => m.ticker);
+        filtered = filtered.filter((dividend) => tickersWithType.includes(dividend.ticker));
+      }
+    }
+
+    // Filter by selected industry from pie chart
+    if (selectedIndustry) {
+      const industryObj = instrumentIndustries.find(i => i.name === selectedIndustry);
+      if (industryObj) {
+        // Get all tickers with this industry
+        const tickersWithIndustry = instrumentMetadata
+          .filter(m => m.instrument_industry_id === industryObj.id)
+          .map(m => m.ticker);
+        filtered = filtered.filter((dividend) => tickersWithIndustry.includes(dividend.ticker));
+      }
+    }
+
     return filtered.map((dividend, index) => ({
       ...dividend,
       rowKey: dividend.id || `${dividend.account_id || 'account'}-${dividend.ticker || 'ticker'}-${dividend.date || index}-${index}`,
@@ -342,7 +405,7 @@ const Dividends = () => {
           ? `${accountLookup[dividend.account_id].institution} - ${accountLookup[dividend.account_id].account_number}`
           : dividend.account_id)
     }));
-  }, [dividends, accountLookup, selectedMonth]);
+  }, [dividends, accountLookup, selectedMonth, selectedTicker, selectedType, selectedIndustry, instrumentTypes, instrumentIndustries, instrumentMetadata]);
 
   const activePeriodDescription = useMemo(() => {
     if (startDate || endDate) {
@@ -550,7 +613,7 @@ const Dividends = () => {
                       Double-click a bar to filter the statement table by that month
                     </Typography>
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={monthlyData} onDoubleClick={handleBarDoubleClick}>
+                      <ComposedChart data={monthlyData} onDoubleClick={handleBarDoubleClick}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="label" />
                         <YAxis />
@@ -564,7 +627,15 @@ const Dividends = () => {
                             />
                           ))}
                         </Bar>
-                      </BarChart>
+                        <Line
+                          type="monotone"
+                          dataKey="movingAverage"
+                          name="12-Month Avg"
+                          stroke="#ff7300"
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      </ComposedChart>
                     </ResponsiveContainer>
                   </Box>
                 ) : (
@@ -584,6 +655,9 @@ const Dividends = () => {
                   <Grid container spacing={3}>
                     <Grid item xs={12} md={6}>
                       <Box sx={{ height: 400 }}>
+                        <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+                          Double-click a slice to filter the statement table
+                        </Typography>
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <Pie
@@ -595,9 +669,14 @@ const Dividends = () => {
                               outerRadius={120}
                               fill="#8884d8"
                               dataKey="value"
+                              onClick={handleTickerPieClick}
                             >
                               {tickerData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                <Cell
+                                  key={`cell-${index}`}
+                                  fill={entry.name === selectedTicker ? '#4caf50' : PIE_COLORS[index % PIE_COLORS.length]}
+                                  style={{ cursor: 'pointer' }}
+                                />
                               ))}
                             </Pie>
                             <Tooltip formatter={(value) => formatCurrency(value)} />
@@ -644,6 +723,9 @@ const Dividends = () => {
                   <Grid container spacing={3}>
                     <Grid item xs={12} md={6}>
                       <Box sx={{ height: 400 }}>
+                        <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+                          Double-click a slice to filter the statement table
+                        </Typography>
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <Pie
@@ -655,9 +737,14 @@ const Dividends = () => {
                               outerRadius={120}
                               fill="#8884d8"
                               dataKey="value"
+                              onClick={handleTypePieClick}
                             >
                               {typeData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
+                                <Cell
+                                  key={`cell-${index}`}
+                                  fill={entry.name === selectedType ? '#4caf50' : entry.color}
+                                  style={{ cursor: 'pointer' }}
+                                />
                               ))}
                             </Pie>
                             <Tooltip formatter={(value) => formatCurrency(value)} />
@@ -704,6 +791,9 @@ const Dividends = () => {
                   <Grid container spacing={3}>
                     <Grid item xs={12} md={6}>
                       <Box sx={{ height: 400 }}>
+                        <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+                          Double-click a slice to filter the statement table
+                        </Typography>
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <Pie
@@ -715,9 +805,14 @@ const Dividends = () => {
                               outerRadius={120}
                               fill="#82ca9d"
                               dataKey="value"
+                              onClick={handleIndustryPieClick}
                             >
                               {industryData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
+                                <Cell
+                                  key={`cell-${index}`}
+                                  fill={entry.name === selectedIndustry ? '#4caf50' : entry.color}
+                                  style={{ cursor: 'pointer' }}
+                                />
                               ))}
                             </Pie>
                             <Tooltip formatter={(value) => formatCurrency(value)} />
@@ -764,19 +859,65 @@ const Dividends = () => {
                 <Typography variant="h6">
                   Dividends Statement
                 </Typography>
-                {selectedMonth && (
-                  <Typography variant="body2" color="primary" sx={{ mt: 0.5 }}>
-                    Filtered by month: {monthlyData.find(m => m.month === selectedMonth)?.label || selectedMonth}
-                    {' '}
-                    <Button
-                      variant="text"
-                      size="small"
-                      onClick={() => setSelectedMonth('')}
-                      sx={{ ml: 1, minWidth: 'auto', p: 0 }}
-                    >
-                      (Clear)
-                    </Button>
-                  </Typography>
+                {(selectedMonth || selectedTicker || selectedType || selectedIndustry) && (
+                  <Box sx={{ mt: 0.5 }}>
+                    {selectedMonth && (
+                      <Typography variant="body2" color="primary" component="span" sx={{ mr: 2 }}>
+                        Month: {monthlyData.find(m => m.month === selectedMonth)?.label || selectedMonth}
+                        {' '}
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => setSelectedMonth('')}
+                          sx={{ minWidth: 'auto', p: 0 }}
+                        >
+                          (Clear)
+                        </Button>
+                      </Typography>
+                    )}
+                    {selectedTicker && (
+                      <Typography variant="body2" color="primary" component="span" sx={{ mr: 2 }}>
+                        Ticker: {selectedTicker}
+                        {' '}
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => setSelectedTicker('')}
+                          sx={{ minWidth: 'auto', p: 0 }}
+                        >
+                          (Clear)
+                        </Button>
+                      </Typography>
+                    )}
+                    {selectedType && (
+                      <Typography variant="body2" color="primary" component="span" sx={{ mr: 2 }}>
+                        Type: {selectedType}
+                        {' '}
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => setSelectedType('')}
+                          sx={{ minWidth: 'auto', p: 0 }}
+                        >
+                          (Clear)
+                        </Button>
+                      </Typography>
+                    )}
+                    {selectedIndustry && (
+                      <Typography variant="body2" color="primary" component="span" sx={{ mr: 2 }}>
+                        Industry: {selectedIndustry}
+                        {' '}
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => setSelectedIndustry('')}
+                          sx={{ minWidth: 'auto', p: 0 }}
+                        >
+                          (Clear)
+                        </Button>
+                      </Typography>
+                    )}
+                  </Box>
                 )}
               </Box>
               {fetching && <LinearProgress sx={{ width: 200 }} />}
