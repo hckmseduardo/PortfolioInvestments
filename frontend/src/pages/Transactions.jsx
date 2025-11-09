@@ -27,6 +27,7 @@ import {
 import { transactionsAPI, accountsAPI, importAPI } from '../services/api';
 import { format, subDays, startOfMonth, startOfYear, subMonths, subYears } from 'date-fns';
 import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
+import ExportButtons from '../components/ExportButtons';
 
 const PRESET_OPTIONS = [
   { value: '7d', label: '7D' },
@@ -377,6 +378,28 @@ const Transactions = () => {
     return sorted;
   }, [transactions, filters, sortConfig, accounts]);
 
+  // Export configuration
+  const transactionExportColumns = useMemo(() => [
+    { field: 'date', header: 'Date', type: 'date' },
+    { field: 'account_name', header: 'Account' },
+    { field: 'type', header: 'Type' },
+    { field: 'ticker', header: 'Ticker' },
+    { field: 'quantity', header: 'Quantity', type: 'number' },
+    { field: 'price', header: 'Price', type: 'currency' },
+    { field: 'fees', header: 'Fees', type: 'currency' },
+    { field: 'total', header: 'Total', type: 'currency' },
+    { field: 'description', header: 'Description' }
+  ], []);
+
+  const transactionExportData = useMemo(() =>
+    processedTransactions.map(tx => ({
+      ...tx,
+      account_name: getAccountName(tx.account_id),
+      type: tx.type?.toUpperCase() || ''
+    })),
+    [processedTransactions, accounts]
+  );
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Typography variant="h4" gutterBottom>
@@ -497,7 +520,15 @@ const Transactions = () => {
         </Alert>
       )}
 
-      <Paper>
+      <Paper sx={{ p: 2 }}>
+        <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+          <ExportButtons
+            data={transactionExportData}
+            columns={transactionExportColumns}
+            filename="transactions"
+            title="Transactions Report"
+          />
+        </Box>
         <TableContainer>
           <Table stickyHeader>
             <TableHead sx={stickyTableHeadSx}>

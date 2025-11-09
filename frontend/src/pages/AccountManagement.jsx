@@ -24,6 +24,7 @@ import {
 import { Add, Edit, Delete, AccountBalance } from '@mui/icons-material';
 import { accountsAPI } from '../services/api';
 import { stickyTableHeadSx } from '../utils/tableStyles';
+import ExportButtons from '../components/ExportButtons';
 
 const AccountManagement = () => {
   const [accounts, setAccounts] = useState([]);
@@ -182,6 +183,20 @@ const AccountManagement = () => {
     }).format(amount);
   };
 
+  // Export configuration
+  const accountExportColumns = [
+    { field: 'label', header: 'Label' },
+    { field: 'account_type', header: 'Type' },
+    { field: 'institution', header: 'Institution' },
+    { field: 'account_number', header: 'Account Number' },
+    { field: 'balance', header: 'Balance', type: 'currency' }
+  ];
+
+  const accountExportData = accounts.map(account => ({
+    ...account,
+    label: account.label || '-'
+  }));
+
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -209,7 +224,15 @@ const AccountManagement = () => {
         </Alert>
       )}
 
-      <Paper>
+      <Paper sx={{ p: 2 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+          <ExportButtons
+            data={accountExportData}
+            columns={accountExportColumns}
+            filename="accounts"
+            title="Accounts Report"
+          />
+        </Box>
         <TableContainer>
           <Table stickyHeader>
             <TableHead sx={stickyTableHeadSx}>

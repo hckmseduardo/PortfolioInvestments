@@ -22,6 +22,7 @@ import {
 import { dividendsAPI, accountsAPI, instrumentsAPI } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Line, ComposedChart } from 'recharts';
 import { stickyTableHeadSx } from '../utils/tableStyles';
+import ExportButtons from '../components/ExportButtons';
 
 const PIE_COLORS = [
   '#0088FE',
@@ -490,6 +491,19 @@ const Dividends = () => {
     return [...statementRows].sort(comparator);
   }, [statementRows, orderBy, order]);
 
+  // Export configuration
+  const dividendExportColumns = useMemo(() => [
+    { field: 'date', header: 'Date', type: 'date' },
+    { field: 'ticker', header: 'Ticker' },
+    { field: 'type', header: 'Type' },
+    { field: 'industry', header: 'Industry' },
+    { field: 'accountLabel', header: 'Account' },
+    { field: 'amount', header: 'Amount', type: 'currency' },
+    { field: 'currency', header: 'Currency' }
+  ], []);
+
+  const dividendExportData = useMemo(() => sortedStatementRows, [sortedStatementRows]);
+
   const activePeriodDescription = useMemo(() => {
     if (startDate || endDate) {
       const startSegment = startDate ? formatDisplayDate(startDate) : 'Beginning';
@@ -921,6 +935,14 @@ const Dividends = () => {
               </Box>
               {fetching && <LinearProgress sx={{ width: 200 }} />}
             </Stack>
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2, mt: 2 }}>
+              <ExportButtons
+                data={dividendExportData}
+                columns={dividendExportColumns}
+                filename="dividends"
+                title="Dividends Report"
+              />
+            </Box>
             {statementRows.length === 0 ? (
               <Typography color="textSecondary">
                 No dividend transactions for the selected period.

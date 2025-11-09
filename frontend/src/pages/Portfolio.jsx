@@ -48,6 +48,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } 
 import { positionsAPI, accountsAPI, instrumentsAPI } from '../services/api';
 import { alpha } from '@mui/material/styles';
 import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
+import ExportButtons from '../components/ExportButtons';
 
 const DATE_PRESETS = {
   CURRENT: 'current',
@@ -899,6 +900,31 @@ const Portfolio = () => {
     return [...filteredPositions].sort(comparator);
   }, [filteredPositions, orderBy, order]);
 
+  // Export configuration
+  const portfolioExportColumns = useMemo(() => [
+    { field: 'ticker', header: 'Ticker' },
+    { field: 'name', header: 'Name' },
+    { field: 'instrument_type_name', header: 'Type' },
+    { field: 'instrument_industry_name', header: 'Industry' },
+    { field: 'price', header: 'Price', type: 'currency' },
+    { field: 'quantity', header: 'Quantity', type: 'number' },
+    { field: 'book_value', header: 'Book Value', type: 'currency' },
+    { field: 'market_value', header: 'Market Value', type: 'currency' },
+    { field: 'gain_loss', header: 'Gain/Loss', type: 'currency' },
+    { field: 'gain_loss_percent', header: 'Gain/Loss %' }
+  ], []);
+
+  const portfolioExportData = useMemo(() =>
+    sortedPositions.map(pos => ({
+      ...pos,
+      gain_loss: pos.market_value - pos.book_value,
+      gain_loss_percent: pos.book_value > 0
+        ? `${(((pos.market_value - pos.book_value) / pos.book_value) * 100).toFixed(2)}%`
+        : 'N/A'
+    })),
+    [sortedPositions]
+  );
+
   const hasFilters = Boolean(
     selectedAccountId ||
     valuationDate ||
@@ -1310,13 +1336,21 @@ const Portfolio = () => {
         </Paper>
       ) : (
         <>
-          {hasColumnFilters && (
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+            {hasColumnFilters && (
               <Button size="small" onClick={resetColumnFilters}>
                 Clear column filters
               </Button>
+            )}
+            <Box sx={{ ml: 'auto' }}>
+              <ExportButtons
+                data={portfolioExportData}
+                columns={portfolioExportColumns}
+                filename="portfolio"
+                title="Portfolio Report"
+              />
             </Box>
-          )}
+          </Box>
           <TableContainer component={Paper}>
             {fetching && <LinearProgress />}
             <Table stickyHeader>

@@ -42,6 +42,7 @@ import {
 import { expensesAPI, accountsAPI } from '../services/api';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, LineChart, Line } from 'recharts';
 import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
+import ExportButtons from '../components/ExportButtons';
 
 const CHART_COLORS = ['#4CAF50', '#FF9800', '#2196F3', '#9C27B0', '#E91E63', '#00BCD4', '#F44336', '#795548', '#607D8B', '#9E9E9E', '#FF5722', '#757575'];
 
@@ -758,6 +759,25 @@ const Expenses = () => {
     );
   }, [displayedExpenses]);
 
+  // Export configuration
+  const expenseExportColumns = useMemo(() => [
+    { field: 'date', header: 'Date', type: 'date' },
+    { field: 'description', header: 'Description' },
+    { field: 'account_label', header: 'Account' },
+    { field: 'category', header: 'Category' },
+    { field: 'amount', header: 'Amount', type: 'currency' },
+    { field: 'notes', header: 'Notes' }
+  ], []);
+
+  const expenseExportData = useMemo(() =>
+    displayedExpenses.map(expense => ({
+      ...expense,
+      account_label: getAccountLabel(expense.account_id),
+      category: expense.category || 'Uncategorized'
+    })),
+    [displayedExpenses, accounts]
+  );
+
   if (loading) {
     return (
       <Container maxWidth="xl" sx={{ mt: 4, mb: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
@@ -1114,6 +1134,14 @@ const Expenses = () => {
       {/* Tab 1: Expense List */}
       {tabValue === 1 && (
         <Paper sx={{ p: 2 }}>
+          <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+            <ExportButtons
+              data={expenseExportData}
+              columns={expenseExportColumns}
+              filename="expenses"
+              title="Expenses Report"
+            />
+          </Box>
           {selectedExpenseIds.length > 0 && (
             <Box
               sx={{
