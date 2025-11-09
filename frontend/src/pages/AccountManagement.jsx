@@ -19,12 +19,15 @@ import {
   DialogActions,
   TextField,
   MenuItem,
-  Chip
+  Chip,
+  CircularProgress,
+  Divider
 } from '@mui/material';
-import { Add, Edit, Delete, AccountBalance } from '@mui/icons-material';
-import { accountsAPI, transactionsAPI } from '../services/api';
+import { Add, Edit, Delete, AccountBalance, Sync, LinkOff } from '@mui/icons-material';
+import { accountsAPI, transactionsAPI, plaidAPI } from '../services/api';
 import { stickyTableHeadSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
+import PlaidLinkButton from '../components/PlaidLink';
 
 const AccountManagement = () => {
   const [accounts, setAccounts] = useState([]);
@@ -44,8 +47,14 @@ const AccountManagement = () => {
     label: ''
   });
 
+  // Plaid-specific state
+  const [plaidItems, setPlaidItems] = useState([]);
+  const [plaidLoading, setPlaidLoading] = useState(false);
+  const [syncingItems, setSyncingItems] = useState({});
+
   useEffect(() => {
     loadAccounts();
+    loadPlaidItems();
   }, []);
 
   const loadAccounts = async () => {
@@ -198,6 +207,89 @@ const AccountManagement = () => {
     setCurrentAccount(null);
   };
 
+  // Plaid functions
+  const loadPlaidItems = async () => {
+    setPlaidLoading(true);
+    try {
+      const response = await plaidAPI.getItems();
+      setPlaidItems(response.data);
+    } catch (err) {
+      console.error('Error loading Plaid items:', err);
+      // Silently fail if Plaid is not configured
+    } finally {
+      setPlaidLoading(false);
+    }
+  };
+
+  const handlePlaidSuccess = (data) => {
+    setSuccess(`Successfully connected ${data.institution_name}! ${data.accounts.length} account(s) linked.`);
+    loadAccounts();
+    loadPlaidItems();
+  };
+
+  const handlePlaidError = (errorMessage) => {
+    setError(errorMessage);
+  };
+
+  const handleSync = async (itemId) => {
+    setSyncingItems(prev => ({ ...prev, [itemId]: true }));
+    setError('');
+
+    try {
+      const response = await plaidAPI.syncTransactions(itemId);
+      const jobId = response.data.job_id;
+
+      // Poll for job status
+      const checkStatus = async () => {
+        try {
+          const statusResponse = await plaidAPI.getSyncStatus(jobId);
+          const status = statusResponse.data.status;
+
+          if (status === 'finished') {
+            setSuccess('Transactions synced successfully!');
+            setSyncingItems(prev => ({ ...prev, [itemId]: false }));
+            loadPlaidItems();
+            loadAccounts();
+          } else if (status === 'failed') {
+            setError('Failed to sync transactions. Please try again.');
+            setSyncingItems(prev => ({ ...prev, [itemId]: false }));
+          } else {
+            // Still in progress, check again in 2 seconds
+            setTimeout(checkStatus, 2000);
+          }
+        } catch (err) {
+          setError('Error checking sync status');
+          setSyncingItems(prev => ({ ...prev, [itemId]: false }));
+        }
+      };
+
+      setTimeout(checkStatus, 2000);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to start sync');
+      setSyncingItems(prev => ({ ...prev, [itemId]: false }));
+    }
+  };
+
+  const handleDisconnect = async (itemId, institutionName) => {
+    if (!window.confirm(`Are you sure you want to disconnect ${institutionName}? This will not delete your accounts or transactions.`)) {
+      return;
+    }
+
+    setPlaidLoading(true);
+    setError('');
+
+    try {
+      await plaidAPI.disconnectItem(itemId);
+      setSuccess(`${institutionName} disconnected successfully`);
+      loadPlaidItems();
+      loadAccounts();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to disconnect');
+    } finally {
+      setPlaidLoading(false);
+    }
+  };
+
   const getAccountTypeColor = (type) => {
     switch (type) {
       case 'investment':
@@ -260,6 +352,82 @@ const AccountManagement = () => {
         <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
           {success}
         </Alert>
+      )}
+
+      {/* Plaid Bank Connection Section */}
+      {plaidItems.length > 0 && (
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">
+              Connected Banks via Plaid
+            </Typography>
+            <PlaidLinkButton
+              onSuccess={handlePlaidSuccess}
+              onError={handlePlaidError}
+              buttonText="Connect Another Bank"
+              variant="outlined"
+            />
+          </Box>
+          <Divider sx={{ mb: 2 }} />
+          {plaidItems.map((item) => (
+            <Box key={item.id} sx={{ mb: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle1" fontWeight="medium">
+                  {item.institution_name}
+                </Typography>
+                <Box>
+                  <Button
+                    size="small"
+                    startIcon={syncingItems[item.id] ? <CircularProgress size={16} /> : <Sync />}
+                    onClick={() => handleSync(item.id)}
+                    disabled={syncingItems[item.id]}
+                    sx={{ mr: 1 }}
+                  >
+                    {syncingItems[item.id] ? 'Syncing...' : 'Sync Now'}
+                  </Button>
+                  <Button
+                    size="small"
+                    color="error"
+                    startIcon={<LinkOff />}
+                    onClick={() => handleDisconnect(item.id, item.institution_name)}
+                    disabled={plaidLoading}
+                  >
+                    Disconnect
+                  </Button>
+                </Box>
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                Last synced: {item.last_synced ? new Date(item.last_synced).toLocaleString() : 'Never'}
+              </Typography>
+              <Box sx={{ mt: 1 }}>
+                {item.accounts.map((acc) => (
+                  <Chip
+                    key={acc.id}
+                    label={`${acc.name} (...${acc.mask || 'XXXX'})`}
+                    size="small"
+                    sx={{ mr: 1, mt: 0.5 }}
+                  />
+                ))}
+              </Box>
+            </Box>
+          ))}
+        </Paper>
+      )}
+
+      {/* Add Plaid Connect Button if no items connected */}
+      {plaidItems.length === 0 && !plaidLoading && (
+        <Paper sx={{ p: 3, mb: 3, textAlign: 'center' }}>
+          <Typography variant="h6" gutterBottom>
+            Automatic Bank Sync with Plaid
+          </Typography>
+          <Typography variant="body2" color="text.secondary" paragraph>
+            Connect your bank accounts to automatically sync transactions
+          </Typography>
+          <PlaidLinkButton
+            onSuccess={handlePlaidSuccess}
+            onError={handlePlaidError}
+          />
+        </Paper>
       )}
 
       <Paper sx={{ p: 2 }}>

@@ -49,6 +49,13 @@ class Settings(BaseSettings):
         ]
     )
 
+    # Plaid configuration
+    PLAID_CLIENT_ID: Optional[str] = None
+    PLAID_SECRET: Optional[str] = None
+    PLAID_ENVIRONMENT: str = "sandbox"  # sandbox, development, or production
+    PLAID_QUEUE_NAME: str = "plaid_sync"
+    PLAID_JOB_TIMEOUT: int = 1800  # 30 minutes
+
     @field_validator("PRICE_SOURCE_PRIORITY", mode="before")
     @classmethod
     def _split_price_priority(cls, value):

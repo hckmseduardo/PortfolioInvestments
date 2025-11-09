@@ -288,4 +288,19 @@ export const transactionsAPI = {
   delete: (id) => api.delete(`/transactions/${id}`),
 };
 
+export const plaidAPI = {
+  createLinkToken: () => api.post('/plaid/create-link-token'),
+  exchangeToken: (publicToken, metadata) =>
+    api.post('/plaid/exchange-token', { public_token: publicToken, metadata }),
+  getItems: () => api.get('/plaid/items'),
+  syncTransactions: (itemId) => api.post(`/plaid/sync/${itemId}`),
+  getSyncStatus: (jobId) => api.get(`/plaid/sync-status/${jobId}`),
+  disconnectItem: (itemId) => api.delete(`/plaid/disconnect/${itemId}`),
+};
+
+// Export convenience methods for PlaidLink component
+export const createPlaidLinkToken = () => plaidAPI.createLinkToken();
+export const exchangePlaidToken = (publicToken, metadata) =>
+  plaidAPI.exchangeToken(publicToken, metadata);
+
 export default api;

@@ -13,6 +13,7 @@ from app.api import (
     transactions,
     dashboard,
     instruments,
+    plaid,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ api_router.include_router(dividends.router)
 api_router.include_router(transactions.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(instruments.router)
+api_router.include_router(plaid.router)
 
 app.include_router(api_router)
 

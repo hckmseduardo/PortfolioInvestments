@@ -22,3 +22,4 @@ redis==5.0.1
 rq==1.15.1
 pyotp==2.9.0
 qrcode[pil]==8.2
+plaid-python==20.0.0

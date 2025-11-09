@@ -54,6 +54,7 @@ class Account(Base):
     institution = Column(String, nullable=False)
     balance = Column(Float, nullable=False, default=0.0)
     label = Column(String, nullable=True)
+    is_plaid_linked = Column(Integer, default=0, nullable=False)  # 0 = not linked, 1 = linked
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, onupdate=datetime.utcnow, nullable=True)
 
@@ -95,6 +96,8 @@ class Transaction(Base):
     fees = Column(Float, default=0.0, nullable=False)
     total = Column(Float, nullable=False)
     description = Column(Text, nullable=True)
+    source = Column(String, default="manual", nullable=False, index=True)  # manual, plaid, import
+    plaid_transaction_id = Column(String, nullable=True, unique=True, index=True)  # Plaid's transaction ID for deduplication
 
     # Relationships
     account = relationship("Account", back_populates="transactions")
@@ -160,6 +163,60 @@ class Statement(Base):
 
     # Relationships
     account = relationship("Account", back_populates="statements")
+
+
+class PlaidItem(Base):
+    """Represents a Plaid Item (bank connection) for a user"""
+    __tablename__ = "plaid_items"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    access_token = Column(String, nullable=False)  # Encrypted in production
+    item_id = Column(String, nullable=False, unique=True, index=True)
+    institution_id = Column(String, nullable=False)
+    institution_name = Column(String, nullable=False)
+    status = Column(String, default="active", nullable=False)  # active, error, disconnected
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_synced = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    # Relationships
+    user = relationship("User", backref="plaid_items")
+    plaid_accounts = relationship("PlaidAccount", back_populates="plaid_item", cascade="all, delete-orphan")
+    sync_cursor = relationship("PlaidSyncCursor", back_populates="plaid_item", uselist=False, cascade="all, delete-orphan")
+
+
+class PlaidAccount(Base):
+    """Maps a Plaid account to our Account model"""
+    __tablename__ = "plaid_accounts"
+
+    id = Column(String, primary_key=True)
+    plaid_item_id = Column(String, ForeignKey("plaid_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    account_id = Column(String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    plaid_account_id = Column(String, nullable=False, index=True)  # Plaid's account ID
+    mask = Column(String, nullable=True)  # Last 4 digits
+    name = Column(String, nullable=False)  # Account name from Plaid
+    official_name = Column(String, nullable=True)
+    type = Column(String, nullable=False)  # depository, credit, loan, investment
+    subtype = Column(String, nullable=True)  # checking, savings, credit card, etc.
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    plaid_item = relationship("PlaidItem", back_populates="plaid_accounts")
+    account = relationship("Account", backref="plaid_account")
+
+
+class PlaidSyncCursor(Base):
+    """Stores the sync cursor for incremental transaction updates"""
+    __tablename__ = "plaid_sync_cursors"
+
+    id = Column(String, primary_key=True)
+    plaid_item_id = Column(String, ForeignKey("plaid_items.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    cursor = Column(String, nullable=False)
+    last_sync = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    plaid_item = relationship("PlaidItem", back_populates="sync_cursor")
 
 
 class DashboardLayout(Base):

@@ -59,7 +59,8 @@ const TRANSACTION_FILTER_DEFAULTS = {
   feesMax: '',
   totalMin: '',
   totalMax: '',
-  description: ''
+  description: '',
+  source: ''
 };
 
 const Transactions = () => {
@@ -288,6 +289,8 @@ const Transactions = () => {
         return Number(transaction.total ?? Number.NEGATIVE_INFINITY);
       case 'description':
         return (transaction.description || '').toLowerCase();
+      case 'source':
+        return (transaction.source || 'manual').toLowerCase();
       default:
         return transaction[field];
     }
@@ -297,7 +300,8 @@ const Transactions = () => {
     const normalizedTextFilters = {
       account: filters.account.trim().toLowerCase(),
       ticker: filters.ticker.trim().toLowerCase(),
-      description: filters.description.trim().toLowerCase()
+      description: filters.description.trim().toLowerCase(),
+      source: filters.source.trim().toLowerCase()
     };
 
     const passesRangeFilter = (value, min, max) => {
@@ -355,6 +359,13 @@ const Transactions = () => {
       if (normalizedTextFilters.description) {
         const description = (tx.description || '').toLowerCase();
         if (!description.includes(normalizedTextFilters.description)) {
+          return false;
+        }
+      }
+
+      if (normalizedTextFilters.source) {
+        const source = (tx.source || 'manual').toLowerCase();
+        if (source !== normalizedTextFilters.source) {
           return false;
         }
       }
@@ -614,6 +625,15 @@ const Transactions = () => {
                     Description
                   </TableSortLabel>
                 </TableCell>
+                <TableCell sortDirection={sortConfig.field === 'source' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'source'}
+                    direction={sortConfig.field === 'source' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('source')}
+                  >
+                    Source
+                  </TableSortLabel>
+                </TableCell>
               </TableRow>
               <TableRow sx={stickyFilterRowSx}>
                 <TableCell>
@@ -742,14 +762,28 @@ const Transactions = () => {
                   </Stack>
                 </TableCell>
                 <TableCell>
+                  <TextField
+                    size="small"
+                    placeholder="Search description"
+                    value={filters.description}
+                    onChange={(e) => handleFilterChange('description', e.target.value)}
+                    fullWidth
+                  />
+                </TableCell>
+                <TableCell>
                   <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
-                    <TextField
+                    <Select
                       size="small"
-                      placeholder="Search description"
-                      value={filters.description}
-                      onChange={(e) => handleFilterChange('description', e.target.value)}
+                      value={filters.source}
+                      onChange={(e) => handleFilterChange('source', e.target.value)}
+                      displayEmpty
                       fullWidth
-                    />
+                    >
+                      <MenuItem value="">All</MenuItem>
+                      <MenuItem value="manual">Manual</MenuItem>
+                      <MenuItem value="plaid">Plaid</MenuItem>
+                      <MenuItem value="import">Import</MenuItem>
+                    </Select>
                     <Button variant="text" size="small" onClick={resetFilters}>
                       Reset
                     </Button>
@@ -760,19 +794,19 @@ const Transactions = () => {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center">
+                  <TableCell colSpan={10} align="center">
                     <CircularProgress />
                   </TableCell>
                 </TableRow>
               ) : transactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center">
+                  <TableCell colSpan={10} align="center">
                     No transactions found
                   </TableCell>
                 </TableRow>
               ) : processedTransactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center">
+                  <TableCell colSpan={10} align="center">
                     No transactions match the selected filters
                   </TableCell>
                 </TableRow>
@@ -821,6 +855,17 @@ const Transactions = () => {
                       <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
                         {transaction.description || '-'}
                       </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={transaction.source || 'manual'}
+                        size="small"
+                        color={
+                          transaction.source === 'plaid' ? 'primary' :
+                          transaction.source === 'import' ? 'secondary' :
+                          'default'
+                        }
+                      />
                     </TableCell>
                   </TableRow>
                 ))

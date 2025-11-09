@@ -14,6 +14,7 @@ _redis_connection: Optional[Redis] = None
 _expense_queue: Optional[Queue] = None
 _price_queue: Optional[Queue] = None
 _statement_queue: Optional[Queue] = None
+_plaid_queue: Optional[Queue] = None
 
 
 def _get_redis_connection() -> Redis:
@@ -124,6 +125,39 @@ def enqueue_statement_job(
         action,
         statement_id,
     )
+    return job
+
+
+def get_plaid_queue() -> Queue:
+    global _plaid_queue
+    if _plaid_queue is None:
+        _plaid_queue = Queue(
+            settings.PLAID_QUEUE_NAME,
+            connection=_get_redis_connection(),
+            default_timeout=settings.PLAID_JOB_TIMEOUT,
+        )
+    return _plaid_queue
+
+
+def enqueue_plaid_sync_job(user_id: str, plaid_item_id: str) -> Job:
+    from app.tasks.plaid_sync import run_plaid_sync_job
+
+    queue = get_plaid_queue()
+    job = queue.enqueue(
+        run_plaid_sync_job,
+        user_id,
+        plaid_item_id,
+        job_timeout=settings.PLAID_JOB_TIMEOUT,
+    )
+    job.meta = job.meta or {}
+    job.meta.update(
+        {
+            "user_id": user_id,
+            "plaid_item_id": plaid_item_id,
+        }
+    )
+    job.save_meta()
+    logger.info("Enqueued Plaid sync job %s for user %s, item %s", job.id, user_id, plaid_item_id)
     return job
 
 
