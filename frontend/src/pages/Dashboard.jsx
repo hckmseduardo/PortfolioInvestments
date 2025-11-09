@@ -433,35 +433,34 @@ const StatCard = ({ title, value, icon, color, subtitle, sizeFactor = 1 }) => (
   <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
     <CardContent sx={{
       flexGrow: 1,
-      p: { xs: 1.5, sm: 2, md: 2 },
-      '&:last-child': { pb: { xs: 1.5, sm: 2, md: 2 } }
+      p: { xs: 1, sm: 1.5, md: 2 },
+      '&:last-child': { pb: { xs: 1, sm: 1.5, md: 2 } }
     }}>
       <Typography
         variant="caption"
         color="textSecondary"
         className="dashboard-tile-handle"
         sx={{
-          letterSpacing: '.08em',
+          letterSpacing: '.05em',
           textTransform: 'uppercase',
           cursor: 'move',
-          fontSize: { xs: '0.65rem', sm: '0.7rem' }
+          fontSize: `clamp(${0.5 * sizeFactor}rem, ${2 * sizeFactor}vw, ${0.75 * sizeFactor}rem)`,
+          display: 'block',
+          mb: 0.5
         }}
       >
         {title}
       </Typography>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mt={{ xs: 0.5, sm: 1 }} sx={{ gap: { xs: 1, sm: 2 } }}>
-        <Box sx={{ minWidth: 0, flex: 1 }}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ gap: 0.5 }}>
+        <Box sx={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
           <Typography
             sx={{
               fontWeight: 600,
-              fontSize: {
-                xs: `clamp(${0.9 * sizeFactor}rem, ${4 * sizeFactor}vw, ${2.4 * sizeFactor}rem)`,
-                sm: `clamp(${1.1 * sizeFactor}rem, ${3 * sizeFactor}vw, ${2.6 * sizeFactor}rem)`,
-                lg: `clamp(${1.1 * sizeFactor}rem, ${2 * sizeFactor}vw, ${2.8 * sizeFactor}rem)`
-              },
+              fontSize: `clamp(${0.75 * sizeFactor}rem, ${5 * sizeFactor}vw, ${2.5 * sizeFactor}rem)`,
               lineHeight: 1.1,
               overflow: 'hidden',
-              textOverflow: 'ellipsis'
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
             }}
           >
             {value}
@@ -470,12 +469,11 @@ const StatCard = ({ title, value, icon, color, subtitle, sizeFactor = 1 }) => (
             <Typography
               sx={{
                 color: color || 'textSecondary',
-                fontSize: {
-                  xs: `clamp(${0.6 * sizeFactor}rem, ${2.5 * sizeFactor}vw, ${0.95 * sizeFactor}rem)`,
-                  lg: `clamp(${0.75 * sizeFactor}rem, ${1 * sizeFactor}vw, ${1 * sizeFactor}rem)`
-                },
+                fontSize: `clamp(${0.5 * sizeFactor}rem, ${2.5 * sizeFactor}vw, ${1 * sizeFactor}rem)`,
                 overflow: 'hidden',
-                textOverflow: 'ellipsis'
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                lineHeight: 1.2
               }}
             >
               {subtitle}
@@ -486,8 +484,11 @@ const StatCard = ({ title, value, icon, color, subtitle, sizeFactor = 1 }) => (
           color: color || 'primary.main',
           display: 'flex',
           alignItems: 'center',
-          fontSize: { xs: '1.5rem', sm: '2rem', md: '2.5rem' },
-          flexShrink: 0
+          fontSize: `clamp(${1 * sizeFactor}rem, ${4 * sizeFactor}vw, ${2.5 * sizeFactor}rem)`,
+          flexShrink: 0,
+          '& > svg': {
+            fontSize: 'inherit'
+          }
         }}>
           {icon}
         </Box>
@@ -1045,35 +1046,34 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
           >
             <CardContent sx={{
               flexGrow: 1,
-              p: { xs: 1.5, sm: 2, md: 2 },
-              '&:last-child': { pb: { xs: 1.5, sm: 2, md: 2 } }
+              p: { xs: 1, sm: 1.5, md: 2 },
+              '&:last-child': { pb: { xs: 1, sm: 1.5, md: 2 } }
             }}>
               <Typography
                 variant="caption"
                 color="textSecondary"
                 className="dashboard-tile-handle"
                 sx={{
-                  letterSpacing: '.08em',
+                  letterSpacing: '.05em',
                   textTransform: 'uppercase',
                   cursor: 'move',
-                  fontSize: { xs: '0.65rem', sm: '0.7rem' }
+                  fontSize: `clamp(${0.5 * tileScale}rem, ${2 * tileScale}vw, ${0.75 * tileScale}rem)`,
+                  display: 'block',
+                  mb: 0.5
                 }}
               >
                 Total Accounts Balance
               </Typography>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mt={{ xs: 0.5, sm: 1 }} sx={{ gap: { xs: 1, sm: 2 } }}>
-                <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ gap: 0.5 }}>
+                <Box sx={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
                   <Typography
                     sx={{
                       fontWeight: 600,
-                      fontSize: {
-                        xs: `clamp(${0.9 * tileScale}rem, ${4 * tileScale}vw, ${2.4 * tileScale}rem)`,
-                        sm: `clamp(${1.1 * tileScale}rem, ${3 * tileScale}vw, ${2.6 * tileScale}rem)`,
-                        lg: `clamp(${1.1 * tileScale}rem, ${2 * tileScale}vw, ${2.8 * tileScale}rem)`
-                      },
+                      fontSize: `clamp(${0.75 * tileScale}rem, ${5 * tileScale}vw, ${2.5 * tileScale}rem)`,
                       lineHeight: 1.1,
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis'
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
                     }}
                   >
                     {formatCurrency(totalAccountsBalance)}
@@ -1081,12 +1081,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                   <Typography
                     sx={{
                       color: 'textSecondary',
-                      fontSize: {
-                        xs: `clamp(${0.6 * tileScale}rem, ${2.5 * tileScale}vw, ${0.95 * tileScale}rem)`,
-                        lg: `clamp(${0.75 * tileScale}rem, ${1 * tileScale}vw, ${1 * tileScale}rem)`
-                      },
+                      fontSize: `clamp(${0.5 * tileScale}rem, ${2.5 * tileScale}vw, ${1 * tileScale}rem)`,
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis'
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      lineHeight: 1.2
                     }}
                   >
                     {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}
@@ -1096,8 +1095,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                   color: 'info.main',
                   display: 'flex',
                   alignItems: 'center',
-                  fontSize: { xs: '1.5rem', sm: '2rem', md: '2.5rem' },
-                  flexShrink: 0
+                  fontSize: `clamp(${1 * tileScale}rem, ${4 * tileScale}vw, ${2.5 * tileScale}rem)`,
+                  flexShrink: 0,
+                  '& > svg': {
+                    fontSize: 'inherit'
+                  }
                 }}>
                   <AccountBalance fontSize="large" />
                 </Box>
@@ -1334,7 +1336,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
         return (
           <Paper
             sx={{
-              p: { xs: 1.5, sm: 2, md: 3 },
+              p: { xs: 1, sm: 1.5, md: 2 },
               height: '100%',
               display: 'flex',
               flexDirection: 'column'
@@ -1347,7 +1349,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
               justifyContent="space-between"
               alignItems={{ xs: 'flex-start', md: 'center' }}
               flexWrap="wrap"
-              gap={{ xs: 1, sm: 2 }}
+              gap={{ xs: 0.5, sm: 1 }}
               className="dashboard-tile-handle"
               sx={{ cursor: 'move' }}
             >
@@ -1356,14 +1358,18 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                   variant="caption"
                   color="textSecondary"
                   sx={{
-                    letterSpacing: '.08em',
+                    letterSpacing: '.05em',
                     textTransform: 'uppercase',
-                    fontSize: { xs: '0.65rem', sm: '0.7rem' }
+                    fontSize: 'clamp(0.5rem, 2vw, 0.75rem)'
                   }}
                 >
                   Portfolio Insights
                 </Typography>
-                <Typography variant="body2" color="textSecondary" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
+                <Typography
+                  variant="body2"
+                  color="textSecondary"
+                  sx={{ fontSize: 'clamp(0.625rem, 2vw, 0.875rem)' }}
+                >
                   {insightActiveTab === 'performance' ? `As of ${asOfLabel}` : 'Auto rotating highlights'}
                 </Typography>
               </Box>
@@ -1375,10 +1381,12 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                 textColor="primary"
                 indicatorColor="primary"
                 sx={{
+                  minHeight: 'auto',
                   '& .MuiTab-root': {
-                    fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                    minHeight: { xs: 40, sm: 48 },
-                    px: { xs: 1, sm: 2 }
+                    fontSize: 'clamp(0.625rem, 2vw, 0.875rem)',
+                    minHeight: 'clamp(32px, 10vw, 48px)',
+                    px: 'clamp(0.5rem, 2vw, 1rem)',
+                    py: 'clamp(0.25rem, 1vw, 0.75rem)'
                   }
                 }}
               >
@@ -1391,16 +1399,16 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             {insightActiveTab === 'performance' && (
               <Stack
                 direction={{ xs: 'column', md: 'row' }}
-                spacing={{ xs: 1, sm: 2 }}
+                spacing={{ xs: 0.5, sm: 1 }}
                 alignItems={{ xs: 'flex-start', md: 'center' }}
-                sx={{ mt: { xs: 1, sm: 2 } }}
+                sx={{ mt: { xs: 0.5, sm: 1 } }}
               >
                 <FormControl
                   size="small"
                   sx={{
                     minWidth: { xs: '100%', sm: 200 },
-                    '& .MuiInputLabel-root': { fontSize: { xs: '0.875rem', sm: '1rem' } },
-                    '& .MuiSelect-select': { fontSize: { xs: '0.875rem', sm: '1rem' } }
+                    '& .MuiInputLabel-root': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' },
+                    '& .MuiSelect-select': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' }
                   }}
                 >
                   <InputLabel id="performance-range-label">Range</InputLabel>
@@ -1429,8 +1437,8 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     InputLabelProps={{ shrink: true }}
                     sx={{
                       minWidth: { xs: '100%', sm: 'auto' },
-                      '& .MuiInputLabel-root': { fontSize: { xs: '0.875rem', sm: '1rem' } },
-                      '& .MuiInputBase-input': { fontSize: { xs: '0.875rem', sm: '1rem' } }
+                      '& .MuiInputLabel-root': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' },
+                      '& .MuiInputBase-input': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' }
                     }}
                   />
                 )}
@@ -1444,22 +1452,22 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     InputProps={{ inputProps: { min: 1900, max: 9999 } }}
                     sx={{
                       minWidth: { xs: '100%', sm: 'auto' },
-                      '& .MuiInputLabel-root': { fontSize: { xs: '0.875rem', sm: '1rem' } },
-                      '& .MuiInputBase-input': { fontSize: { xs: '0.875rem', sm: '1rem' } }
+                      '& .MuiInputLabel-root': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' },
+                      '& .MuiInputBase-input': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' }
                     }}
                   />
                 )}
               </Stack>
             )}
 
-            <Box sx={{ flexGrow: 1, minHeight: chartHeight, mt: { xs: 1, sm: 2 } }}>{insightBody}</Box>
+            <Box sx={{ flexGrow: 1, minHeight: chartHeight, mt: { xs: 0.5, sm: 1 } }}>{insightBody}</Box>
 
             <Typography
               variant="caption"
               color="textSecondary"
               sx={{
-                mt: { xs: 1, sm: 2 },
-                fontSize: { xs: '0.65rem', sm: '0.75rem' }
+                mt: { xs: 0.5, sm: 1 },
+                fontSize: 'clamp(0.5rem, 1.5vw, 0.75rem)'
               }}
             >
               {footerText}
@@ -1470,7 +1478,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
       case 'accounts_list':
         return (
           <Paper sx={{
-            p: { xs: 1.5, sm: 2, md: 3 },
+            p: { xs: 1, sm: 1.5, md: 2 },
             height: '100%',
             display: 'flex',
             flexDirection: 'column'
@@ -1480,11 +1488,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
               color="textSecondary"
               className="dashboard-tile-handle"
               sx={{
-                letterSpacing: '.08em',
+                letterSpacing: '.05em',
                 textTransform: 'uppercase',
                 cursor: 'move',
-                mb: { xs: 1, sm: 2 },
-                fontSize: { xs: '0.65rem', sm: '0.7rem' }
+                mb: { xs: 0.5, sm: 1 },
+                fontSize: 'clamp(0.5rem, 2vw, 0.75rem)'
               }}
             >
               Accounts
@@ -1504,20 +1512,20 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                         <Paper
                           variant="outlined"
                           sx={{
-                            p: { xs: 1.5, sm: 2 },
+                            p: { xs: 1, sm: 1.5 },
                             height: '100%',
                             display: 'flex',
                             flexDirection: 'column',
                             gap: 0.5
                           }}
                         >
-                          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={0.5}>
                             <Box sx={{ minWidth: 0, flex: 1 }}>
                               <Typography
                                 variant="subtitle1"
                                 sx={{
                                   fontWeight: 600,
-                                  fontSize: { xs: '0.9rem', sm: '1rem' },
+                                  fontSize: 'clamp(0.75rem, 2.5vw, 1rem)',
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap'
@@ -1529,7 +1537,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                                 variant="body2"
                                 color="textSecondary"
                                 sx={{
-                                  fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                                  fontSize: 'clamp(0.6rem, 2vw, 0.875rem)',
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap'
@@ -1540,23 +1548,36 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                               </Typography>
                             </Box>
                             <Tooltip title={typeLabel}>
-                              <Box color="text.secondary" display="flex" alignItems="center" sx={{ flexShrink: 0 }}>
+                              <Box
+                                color="text.secondary"
+                                display="flex"
+                                alignItems="center"
+                                sx={{
+                                  flexShrink: 0,
+                                  fontSize: 'clamp(1rem, 3vw, 1.5rem)',
+                                  '& > svg': { fontSize: 'inherit' }
+                                }}
+                              >
                                 {getAccountTypeIcon(account.account_type)}
                               </Box>
                             </Tooltip>
                           </Stack>
-                          <Box sx={{ mt: { xs: 0.5, sm: 1 }, display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                          <Box sx={{ mt: { xs: 0.25, sm: 0.5 }, display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
                             <Typography
                               variant="h6"
                               color="primary"
                               sx={{
                                 fontWeight: 600,
-                                fontSize: { xs: '1rem', sm: '1.25rem' }
+                                fontSize: 'clamp(0.875rem, 3vw, 1.25rem)'
                               }}
                             >
                               {formatCurrency(derivedBalance)}
                             </Typography>
-                            <Typography variant="caption" color="textSecondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                            <Typography
+                              variant="caption"
+                              color="textSecondary"
+                              sx={{ fontSize: 'clamp(0.5rem, 1.5vw, 0.75rem)' }}
+                            >
                               balance
                             </Typography>
                           </Box>
