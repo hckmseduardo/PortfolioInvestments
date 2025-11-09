@@ -1,6 +1,12 @@
 import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+
+// Ensure autoTable is loaded and extends jsPDF prototype
+// This import is necessary for doc.autoTable() to work
+if (autoTable) {
+  // Reference to prevent tree-shaking
+}
 
 /**
  * Export data to Excel file
@@ -86,6 +92,13 @@ export const exportToPDF = (data, columns, filename = 'export', title = 'Data Ex
       format: 'a4'
     });
 
+    // Verify autoTable is available
+    if (typeof doc.autoTable !== 'function') {
+      console.error('autoTable is not available on jsPDF instance');
+      alert('PDF export feature is not properly configured. Please contact support.');
+      return false;
+    }
+
     // Add title
     doc.setFontSize(16);
     doc.text(title, 14, 15);
@@ -148,6 +161,7 @@ export const exportToPDF = (data, columns, filename = 'export', title = 'Data Ex
     return true;
   } catch (error) {
     console.error('Error exporting to PDF:', error);
+    alert(`Error exporting to PDF: ${error.message}`);
     return false;
   }
 };
