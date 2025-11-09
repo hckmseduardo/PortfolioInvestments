@@ -31,7 +31,8 @@ import {
   Tab,
   IconButton,
   Snackbar,
-  Alert
+  Alert,
+  TableSortLabel
 } from '@mui/material';
 import {
   Refresh,
@@ -138,6 +139,8 @@ const Portfolio = () => {
   const [newIndustry, setNewIndustry] = useState({ name: '', color: '#82ca9d' });
   const [classificationSaving, setClassificationSaving] = useState({});
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [orderBy, setOrderBy] = useState('ticker');
+  const [order, setOrder] = useState('asc');
   const hasLoadedOnce = useRef(false);
   const priceRefreshTimer = useRef(null);
 
@@ -652,13 +655,13 @@ const Portfolio = () => {
     [editingIndustry, loadInstrumentMetadata, selectedIndustryId, showSnackbar]
   );
 
-  const handleIndustrySliceDoubleClick = useCallback((slice) => {
+  const handleIndustrySliceClick = useCallback((slice) => {
     if (!slice) return;
     const sliceId = slice.industry_id ?? UNCLASSIFIED_SENTINEL;
     setSelectedIndustryId((prev) => (prev === sliceId ? '' : sliceId));
   }, []);
 
-  const handleTypeSliceDoubleClick = useCallback((slice) => {
+  const handleTypeSliceClick = useCallback((slice) => {
     if (!slice) return;
     const sliceId = slice.type_id ?? UNCLASSIFIED_SENTINEL;
     setSelectedTypeId((prev) => (prev === sliceId ? '' : sliceId));
@@ -671,6 +674,69 @@ const Portfolio = () => {
   const clearTypeFilter = useCallback(() => {
     setSelectedTypeId('');
   }, []);
+
+  const handleRequestSort = useCallback((property) => {
+    const isAsc = orderBy === property && order === 'asc';
+    setOrder(isAsc ? 'desc' : 'asc');
+    setOrderBy(property);
+  }, [orderBy, order]);
+
+  const sortedPositions = useMemo(() => {
+    const comparator = (a, b) => {
+      let aValue = a[orderBy];
+      let bValue = b[orderBy];
+
+      // Handle null/undefined values
+      if (aValue === null || aValue === undefined) aValue = '';
+      if (bValue === null || bValue === undefined) bValue = '';
+
+      // Special handling for different column types
+      if (orderBy === 'ticker' || orderBy === 'name') {
+        // String comparison
+        return order === 'asc'
+          ? String(aValue).localeCompare(String(bValue))
+          : String(bValue).localeCompare(String(aValue));
+      }
+
+      if (orderBy === 'instrument_type_name' || orderBy === 'instrument_industry_name') {
+        // Handle empty type/industry (treat as "ZZZ" to sort to end)
+        const aStr = aValue || '\uFFFF';
+        const bStr = bValue || '\uFFFF';
+        return order === 'asc'
+          ? aStr.localeCompare(bStr)
+          : bStr.localeCompare(aStr);
+      }
+
+      if (orderBy === 'price' || orderBy === 'quantity' || orderBy === 'book_value' || orderBy === 'market_value') {
+        // Numeric comparison
+        const aNum = Number(aValue) || 0;
+        const bNum = Number(bValue) || 0;
+        return order === 'asc'
+          ? aNum - bNum
+          : bNum - aNum;
+      }
+
+      if (orderBy === 'gain_loss' || orderBy === 'gain_loss_percent') {
+        // Calculate gain/loss for sorting
+        const aGainLoss = orderBy === 'gain_loss'
+          ? calculateGainLoss(a)
+          : calculateGainLossPercent(a);
+        const bGainLoss = orderBy === 'gain_loss'
+          ? calculateGainLoss(b)
+          : calculateGainLossPercent(b);
+        return order === 'asc'
+          ? aGainLoss - bGainLoss
+          : bGainLoss - aGainLoss;
+      }
+
+      // Default string comparison
+      return order === 'asc'
+        ? String(aValue).localeCompare(String(bValue))
+        : String(bValue).localeCompare(String(aValue));
+    };
+
+    return [...positions].sort(comparator);
+  }, [positions, orderBy, order]);
 
   const hasFilters = Boolean(
     selectedAccountId ||
@@ -885,8 +951,17 @@ const Portfolio = () => {
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {summaryCards.map((card) => (
-          <Grid item xs={12} sm={6} md={3} key={card.title}>
-            <Paper sx={{ p: 2 }}>
+          <Grid item xs={12} sm={6} md={3} key={card.title} sx={{ display: 'flex' }}>
+            <Paper
+              sx={{
+                p: 2,
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 1
+              }}
+            >
               <Typography
                 variant="caption"
                 color="textSecondary"
@@ -897,11 +972,13 @@ const Portfolio = () => {
               <Typography variant="h5" sx={{ fontWeight: 600, color: card.color, mt: 1 }}>
                 {card.value}
               </Typography>
-              {card.subtitle && (
-                <Typography variant="body2" color="textSecondary">
-                  {card.subtitle}
-                </Typography>
-              )}
+              <Box sx={{ minHeight: 24 }}>
+                {card.subtitle && (
+                  <Typography variant="body2" color="textSecondary">
+                    {card.subtitle}
+                  </Typography>
+                )}
+              </Box>
             </Paper>
           </Grid>
         ))}
@@ -958,7 +1035,7 @@ const Portfolio = () => {
                         <Cell
                           key={slice.industry_id || 'unclassified'}
                           fill={slice.color || '#b0bec5'}
-                          onDoubleClick={() => handleIndustrySliceDoubleClick(slice)}
+                          onClick={() => handleIndustrySliceClick(slice)}
                         />
                       ))}
                     </Pie>
@@ -1024,7 +1101,7 @@ const Portfolio = () => {
                         <Cell
                           key={slice.type_id || 'unclassified_type'}
                           fill={slice.color || '#b0bec5'}
-                          onDoubleClick={() => handleTypeSliceDoubleClick(slice)}
+                          onClick={() => handleTypeSliceClick(slice)}
                         />
                       ))}
                     </Pie>
