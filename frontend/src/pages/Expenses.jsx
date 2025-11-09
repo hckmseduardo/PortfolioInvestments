@@ -41,6 +41,7 @@ import {
 } from '@mui/icons-material';
 import { expensesAPI, accountsAPI } from '../services/api';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, LineChart, Line } from 'recharts';
+import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
 
 const CHART_COLORS = ['#4CAF50', '#FF9800', '#2196F3', '#9C27B0', '#E91E63', '#00BCD4', '#F44336', '#795548', '#607D8B', '#9E9E9E', '#FF5722', '#757575'];
 
@@ -1172,8 +1173,8 @@ const Expenses = () => {
             </Box>
           )}
           <TableContainer>
-            <Table>
-              <TableHead>
+            <Table stickyHeader>
+              <TableHead sx={stickyTableHeadSx}>
                 <TableRow>
                   <TableCell padding="checkbox">
                     <Checkbox
@@ -1240,7 +1241,7 @@ const Expenses = () => {
                   </TableCell>
                   <TableCell align="center">Actions</TableCell>
                 </TableRow>
-                <TableRow>
+                <TableRow sx={stickyFilterRowSx}>
                   <TableCell />
                   <TableCell>
                     <TextField

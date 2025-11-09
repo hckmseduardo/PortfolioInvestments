@@ -26,6 +26,7 @@ import {
 } from '@mui/material';
 import { transactionsAPI, accountsAPI, importAPI } from '../services/api';
 import { format, subDays, startOfMonth, startOfYear, subMonths, subYears } from 'date-fns';
+import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
 
 const PRESET_OPTIONS = [
   { value: '7d', label: '7D' },
@@ -498,8 +499,8 @@ const Transactions = () => {
 
       <Paper>
         <TableContainer>
-          <Table>
-            <TableHead>
+          <Table stickyHeader>
+            <TableHead sx={stickyTableHeadSx}>
               <TableRow>
                 <TableCell sortDirection={sortConfig.field === 'date' ? sortConfig.direction : false}>
                   <TableSortLabel
@@ -583,7 +584,7 @@ const Transactions = () => {
                   </TableSortLabel>
                 </TableCell>
               </TableRow>
-              <TableRow>
+              <TableRow sx={stickyFilterRowSx}>
                 <TableCell>
                   <TextField
                     type="date"

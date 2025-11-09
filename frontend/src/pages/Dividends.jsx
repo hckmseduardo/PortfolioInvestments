@@ -21,6 +21,7 @@ import {
 } from '@mui/material';
 import { dividendsAPI, accountsAPI, instrumentsAPI } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Line, ComposedChart } from 'recharts';
+import { stickyTableHeadSx } from '../utils/tableStyles';
 
 const PIE_COLORS = [
   '#0088FE',
@@ -926,8 +927,8 @@ const Dividends = () => {
               </Typography>
             ) : (
               <TableContainer>
-                <Table size="small">
-                  <TableHead>
+                <Table size="small" stickyHeader>
+                  <TableHead sx={stickyTableHeadSx}>
                     <TableRow>
                       <TableCell>
                         <TableSortLabel

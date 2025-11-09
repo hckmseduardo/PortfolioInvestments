@@ -47,6 +47,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { positionsAPI, accountsAPI, instrumentsAPI } from '../services/api';
 import { alpha } from '@mui/material/styles';
+import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
 
 const DATE_PRESETS = {
   CURRENT: 'current',
@@ -1318,8 +1319,8 @@ const Portfolio = () => {
           )}
           <TableContainer component={Paper}>
             {fetching && <LinearProgress />}
-            <Table>
-              <TableHead>
+            <Table stickyHeader>
+              <TableHead sx={stickyTableHeadSx}>
                 <TableRow>
                   <TableCell sortDirection={orderBy === 'ticker' ? order : false}>
                     <TableSortLabel
@@ -1412,7 +1413,7 @@ const Portfolio = () => {
                     </TableSortLabel>
                   </TableCell>
                 </TableRow>
-                <TableRow>
+                <TableRow sx={stickyFilterRowSx}>
                   <TableCell>{renderFilterField('ticker', 'Ticker')}</TableCell>
                   <TableCell>{renderFilterField('name', 'Name')}</TableCell>
                   <TableCell>{renderFilterField('instrument_type_name', 'Type')}</TableCell>

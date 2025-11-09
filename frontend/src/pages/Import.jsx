@@ -53,6 +53,7 @@ import {
   TableRows
 } from '@mui/icons-material';
 import { importAPI, accountsAPI } from '../services/api';
+import { stickyTableHeadSx } from '../utils/tableStyles';
 
 const STATEMENT_COLUMNS = [
   { id: 'filename', label: 'File', numeric: false },
@@ -1176,8 +1177,8 @@ const Import = () => {
           </Grid>
         ) : (
           <TableContainer>
-            <Table size="small">
-              <TableHead>
+            <Table size="small" stickyHeader>
+              <TableHead sx={stickyTableHeadSx}>
                 <TableRow>
                   {STATEMENT_COLUMNS.map((column) => (
                     <TableCell key={column.id} align={column.numeric ? 'right' : 'left'}>

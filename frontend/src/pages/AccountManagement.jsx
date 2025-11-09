@@ -23,6 +23,7 @@ import {
 } from '@mui/material';
 import { Add, Edit, Delete, AccountBalance } from '@mui/icons-material';
 import { accountsAPI } from '../services/api';
+import { stickyTableHeadSx } from '../utils/tableStyles';
 
 const AccountManagement = () => {
   const [accounts, setAccounts] = useState([]);
@@ -210,8 +211,8 @@ const AccountManagement = () => {
 
       <Paper>
         <TableContainer>
-          <Table>
-            <TableHead>
+          <Table stickyHeader>
+            <TableHead sx={stickyTableHeadSx}>
               <TableRow>
                 <TableCell>Label</TableCell>
                 <TableCell>Type</TableCell>
