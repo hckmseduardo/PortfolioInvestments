@@ -607,8 +607,54 @@ const Expenses = () => {
         </Box>
       </Box>
 
-      {/* Filters */}
-      <Paper sx={{ p: 2, mb: 3 }}>
+      {/* Filter Cards */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography color="textSecondary" gutterBottom>
+              Account
+            </Typography>
+            <FormControl fullWidth size="small">
+              <Select
+                value={selectedAccount}
+                onChange={(e) => setSelectedAccount(e.target.value)}
+                displayEmpty
+              >
+                <MenuItem value="">All Accounts</MenuItem>
+                {accounts.map(account => (
+                  <MenuItem key={account.id} value={account.id}>
+                    {account.label} ({account.institution})
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography color="textSecondary" gutterBottom>
+              Category
+            </Typography>
+            <FormControl fullWidth size="small">
+              <Select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                displayEmpty
+              >
+                <MenuItem value="">All Categories</MenuItem>
+                {categories.map(category => (
+                  <MenuItem key={category.id} value={category.name}>
+                    {category.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      {/* Filter by Period */}
+      <Paper sx={{ p: 3, mb: 3 }}>
         <Stack spacing={2}>
           <Box>
             <Typography variant="subtitle1" sx={{ mb: 1 }}>
@@ -648,42 +694,6 @@ const Expenses = () => {
               Clear filters
             </Button>
           </Stack>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Account</InputLabel>
-                <Select
-                  value={selectedAccount}
-                  onChange={(e) => setSelectedAccount(e.target.value)}
-                  label="Account"
-                >
-                  <MenuItem value="">All Accounts</MenuItem>
-                  {accounts.map(account => (
-                    <MenuItem key={account.id} value={account.id}>
-                      {account.label} ({account.institution})
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Category</InputLabel>
-                <Select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  label="Category"
-                >
-                  <MenuItem value="">All Categories</MenuItem>
-                  {categories.map(category => (
-                    <MenuItem key={category.id} value={category.name}>
-                      {category.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-          </Grid>
         </Stack>
       </Paper>
 
