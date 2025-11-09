@@ -43,6 +43,9 @@ services:
       - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost,http://localhost:80,http://app.home,http://app.home:80,https://app.home,https://app.home:443
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
+      - PLAID_CLIENT_ID=${PLAID_CLIENT_ID:-}
+      - PLAID_SECRET=${PLAID_SECRET:-}
+      - PLAID_ENVIRONMENT=${PLAID_ENVIRONMENT:-sandbox}
     depends_on:
       postgres:
         condition: service_healthy
@@ -120,6 +123,31 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
       - QUEUE_LIST=statement_processing
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  plaid-worker:
+    build: ./backend
+    container_name: portfolio-plaid-worker
+    command: ["python", "worker.py"]
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/uploads:/app/uploads
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-portfolio_user}:${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}@postgres:5432/${POSTGRES_DB:-portfolio}
+      - LEGACY_DATA_PATH=/app/data
+      - UPLOAD_PATH=/app/uploads
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
+      - PLAID_CLIENT_ID=${PLAID_CLIENT_ID:-}
+      - PLAID_SECRET=${PLAID_SECRET:-}
+      - PLAID_ENVIRONMENT=${PLAID_ENVIRONMENT:-sandbox}
+      - QUEUE_LIST=plaid_sync
     depends_on:
       postgres:
         condition: service_healthy
