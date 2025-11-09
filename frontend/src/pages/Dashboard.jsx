@@ -431,26 +431,37 @@ const getTileScale = (layoutItem) => {
 
 const StatCard = ({ title, value, icon, color, subtitle, sizeFactor = 1 }) => (
   <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-    <CardContent sx={{ flexGrow: 1 }}>
+    <CardContent sx={{
+      flexGrow: 1,
+      p: { xs: 1.5, sm: 2, md: 2 },
+      '&:last-child': { pb: { xs: 1.5, sm: 2, md: 2 } }
+    }}>
       <Typography
         variant="caption"
         color="textSecondary"
         className="dashboard-tile-handle"
-        sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move' }}
+        sx={{
+          letterSpacing: '.08em',
+          textTransform: 'uppercase',
+          cursor: 'move',
+          fontSize: { xs: '0.65rem', sm: '0.7rem' }
+        }}
       >
         {title}
       </Typography>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mt={1} sx={{ gap: 2 }}>
-        <Box>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mt={{ xs: 0.5, sm: 1 }} sx={{ gap: { xs: 1, sm: 2 } }}>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography
             sx={{
               fontWeight: 600,
               fontSize: {
-                xs: `clamp(${1.1 * sizeFactor}rem, ${4 * sizeFactor}vw, ${2.4 * sizeFactor}rem)`,
+                xs: `clamp(${0.9 * sizeFactor}rem, ${4 * sizeFactor}vw, ${2.4 * sizeFactor}rem)`,
                 sm: `clamp(${1.1 * sizeFactor}rem, ${3 * sizeFactor}vw, ${2.6 * sizeFactor}rem)`,
                 lg: `clamp(${1.1 * sizeFactor}rem, ${2 * sizeFactor}vw, ${2.8 * sizeFactor}rem)`
               },
-              lineHeight: 1.1
+              lineHeight: 1.1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
             }}
           >
             {value}
@@ -460,16 +471,24 @@ const StatCard = ({ title, value, icon, color, subtitle, sizeFactor = 1 }) => (
               sx={{
                 color: color || 'textSecondary',
                 fontSize: {
-                  xs: `clamp(${0.7 * sizeFactor}rem, ${2.5 * sizeFactor}vw, ${0.95 * sizeFactor}rem)`,
+                  xs: `clamp(${0.6 * sizeFactor}rem, ${2.5 * sizeFactor}vw, ${0.95 * sizeFactor}rem)`,
                   lg: `clamp(${0.75 * sizeFactor}rem, ${1 * sizeFactor}vw, ${1 * sizeFactor}rem)`
-                }
+                },
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
               }}
             >
               {subtitle}
             </Typography>
           )}
         </Box>
-        <Box sx={{ color: color || 'primary.main', display: 'flex', alignItems: 'center' }}>
+        <Box sx={{
+          color: color || 'primary.main',
+          display: 'flex',
+          alignItems: 'center',
+          fontSize: { xs: '1.5rem', sm: '2rem', md: '2.5rem' },
+          flexShrink: 0
+        }}>
           {icon}
         </Box>
       </Box>
@@ -1024,26 +1043,37 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             }}
             onClick={() => navigate('/accounts')}
           >
-            <CardContent sx={{ flexGrow: 1 }}>
+            <CardContent sx={{
+              flexGrow: 1,
+              p: { xs: 1.5, sm: 2, md: 2 },
+              '&:last-child': { pb: { xs: 1.5, sm: 2, md: 2 } }
+            }}>
               <Typography
                 variant="caption"
                 color="textSecondary"
                 className="dashboard-tile-handle"
-                sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move' }}
+                sx={{
+                  letterSpacing: '.08em',
+                  textTransform: 'uppercase',
+                  cursor: 'move',
+                  fontSize: { xs: '0.65rem', sm: '0.7rem' }
+                }}
               >
                 Total Accounts Balance
               </Typography>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mt={1} sx={{ gap: 2 }}>
-                <Box>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mt={{ xs: 0.5, sm: 1 }} sx={{ gap: { xs: 1, sm: 2 } }}>
+                <Box sx={{ minWidth: 0, flex: 1 }}>
                   <Typography
                     sx={{
                       fontWeight: 600,
                       fontSize: {
-                        xs: `clamp(${1.1 * tileScale}rem, ${4 * tileScale}vw, ${2.4 * tileScale}rem)`,
+                        xs: `clamp(${0.9 * tileScale}rem, ${4 * tileScale}vw, ${2.4 * tileScale}rem)`,
                         sm: `clamp(${1.1 * tileScale}rem, ${3 * tileScale}vw, ${2.6 * tileScale}rem)`,
                         lg: `clamp(${1.1 * tileScale}rem, ${2 * tileScale}vw, ${2.8 * tileScale}rem)`
                       },
-                      lineHeight: 1.1
+                      lineHeight: 1.1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
                     }}
                   >
                     {formatCurrency(totalAccountsBalance)}
@@ -1052,15 +1082,23 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     sx={{
                       color: 'textSecondary',
                       fontSize: {
-                        xs: `clamp(${0.7 * tileScale}rem, ${2.5 * tileScale}vw, ${0.95 * tileScale}rem)`,
+                        xs: `clamp(${0.6 * tileScale}rem, ${2.5 * tileScale}vw, ${0.95 * tileScale}rem)`,
                         lg: `clamp(${0.75 * tileScale}rem, ${1 * tileScale}vw, ${1 * tileScale}rem)`
-                      }
+                      },
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
                     }}
                   >
                     {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}
                   </Typography>
                 </Box>
-                <Box sx={{ color: 'info.main', display: 'flex', alignItems: 'center' }}>
+                <Box sx={{
+                  color: 'info.main',
+                  display: 'flex',
+                  alignItems: 'center',
+                  fontSize: { xs: '1.5rem', sm: '2rem', md: '2.5rem' },
+                  flexShrink: 0
+                }}>
                   <AccountBalance fontSize="large" />
                 </Box>
               </Box>
@@ -1126,9 +1164,9 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
           insightBody = typeBreakdown.length === 0 ? (
             <Typography color="textSecondary">Assign instrument types to view this breakdown.</Typography>
           ) : (
-            <Grid container spacing={3} sx={{ height: '100%', overflow: 'hidden' }}>
-              <Grid item xs={12} md={6} sx={{ height: '100%', minWidth: 0 }}>
-                <Box sx={{ height: '100%', minHeight: 0 }}>
+            <Grid container spacing={3} sx={{ height: '100%' }}>
+              <Grid item xs={12} md={6} sx={{ height: { xs: 300, md: '100%' }, minWidth: 0 }}>
+                <Box sx={{ height: '100%', minHeight: 250 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -1158,12 +1196,25 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                   </ResponsiveContainer>
                 </Box>
               </Grid>
-              <Grid item xs={12} md={6} sx={{ minWidth: 0 }}>
-                <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+              <Grid item xs={12} md={6} sx={{ minWidth: 0, height: { xs: 'auto', md: '100%' } }}>
+                <Box sx={{
+                  height: { xs: 'auto', md: '100%' },
+                  maxHeight: { xs: 400, md: '100%' },
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minHeight: 0
+                }}>
                   <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600, flexShrink: 0 }}>
                     Asset Types (Details)
                   </Typography>
-                  <Stack spacing={0.5} sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', pr: 1, minHeight: 0 }}>
+                  <Stack spacing={0.5} sx={{
+                    flexGrow: 1,
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                    pr: 1,
+                    minHeight: 0,
+                    maxHeight: { xs: 350, md: 'none' }
+                  }}>
                     {typeBreakdown.map((slice) => (
                       <Box
                         key={slice.type_id || 'unclassified'}
@@ -1194,9 +1245,9 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
           insightBody = industryBreakdown.length === 0 ? (
             <Typography color="textSecondary">Classify positions to view this breakdown.</Typography>
           ) : (
-            <Grid container spacing={3} sx={{ height: '100%', overflow: 'hidden' }}>
-              <Grid item xs={12} md={6} sx={{ height: '100%', minWidth: 0 }}>
-                <Box sx={{ height: '100%', minHeight: 0 }}>
+            <Grid container spacing={3} sx={{ height: '100%' }}>
+              <Grid item xs={12} md={6} sx={{ height: { xs: 300, md: '100%' }, minWidth: 0 }}>
+                <Box sx={{ height: '100%', minHeight: 250 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -1226,12 +1277,25 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                   </ResponsiveContainer>
                 </Box>
               </Grid>
-              <Grid item xs={12} md={6} sx={{ minWidth: 0 }}>
-                <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+              <Grid item xs={12} md={6} sx={{ minWidth: 0, height: { xs: 'auto', md: '100%' } }}>
+                <Box sx={{
+                  height: { xs: 'auto', md: '100%' },
+                  maxHeight: { xs: 400, md: '100%' },
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minHeight: 0
+                }}>
                   <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600, flexShrink: 0 }}>
                     Industry Breakdown (Details)
                   </Typography>
-                  <Stack spacing={0.5} sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', pr: 1, minHeight: 0 }}>
+                  <Stack spacing={0.5} sx={{
+                    flexGrow: 1,
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                    pr: 1,
+                    minHeight: 0,
+                    maxHeight: { xs: 350, md: 'none' }
+                  }}>
                     {industryBreakdown.map((slice) => (
                       <Box
                         key={slice.industry_id || 'unclassified'}
@@ -1269,7 +1333,12 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
 
         return (
           <Paper
-            sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}
+            sx={{
+              p: { xs: 1.5, sm: 2, md: 3 },
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
             onMouseEnter={() => handleInsightHover(true)}
             onMouseLeave={() => handleInsightHover(false)}
           >
@@ -1278,15 +1347,23 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
               justifyContent="space-between"
               alignItems={{ xs: 'flex-start', md: 'center' }}
               flexWrap="wrap"
-              gap={2}
+              gap={{ xs: 1, sm: 2 }}
               className="dashboard-tile-handle"
               sx={{ cursor: 'move' }}
             >
               <Box>
-                <Typography variant="caption" color="textSecondary" sx={{ letterSpacing: '.08em', textTransform: 'uppercase' }}>
+                <Typography
+                  variant="caption"
+                  color="textSecondary"
+                  sx={{
+                    letterSpacing: '.08em',
+                    textTransform: 'uppercase',
+                    fontSize: { xs: '0.65rem', sm: '0.7rem' }
+                  }}
+                >
                   Portfolio Insights
                 </Typography>
-                <Typography variant="body2" color="textSecondary">
+                <Typography variant="body2" color="textSecondary" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
                   {insightActiveTab === 'performance' ? `As of ${asOfLabel}` : 'Auto rotating highlights'}
                 </Typography>
               </Box>
@@ -1297,6 +1374,13 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                 scrollButtons="auto"
                 textColor="primary"
                 indicatorColor="primary"
+                sx={{
+                  '& .MuiTab-root': {
+                    fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                    minHeight: { xs: 40, sm: 48 },
+                    px: { xs: 1, sm: 2 }
+                  }
+                }}
               >
                 {INSIGHT_TABS.map((tab) => (
                   <Tab key={tab.id} label={tab.label} value={tab.id} disableRipple />
@@ -1307,11 +1391,18 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             {insightActiveTab === 'performance' && (
               <Stack
                 direction={{ xs: 'column', md: 'row' }}
-                spacing={2}
+                spacing={{ xs: 1, sm: 2 }}
                 alignItems={{ xs: 'flex-start', md: 'center' }}
-                sx={{ mt: 2 }}
+                sx={{ mt: { xs: 1, sm: 2 } }}
               >
-                <FormControl size="small" sx={{ minWidth: 200 }}>
+                <FormControl
+                  size="small"
+                  sx={{
+                    minWidth: { xs: '100%', sm: 200 },
+                    '& .MuiInputLabel-root': { fontSize: { xs: '0.875rem', sm: '1rem' } },
+                    '& .MuiSelect-select': { fontSize: { xs: '0.875rem', sm: '1rem' } }
+                  }}
+                >
                   <InputLabel id="performance-range-label">Range</InputLabel>
                   <Select
                     labelId="performance-range-label"
@@ -1336,6 +1427,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     value={performanceMonth}
                     onChange={(event) => setPerformanceMonth(event.target.value)}
                     InputLabelProps={{ shrink: true }}
+                    sx={{
+                      minWidth: { xs: '100%', sm: 'auto' },
+                      '& .MuiInputLabel-root': { fontSize: { xs: '0.875rem', sm: '1rem' } },
+                      '& .MuiInputBase-input': { fontSize: { xs: '0.875rem', sm: '1rem' } }
+                    }}
                   />
                 )}
                 {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_YEAR && (
@@ -1346,14 +1442,26 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     value={performanceYear}
                     onChange={(event) => setPerformanceYear(event.target.value)}
                     InputProps={{ inputProps: { min: 1900, max: 9999 } }}
+                    sx={{
+                      minWidth: { xs: '100%', sm: 'auto' },
+                      '& .MuiInputLabel-root': { fontSize: { xs: '0.875rem', sm: '1rem' } },
+                      '& .MuiInputBase-input': { fontSize: { xs: '0.875rem', sm: '1rem' } }
+                    }}
                   />
                 )}
               </Stack>
             )}
 
-            <Box sx={{ flexGrow: 1, minHeight: chartHeight, mt: 2 }}>{insightBody}</Box>
+            <Box sx={{ flexGrow: 1, minHeight: chartHeight, mt: { xs: 1, sm: 2 } }}>{insightBody}</Box>
 
-            <Typography variant="caption" color="textSecondary" sx={{ mt: 2 }}>
+            <Typography
+              variant="caption"
+              color="textSecondary"
+              sx={{
+                mt: { xs: 1, sm: 2 },
+                fontSize: { xs: '0.65rem', sm: '0.75rem' }
+              }}
+            >
               {footerText}
             </Typography>
           </Paper>
@@ -1361,22 +1469,33 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
       }
       case 'accounts_list':
         return (
-          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Paper sx={{
+            p: { xs: 1.5, sm: 2, md: 3 },
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
             <Typography
               variant="caption"
               color="textSecondary"
               className="dashboard-tile-handle"
-              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
+              sx={{
+                letterSpacing: '.08em',
+                textTransform: 'uppercase',
+                cursor: 'move',
+                mb: { xs: 1, sm: 2 },
+                fontSize: { xs: '0.65rem', sm: '0.7rem' }
+              }}
             >
               Accounts
             </Typography>
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', pr: 1 }}>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', pr: { xs: 0.5, sm: 1 } }}>
               {accounts.length === 0 ? (
-                <Typography color="textSecondary">
+                <Typography color="textSecondary" sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}>
                   No accounts yet. Import a statement to get started.
                 </Typography>
               ) : (
-                <Grid container spacing={2}>
+                <Grid container spacing={{ xs: 1, sm: 1.5, md: 2 }}>
                   {accounts.map((account) => {
                     const derivedBalance = accountBalances[account.id] ?? account.balance ?? 0;
                     const typeLabel = formatAccountTypeLabel(account.account_type);
@@ -1385,7 +1504,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                         <Paper
                           variant="outlined"
                           sx={{
-                            p: 2,
+                            p: { xs: 1.5, sm: 2 },
                             height: '100%',
                             display: 'flex',
                             flexDirection: 'column',
@@ -1393,26 +1512,51 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                           }}
                         >
                           <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
-                            <Box>
-                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                            <Box sx={{ minWidth: 0, flex: 1 }}>
+                              <Typography
+                                variant="subtitle1"
+                                sx={{
+                                  fontWeight: 600,
+                                  fontSize: { xs: '0.9rem', sm: '1rem' },
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
                                 {account.label || account.institution}
                               </Typography>
-                              <Typography variant="body2" color="textSecondary">
+                              <Typography
+                                variant="body2"
+                                color="textSecondary"
+                                sx={{
+                                  fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
                                 {account.institution}
                                 {account.account_number ? ` · #${account.account_number}` : ''}
                               </Typography>
                             </Box>
                             <Tooltip title={typeLabel}>
-                              <Box color="text.secondary" display="flex" alignItems="center">
+                              <Box color="text.secondary" display="flex" alignItems="center" sx={{ flexShrink: 0 }}>
                                 {getAccountTypeIcon(account.account_type)}
                               </Box>
                             </Tooltip>
                           </Stack>
-                          <Box sx={{ mt: 1, display: 'flex', alignItems: 'baseline', gap: 1 }}>
-                            <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
+                          <Box sx={{ mt: { xs: 0.5, sm: 1 }, display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                            <Typography
+                              variant="h6"
+                              color="primary"
+                              sx={{
+                                fontWeight: 600,
+                                fontSize: { xs: '1rem', sm: '1.25rem' }
+                              }}
+                            >
                               {formatCurrency(derivedBalance)}
                             </Typography>
-                            <Typography variant="caption" color="textSecondary">
+                            <Typography variant="caption" color="textSecondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
                               balance
                             </Typography>
                           </Box>
