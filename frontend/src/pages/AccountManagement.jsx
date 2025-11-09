@@ -22,12 +22,13 @@ import {
   Chip
 } from '@mui/material';
 import { Add, Edit, Delete, AccountBalance } from '@mui/icons-material';
-import { accountsAPI } from '../services/api';
+import { accountsAPI, transactionsAPI } from '../services/api';
 import { stickyTableHeadSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
 
 const AccountManagement = () => {
   const [accounts, setAccounts] = useState([]);
+  const [accountBalances, setAccountBalances] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -59,6 +60,42 @@ const AccountManagement = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadBalances = async () => {
+      if (accounts.length === 0) {
+        if (!isCancelled) {
+          setAccountBalances({});
+        }
+        return;
+      }
+
+      const results = await Promise.all(
+        accounts.map(async (account) => {
+          try {
+            const response = await transactionsAPI.getBalance(account.id);
+            const value = response.data?.balance ?? account.balance ?? 0;
+            return [account.id, value];
+          } catch (error) {
+            console.error(`Error fetching balance for account ${account.id}:`, error);
+            return [account.id, account.balance ?? 0];
+          }
+        })
+      );
+
+      if (!isCancelled) {
+        setAccountBalances(Object.fromEntries(results));
+      }
+    };
+
+    loadBalances();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [accounts]);
 
   const handleOpenDialog = (account = null) => {
     if (account) {
@@ -194,7 +231,8 @@ const AccountManagement = () => {
 
   const accountExportData = accounts.map(account => ({
     ...account,
-    label: account.label || '-'
+    label: account.label || '-',
+    balance: accountBalances[account.id] ?? account.balance ?? 0
   }));
 
   return (
@@ -258,41 +296,44 @@ const AccountManagement = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                accounts.map((account) => (
-                  <TableRow key={account.id}>
-                    <TableCell>
-                      <Typography variant="body1" fontWeight="medium">
-                        {account.label || '-'}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={account.account_type}
-                        color={getAccountTypeColor(account.account_type)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>{account.institution}</TableCell>
-                    <TableCell>{account.account_number}</TableCell>
-                    <TableCell align="right">{formatCurrency(account.balance)}</TableCell>
-                    <TableCell align="center">
-                      <IconButton
-                        color="primary"
-                        onClick={() => handleOpenDialog(account)}
-                        size="small"
-                      >
-                        <Edit />
-                      </IconButton>
-                      <IconButton
-                        color="error"
-                        onClick={() => handleDeleteClick(account)}
-                        size="small"
-                      >
-                        <Delete />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))
+                accounts.map((account) => {
+                  const derivedBalance = accountBalances[account.id] ?? account.balance ?? 0;
+                  return (
+                    <TableRow key={account.id}>
+                      <TableCell>
+                        <Typography variant="body1" fontWeight="medium">
+                          {account.label || '-'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={account.account_type}
+                          color={getAccountTypeColor(account.account_type)}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>{account.institution}</TableCell>
+                      <TableCell>{account.account_number}</TableCell>
+                      <TableCell align="right">{formatCurrency(derivedBalance)}</TableCell>
+                      <TableCell align="center">
+                        <IconButton
+                          color="primary"
+                          onClick={() => handleOpenDialog(account)}
+                          size="small"
+                        >
+                          <Edit />
+                        </IconButton>
+                        <IconButton
+                          color="error"
+                          onClick={() => handleDeleteClick(account)}
+                          size="small"
+                        >
+                          <Delete />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>

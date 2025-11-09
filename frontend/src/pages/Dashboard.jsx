@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -49,8 +50,8 @@ const GRID_MARGIN = [16, 16];
 const DRAG_START_DELAY = 300;
 const INSIGHT_TABS = [
   { id: 'performance', label: 'Performance' },
-  { id: 'types', label: 'Asset Types' },
-  { id: 'industries', label: 'Industries' }
+  { id: 'types', label: 'Breakdown by Asset Types' },
+  { id: 'industries', label: 'Breakdown by Industries' }
 ];
 const INSIGHT_AUTO_INTERVAL = 10000;
 const INSIGHT_INTERACTION_TIMEOUT = 20000;
@@ -87,12 +88,8 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 9, y: 0, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 1, w: 4, h: 1 },
     { i: 'total_value', x: 4, y: 1, w: 4, h: 1 },
-    { i: 'accounts_list', x: 0, y: 2, w: 12, h: 2 },
-    { i: 'performance', x: 0, y: 4, w: 12, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 7, w: 6, h: 3, minH: 3 },
-    { i: 'type_breakdown_table', x: 0, y: 10, w: 6, h: 3, minH: 3 },
-    { i: 'industry_breakdown', x: 6, y: 7, w: 6, h: 3, minH: 3 },
-    { i: 'industry_breakdown_table', x: 6, y: 10, w: 6, h: 3, minH: 3 }
+    { i: 'performance', x: 0, y: 2, w: 12, h: 4, minH: 4 },
+    { i: 'accounts_list', x: 0, y: 6, w: 12, h: 2 }
   ],
   tablet_landscape: [
     { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
@@ -101,12 +98,8 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 9, y: 0, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 1, w: 4, h: 1 },
     { i: 'total_value', x: 4, y: 1, w: 4, h: 1 },
-    { i: 'accounts_list', x: 0, y: 2, w: 12, h: 2 },
-    { i: 'performance', x: 0, y: 4, w: 12, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 7, w: 6, h: 3, minH: 3 },
-    { i: 'type_breakdown_table', x: 0, y: 10, w: 6, h: 3, minH: 3 },
-    { i: 'industry_breakdown', x: 6, y: 7, w: 6, h: 3, minH: 3 },
-    { i: 'industry_breakdown_table', x: 6, y: 10, w: 6, h: 3, minH: 3 }
+    { i: 'performance', x: 0, y: 2, w: 12, h: 4, minH: 4 },
+    { i: 'accounts_list', x: 0, y: 6, w: 12, h: 2 }
   ],
   tablet_portrait: [
     { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
@@ -115,12 +108,8 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 4, y: 1, w: 4, h: 1 },
     { i: 'accounts_summary', x: 0, y: 2, w: 4, h: 1 },
     { i: 'total_value', x: 4, y: 2, w: 4, h: 1 },
-    { i: 'accounts_list', x: 0, y: 3, w: 8, h: 2 },
-    { i: 'performance', x: 0, y: 5, w: 8, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 8, w: 8, h: 3, minH: 3 },
-    { i: 'type_breakdown_table', x: 0, y: 11, w: 8, h: 3, minH: 3 },
-    { i: 'industry_breakdown', x: 0, y: 14, w: 8, h: 3, minH: 3 },
-    { i: 'industry_breakdown_table', x: 0, y: 17, w: 8, h: 3, minH: 3 }
+    { i: 'performance', x: 0, y: 3, w: 8, h: 4, minH: 4 },
+    { i: 'accounts_list', x: 0, y: 7, w: 8, h: 2 }
   ],
   mobile_landscape: [
     { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
@@ -129,12 +118,8 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 3, y: 1, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 2, w: 3, h: 1 },
     { i: 'total_value', x: 3, y: 2, w: 3, h: 1 },
-    { i: 'accounts_list', x: 0, y: 3, w: 6, h: 2 },
-    { i: 'performance', x: 0, y: 5, w: 6, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 8, w: 6, h: 3, minH: 3 },
-    { i: 'type_breakdown_table', x: 0, y: 11, w: 6, h: 3, minH: 3 },
-    { i: 'industry_breakdown', x: 0, y: 14, w: 6, h: 3, minH: 3 },
-    { i: 'industry_breakdown_table', x: 0, y: 17, w: 6, h: 3, minH: 3 }
+    { i: 'performance', x: 0, y: 3, w: 6, h: 4, minH: 4 },
+    { i: 'accounts_list', x: 0, y: 7, w: 6, h: 2 }
   ],
   mobile_portrait: [
     { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
@@ -143,12 +128,8 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 0, y: 3, w: 4, h: 1 },
     { i: 'accounts_summary', x: 0, y: 4, w: 4, h: 1 },
     { i: 'total_value', x: 0, y: 5, w: 4, h: 1 },
-    { i: 'accounts_list', x: 0, y: 6, w: 4, h: 2 },
-    { i: 'performance', x: 0, y: 8, w: 4, h: 3 },
-    { i: 'type_breakdown', x: 0, y: 11, w: 4, h: 3, minH: 3 },
-    { i: 'type_breakdown_table', x: 0, y: 14, w: 4, h: 4, minH: 4 },
-    { i: 'industry_breakdown', x: 0, y: 18, w: 4, h: 3, minH: 3 },
-    { i: 'industry_breakdown_table', x: 0, y: 21, w: 4, h: 4, minH: 4 }
+    { i: 'performance', x: 0, y: 6, w: 4, h: 5, minH: 5 },
+    { i: 'accounts_list', x: 0, y: 11, w: 4, h: 2 }
   ]
 };
 
@@ -497,6 +478,7 @@ const StatCard = ({ title, value, icon, color, subtitle, sizeFactor = 1 }) => (
 );
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [accountBalances, setAccountBalances] = useState({});
@@ -772,6 +754,10 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
   const totalDividends = dividendSummary?.total_dividends || 0;
   const totalGains = capitalGains + totalDividends;
 
+  const totalAccountsBalance = useMemo(() => {
+    return Object.values(accountBalances).reduce((sum, balance) => sum + balance, 0);
+  }, [accountBalances]);
+
   const persistLayout = useCallback(async (profile, layout) => {
     try {
       await dashboardAPI.saveLayout(profile, serializeLayout(layout));
@@ -1024,182 +1010,62 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
         );
       case 'accounts_summary':
         return (
-          <StatCard
-            title="Accounts"
-            value={summary?.accounts_count || 0}
-            icon={<AccountBalance fontSize="large" />}
-            color="info.main"
-            subtitle={`${summary?.positions_count || 0} positions`}
-            sizeFactor={tileScale}
-          />
-        );
-      case 'industry_breakdown':
-        return (
-          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Typography
-              variant="caption"
-              color="textSecondary"
-              className="dashboard-tile-handle"
-              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
-            >
-              Industry Breakdown
-            </Typography>
-            {industryBreakdown.length === 0 ? (
-              <Typography color="textSecondary">Classify positions to view this chart.</Typography>
-            ) : (
-              <Box sx={{ flexGrow: 1, minHeight: 0 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={industryBreakdown}
-                      dataKey="market_value"
-                      nameKey="industry_name"
-                      innerRadius="25%"
-                      outerRadius="90%"
-                      paddingAngle={1}
-                      cx="50%"
-                      cy="50%"
-                    >
-                      {industryBreakdown.map((slice) => (
-                        <Cell
-                          key={slice.industry_id || 'unclassified'}
-                          fill={slice.color || '#b0bec5'}
-                        />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip
-                      formatter={(value, name, payload) => [
-                        `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
-                        payload?.payload?.industry_name || name
-                      ]}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </Box>
-            )}
-          </Paper>
-        );
-      case 'industry_breakdown_table':
-        return (
-          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Typography
-              variant="caption"
-              color="textSecondary"
-              className="dashboard-tile-handle"
-              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
-            >
-              Industry Breakdown (Details)
-            </Typography>
-            {industryBreakdown.length === 0 ? (
-              <Typography color="textSecondary">Classify positions to view this table.</Typography>
-            ) : (
-              <Stack spacing={1.25} sx={{ flexGrow: 1, overflowY: 'auto', pr: 1 }}>
-                {industryBreakdown.map((slice) => (
-                  <Box
-                    key={slice.industry_id || 'unclassified'}
-                    sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+          <Card
+            sx={{
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              cursor: 'pointer',
+              transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+              '&:hover': {
+                transform: 'translateY(-4px)',
+                boxShadow: 6
+              }
+            }}
+            onClick={() => navigate('/accounts')}
+          >
+            <CardContent sx={{ flexGrow: 1 }}>
+              <Typography
+                variant="caption"
+                color="textSecondary"
+                className="dashboard-tile-handle"
+                sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move' }}
+              >
+                Total Accounts Balance
+              </Typography>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mt={1} sx={{ gap: 2 }}>
+                <Box>
+                  <Typography
+                    sx={{
+                      fontWeight: 600,
+                      fontSize: {
+                        xs: `clamp(${1.1 * tileScale}rem, ${4 * tileScale}vw, ${2.4 * tileScale}rem)`,
+                        sm: `clamp(${1.1 * tileScale}rem, ${3 * tileScale}vw, ${2.6 * tileScale}rem)`,
+                        lg: `clamp(${1.1 * tileScale}rem, ${2 * tileScale}vw, ${2.8 * tileScale}rem)`
+                      },
+                      lineHeight: 1.1
+                    }}
                   >
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {renderColorSwatch(slice.color)}
-                      <Typography variant="body2">{slice.industry_name}</Typography>
-                    </Box>
-                    <Box textAlign="right">
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {formatCurrency(slice.market_value)}
-                      </Typography>
-                      <Typography variant="caption" color="textSecondary">
-                        {formatPercent(slice.percentage)}
-                      </Typography>
-                    </Box>
-                  </Box>
-                ))}
-              </Stack>
-            )}
-          </Paper>
-        );
-      case 'type_breakdown':
-        return (
-          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Typography
-              variant="caption"
-              color="textSecondary"
-              className="dashboard-tile-handle"
-              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
-            >
-              Asset Types
-            </Typography>
-            {typeBreakdown.length === 0 ? (
-              <Typography color="textSecondary">Assign instrument types to view this chart.</Typography>
-            ) : (
-              <Box sx={{ flexGrow: 1, minHeight: 0 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={typeBreakdown}
-                      dataKey="market_value"
-                      nameKey="type_name"
-                      innerRadius="25%"
-                      outerRadius="90%"
-                      paddingAngle={1}
-                      cx="50%"
-                      cy="50%"
-                    >
-                      {typeBreakdown.map((slice) => (
-                        <Cell
-                          key={slice.type_id || 'unclassified'}
-                          fill={slice.color || '#b0bec5'}
-                        />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip
-                      formatter={(value, name, payload) => [
-                        `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
-                        payload?.payload?.type_name || name
-                      ]}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </Box>
-            )}
-          </Paper>
-        );
-      case 'type_breakdown_table':
-        return (
-          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Typography
-              variant="caption"
-              color="textSecondary"
-              className="dashboard-tile-handle"
-              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
-            >
-              Asset Types (Details)
-            </Typography>
-            {typeBreakdown.length === 0 ? (
-              <Typography color="textSecondary">Assign instrument types to view this table.</Typography>
-            ) : (
-              <Stack spacing={1.25} sx={{ flexGrow: 1, overflowY: 'auto', pr: 1 }}>
-                {typeBreakdown.map((slice) => (
-                  <Box
-                    key={slice.type_id || 'unclassified'}
-                    sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    {formatCurrency(totalAccountsBalance)}
+                  </Typography>
+                  <Typography
+                    sx={{
+                      color: 'textSecondary',
+                      fontSize: {
+                        xs: `clamp(${0.7 * tileScale}rem, ${2.5 * tileScale}vw, ${0.95 * tileScale}rem)`,
+                        lg: `clamp(${0.75 * tileScale}rem, ${1 * tileScale}vw, ${1 * tileScale}rem)`
+                      }
+                    }}
                   >
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {renderColorSwatch(slice.color)}
-                      <Typography variant="body2">{slice.type_name}</Typography>
-                    </Box>
-                    <Box textAlign="right">
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {formatCurrency(slice.market_value)}
-                      </Typography>
-                      <Typography variant="caption" color="textSecondary">
-                        {formatPercent(slice.percentage)}
-                      </Typography>
-                    </Box>
-                  </Box>
-                ))}
-              </Stack>
-            )}
-          </Paper>
+                    {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}
+                  </Typography>
+                </Box>
+                <Box sx={{ color: 'info.main', display: 'flex', alignItems: 'center' }}>
+                  <AccountBalance fontSize="large" />
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
         );
       case 'performance': {
         const chartHeight = Math.max(ROW_HEIGHT * (layoutItem?.h || 2) - 140, 220);
@@ -1257,20 +1123,140 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             </ResponsiveContainer>
           );
         } else if (insightActiveTab === 'types') {
-          insightBody = renderPieChart(
-            typeBreakdown,
-            'market_value',
-            'type_name',
-            'type_id',
-            'Assign instrument types to view this chart.'
+          insightBody = typeBreakdown.length === 0 ? (
+            <Typography color="textSecondary">Assign instrument types to view this breakdown.</Typography>
+          ) : (
+            <Grid container spacing={3} sx={{ height: '100%', overflow: 'hidden' }}>
+              <Grid item xs={12} md={6} sx={{ height: '100%', minWidth: 0 }}>
+                <Box sx={{ height: '100%', minHeight: 0 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={typeBreakdown}
+                        dataKey="market_value"
+                        nameKey="type_name"
+                        innerRadius="25%"
+                        outerRadius="90%"
+                        paddingAngle={1}
+                        cx="50%"
+                        cy="50%"
+                      >
+                        {typeBreakdown.map((slice) => (
+                          <Cell
+                            key={slice.type_id || 'unclassified'}
+                            fill={slice.color || '#b0bec5'}
+                          />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip
+                        formatter={(value, name, payload) => [
+                          `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
+                          payload?.payload?.type_name || name
+                        ]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Grid>
+              <Grid item xs={12} md={6} sx={{ minWidth: 0 }}>
+                <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                  <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600, flexShrink: 0 }}>
+                    Asset Types (Details)
+                  </Typography>
+                  <Stack spacing={0.5} sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', pr: 1, minHeight: 0 }}>
+                    {typeBreakdown.map((slice) => (
+                      <Box
+                        key={slice.type_id || 'unclassified'}
+                        sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flexShrink: 1 }}>
+                          {renderColorSwatch(slice.color)}
+                          <Typography variant="body2" noWrap sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {slice.type_name}
+                          </Typography>
+                        </Box>
+                        <Box textAlign="right" sx={{ flexShrink: 0, ml: 2 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            {formatCurrency(slice.market_value)}{' '}
+                            <Typography component="span" variant="caption" color="textSecondary">
+                              {formatPercent(slice.percentage)}
+                            </Typography>
+                          </Typography>
+                        </Box>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Box>
+              </Grid>
+            </Grid>
           );
         } else {
-          insightBody = renderPieChart(
-            industryBreakdown,
-            'market_value',
-            'industry_name',
-            'industry_id',
-            'Classify positions to view this chart.'
+          insightBody = industryBreakdown.length === 0 ? (
+            <Typography color="textSecondary">Classify positions to view this breakdown.</Typography>
+          ) : (
+            <Grid container spacing={3} sx={{ height: '100%', overflow: 'hidden' }}>
+              <Grid item xs={12} md={6} sx={{ height: '100%', minWidth: 0 }}>
+                <Box sx={{ height: '100%', minHeight: 0 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={industryBreakdown}
+                        dataKey="market_value"
+                        nameKey="industry_name"
+                        innerRadius="25%"
+                        outerRadius="90%"
+                        paddingAngle={1}
+                        cx="50%"
+                        cy="50%"
+                      >
+                        {industryBreakdown.map((slice) => (
+                          <Cell
+                            key={slice.industry_id || 'unclassified'}
+                            fill={slice.color || '#b0bec5'}
+                          />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip
+                        formatter={(value, name, payload) => [
+                          `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
+                          payload?.payload?.industry_name || name
+                        ]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Grid>
+              <Grid item xs={12} md={6} sx={{ minWidth: 0 }}>
+                <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                  <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600, flexShrink: 0 }}>
+                    Industry Breakdown (Details)
+                  </Typography>
+                  <Stack spacing={0.5} sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', pr: 1, minHeight: 0 }}>
+                    {industryBreakdown.map((slice) => (
+                      <Box
+                        key={slice.industry_id || 'unclassified'}
+                        sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flexShrink: 1 }}>
+                          {renderColorSwatch(slice.color)}
+                          <Typography variant="body2" noWrap sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {slice.industry_name}
+                          </Typography>
+                        </Box>
+                        <Box textAlign="right" sx={{ flexShrink: 0, ml: 2 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            {formatCurrency(slice.market_value)}{' '}
+                            <Typography component="span" variant="caption" color="textSecondary">
+                              {formatPercent(slice.percentage)}
+                            </Typography>
+                          </Typography>
+                        </Box>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Box>
+              </Grid>
+            </Grid>
           );
         }
 
