@@ -29,7 +29,8 @@ import {
   SwapHoriz,
   Brightness4,
   Brightness7,
-  Menu as MenuIcon
+  Menu as MenuIcon,
+  Settings as SettingsIcon
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -141,6 +142,12 @@ const Navbar = () => {
             >
               <MenuItem disabled>
                 <Typography variant="body2">{user?.email}</Typography>
+              </MenuItem>
+              <MenuItem onClick={() => { navigate('/settings'); handleClose(); }}>
+                <ListItemIcon>
+                  <SettingsIcon fontSize="small" />
+                </ListItemIcon>
+                Settings
               </MenuItem>
               <MenuItem onClick={handleLogout}>Logout</MenuItem>
             </Menu>

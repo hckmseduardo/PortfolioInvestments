@@ -105,6 +105,13 @@ export const authAPI = {
   },
 
   getCurrentUser: () => api.get('/auth/me'),
+
+  // 2FA Methods
+  setup2FA: () => api.post('/auth/2fa/setup'),
+  enable2FA: (code) => api.post('/auth/2fa/enable', { code }),
+  verify2FA: (code, tempToken) => api.post(`/auth/2fa/verify?temp_token=${tempToken}`, { code }),
+  disable2FA: (password, code) => api.post('/auth/2fa/disable', { password, code }),
+  get2FAStatus: () => api.get('/auth/2fa/status'),
 };
 
 export const accountsAPI = {

@@ -34,6 +34,7 @@ class UserLogin(BaseModel):
 class User(UserBase):
     id: str
     created_at: datetime
+    two_factor_enabled: bool = False
 
     class Config:
         from_attributes = True
@@ -41,9 +42,23 @@ class User(UserBase):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    requires_2fa: bool = False
+    temp_token: Optional[str] = None
 
 class TokenData(BaseModel):
     email: Optional[str] = None
+
+class TwoFactorSetup(BaseModel):
+    secret: str
+    qr_code_url: str
+    backup_codes: List[str]
+
+class TwoFactorVerify(BaseModel):
+    code: str
+
+class TwoFactorDisable(BaseModel):
+    password: str
+    code: str
 
 class AccountBase(BaseModel):
     account_type: AccountType

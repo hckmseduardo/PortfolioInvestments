@@ -16,15 +16,22 @@ if [ ! -f backend/.env ]; then
     cp backend/.env.example backend/.env
 fi
 
-echo "Choose an option:"
-echo "1. Start with Docker (Recommended)"
-echo "2. Start with Docker (Recommended) and see console output"
-echo "3. Start Backend Only (Development)"
-echo "4. Start Frontend Only (Development)"
-echo "5. Stop Docker Containers"
-echo "6. View Logs"
-echo ""
-read -p "Enter your choice (1-5): " choice
+# Check if parameter was passed
+if [ -n "$1" ]; then
+    choice=$1
+    echo "Executing option $choice directly..."
+    echo ""
+else
+    echo "Choose an option:"
+    echo "1. Start with Docker (Recommended)"
+    echo "2. Start with Docker (Recommended) and see console output"
+    echo "3. Start Backend Only (Development)"
+    echo "4. Start Frontend Only (Development)"
+    echo "5. Stop Docker Containers"
+    echo "6. View Logs"
+    echo ""
+    read -p "Enter your choice (1-6): " choice
+fi
 
 case $choice in
     1)

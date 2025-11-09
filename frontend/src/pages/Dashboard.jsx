@@ -31,11 +31,7 @@ import {
   Refresh,
   Lock,
   LockOpen,
-  Menu as MenuIcon,
-  AccountBalanceWallet,
-  CreditCard,
-  Savings,
-  Wallet
+  Menu as MenuIcon
 } from '@mui/icons-material';
 import { accountsAPI, positionsAPI, dividendsAPI, dashboardAPI, transactionsAPI } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -88,8 +84,7 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 9, y: 0, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 1, w: 4, h: 1 },
     { i: 'total_value', x: 4, y: 1, w: 4, h: 1 },
-    { i: 'performance', x: 0, y: 2, w: 12, h: 4, minH: 4 },
-    { i: 'accounts_list', x: 0, y: 6, w: 12, h: 2 }
+    { i: 'performance', x: 0, y: 2, w: 12, h: 4, minH: 4 }
   ],
   tablet_landscape: [
     { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
@@ -98,8 +93,7 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 9, y: 0, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 1, w: 4, h: 1 },
     { i: 'total_value', x: 4, y: 1, w: 4, h: 1 },
-    { i: 'performance', x: 0, y: 2, w: 12, h: 4, minH: 4 },
-    { i: 'accounts_list', x: 0, y: 6, w: 12, h: 2 }
+    { i: 'performance', x: 0, y: 2, w: 12, h: 4, minH: 4 }
   ],
   tablet_portrait: [
     { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
@@ -108,8 +102,7 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 4, y: 1, w: 4, h: 1 },
     { i: 'accounts_summary', x: 0, y: 2, w: 4, h: 1 },
     { i: 'total_value', x: 4, y: 2, w: 4, h: 1 },
-    { i: 'performance', x: 0, y: 3, w: 8, h: 4, minH: 4 },
-    { i: 'accounts_list', x: 0, y: 7, w: 8, h: 2 }
+    { i: 'performance', x: 0, y: 3, w: 8, h: 4, minH: 4 }
   ],
   mobile_landscape: [
     { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
@@ -118,8 +111,7 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 3, y: 1, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 2, w: 3, h: 1 },
     { i: 'total_value', x: 3, y: 2, w: 3, h: 1 },
-    { i: 'performance', x: 0, y: 3, w: 6, h: 4, minH: 4 },
-    { i: 'accounts_list', x: 0, y: 7, w: 6, h: 2 }
+    { i: 'performance', x: 0, y: 3, w: 6, h: 4, minH: 4 }
   ],
   mobile_portrait: [
     { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
@@ -128,8 +120,7 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 0, y: 3, w: 4, h: 1 },
     { i: 'accounts_summary', x: 0, y: 4, w: 4, h: 1 },
     { i: 'total_value', x: 0, y: 5, w: 4, h: 1 },
-    { i: 'performance', x: 0, y: 6, w: 4, h: 5, minH: 5 },
-    { i: 'accounts_list', x: 0, y: 11, w: 4, h: 2 }
+    { i: 'performance', x: 0, y: 6, w: 4, h: 5, minH: 5 }
   ]
 };
 
@@ -389,35 +380,6 @@ const renderColorSwatch = (color) => (
     }}
   />
 );
-
-const getAccountTypeIcon = (accountType) => {
-  const normalized = String(accountType || '').toLowerCase();
-  const iconProps = { fontSize: 'small' };
-
-  switch (normalized) {
-    case 'credit_card':
-      return <CreditCard {...iconProps} />;
-    case 'savings':
-      return <Savings {...iconProps} />;
-    case 'investment':
-    case 'brokerage':
-      return <TrendingUp {...iconProps} />;
-    case 'checking':
-    case 'chequing':
-      return <AccountBalanceWallet {...iconProps} />;
-    default:
-      return <Wallet {...iconProps} />;
-  }
-};
-
-const formatAccountTypeLabel = (accountType) => {
-  if (!accountType) {
-    return 'Account';
-  }
-  return String(accountType)
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-};
 
 const getTileScale = (layoutItem) => {
   if (!layoutItem) {
@@ -1475,121 +1437,6 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
           </Paper>
         );
       }
-      case 'accounts_list':
-        return (
-          <Paper sx={{
-            p: { xs: 1, sm: 1.5, md: 2 },
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column'
-          }}>
-            <Typography
-              variant="caption"
-              color="textSecondary"
-              className="dashboard-tile-handle"
-              sx={{
-                letterSpacing: '.05em',
-                textTransform: 'uppercase',
-                cursor: 'move',
-                mb: { xs: 0.5, sm: 1 },
-                fontSize: 'clamp(0.5rem, 2vw, 0.75rem)'
-              }}
-            >
-              Accounts
-            </Typography>
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', pr: { xs: 0.5, sm: 1 } }}>
-              {accounts.length === 0 ? (
-                <Typography color="textSecondary" sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}>
-                  No accounts yet. Import a statement to get started.
-                </Typography>
-              ) : (
-                <Grid container spacing={{ xs: 1, sm: 1.5, md: 2 }}>
-                  {accounts.map((account) => {
-                    const derivedBalance = accountBalances[account.id] ?? account.balance ?? 0;
-                    const typeLabel = formatAccountTypeLabel(account.account_type);
-                    return (
-                      <Grid item xs={12} sm={6} md={4} key={account.id}>
-                        <Paper
-                          variant="outlined"
-                          sx={{
-                            p: { xs: 1, sm: 1.5 },
-                            height: '100%',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 0.5
-                          }}
-                        >
-                          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={0.5}>
-                            <Box sx={{ minWidth: 0, flex: 1 }}>
-                              <Typography
-                                variant="subtitle1"
-                                sx={{
-                                  fontWeight: 600,
-                                  fontSize: 'clamp(0.75rem, 2.5vw, 1rem)',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap'
-                                }}
-                              >
-                                {account.label || account.institution}
-                              </Typography>
-                              <Typography
-                                variant="body2"
-                                color="textSecondary"
-                                sx={{
-                                  fontSize: 'clamp(0.6rem, 2vw, 0.875rem)',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap'
-                                }}
-                              >
-                                {account.institution}
-                                {account.account_number ? ` · #${account.account_number}` : ''}
-                              </Typography>
-                            </Box>
-                            <Tooltip title={typeLabel}>
-                              <Box
-                                color="text.secondary"
-                                display="flex"
-                                alignItems="center"
-                                sx={{
-                                  flexShrink: 0,
-                                  fontSize: 'clamp(1rem, 3vw, 1.5rem)',
-                                  '& > svg': { fontSize: 'inherit' }
-                                }}
-                              >
-                                {getAccountTypeIcon(account.account_type)}
-                              </Box>
-                            </Tooltip>
-                          </Stack>
-                          <Box sx={{ mt: { xs: 0.25, sm: 0.5 }, display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
-                            <Typography
-                              variant="h6"
-                              color="primary"
-                              sx={{
-                                fontWeight: 600,
-                                fontSize: 'clamp(0.875rem, 3vw, 1.25rem)'
-                              }}
-                            >
-                              {formatCurrency(derivedBalance)}
-                            </Typography>
-                            <Typography
-                              variant="caption"
-                              color="textSecondary"
-                              sx={{ fontSize: 'clamp(0.5rem, 1.5vw, 0.75rem)' }}
-                            >
-                              balance
-                            </Typography>
-                          </Box>
-                        </Paper>
-                      </Grid>
-                    );
-                  })}
-                </Grid>
-              )}
-            </Box>
-          </Paper>
-        );
       default:
         return null;
     }
