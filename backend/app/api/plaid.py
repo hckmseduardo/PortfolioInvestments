@@ -3,19 +3,20 @@ Plaid API Routes
 
 Handles Plaid integration endpoints for account linking and transaction syncing.
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
+from sqlalchemy.orm import Session
 import logging
 import uuid
 
 from app.models.schemas import User
 from app.api.auth import get_current_user
-from app.database.json_db import get_db
+from app.database.postgres_db import get_db
+from app.database.models import PlaidItem, PlaidAccount, Account, AccountTypeEnum
 from app.services.plaid_client import plaid_client
 from app.services.job_queue import enqueue_plaid_sync_job, get_job_info
-from app.database.models import AccountTypeEnum
 
 router = APIRouter(prefix="/plaid", tags=["plaid"])
 logger = logging.getLogger(__name__)
@@ -85,13 +86,12 @@ async def create_link_token(current_user: User = Depends(get_current_user)):
 @router.post("/exchange-token")
 async def exchange_public_token(
     request: ExchangeTokenRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     Exchange public token from Plaid Link for access token and create accounts
     """
-    db = get_db()
-
     # Exchange public token for access token
     exchange_result = plaid_client.exchange_public_token(request.public_token)
     if not exchange_result:
@@ -117,20 +117,19 @@ async def exchange_public_token(
         )
 
     # Create PlaidItem record
-    plaid_item_id = str(uuid.uuid4())
-    plaid_item = {
-        "id": plaid_item_id,
-        "user_id": current_user.id,
-        "access_token": access_token,  # In production, encrypt this
-        "item_id": item_id,
-        "institution_id": institution_id,
-        "institution_name": institution_name,
-        "status": "active",
-        "created_at": datetime.utcnow().isoformat(),
-        "last_synced": None,
-        "error_message": None,
-    }
-    db.insert("plaid_items", plaid_item)
+    plaid_item = PlaidItem(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        access_token=access_token,  # In production, encrypt this
+        item_id=item_id,
+        institution_id=institution_id,
+        institution_name=institution_name,
+        status="active",
+        created_at=datetime.utcnow(),
+        last_synced=None,
+        error_message=None
+    )
+    db.add(plaid_item)
 
     # Create accounts and PlaidAccount mappings
     created_accounts = []
@@ -142,37 +141,36 @@ async def exchange_public_token(
         )
 
         # Create Account record
-        account_id = str(uuid.uuid4())
-        account = {
-            "id": account_id,
-            "user_id": current_user.id,
-            "account_type": acc_type,
-            "account_number": plaid_acc.get('mask', 'XXXX'),
-            "institution": institution_name,
-            "balance": plaid_acc['balances'].get('current', 0.0) or 0.0,
-            "label": plaid_acc['name'],
-            "is_plaid_linked": 1,
-            "created_at": datetime.utcnow().isoformat(),
-        }
-        db.insert("accounts", account)
+        account = Account(
+            id=str(uuid.uuid4()),
+            user_id=current_user.id,
+            account_type=acc_type,
+            account_number=plaid_acc.get('mask', 'XXXX'),
+            institution=institution_name,
+            balance=plaid_acc['balances'].get('current', 0.0) or 0.0,
+            label=plaid_acc['name'],
+            is_plaid_linked=1,
+            created_at=datetime.utcnow()
+        )
+        db.add(account)
 
         # Create PlaidAccount mapping
-        plaid_account_mapping = {
-            "id": str(uuid.uuid4()),
-            "plaid_item_id": plaid_item_id,
-            "account_id": account_id,
-            "plaid_account_id": plaid_acc['account_id'],
-            "mask": plaid_acc.get('mask'),
-            "name": plaid_acc['name'],
-            "official_name": plaid_acc.get('official_name'),
-            "type": plaid_acc['type'],
-            "subtype": plaid_acc.get('subtype'),
-            "created_at": datetime.utcnow().isoformat(),
-        }
-        db.insert("plaid_accounts", plaid_account_mapping)
+        plaid_account_mapping = PlaidAccount(
+            id=str(uuid.uuid4()),
+            plaid_item_id=plaid_item.id,
+            account_id=account.id,
+            plaid_account_id=plaid_acc['account_id'],
+            mask=plaid_acc.get('mask'),
+            name=plaid_acc['name'],
+            official_name=plaid_acc.get('official_name'),
+            type=plaid_acc['type'],
+            subtype=plaid_acc.get('subtype'),
+            created_at=datetime.utcnow()
+        )
+        db.add(plaid_account_mapping)
 
         created_accounts.append({
-            "account_id": account_id,
+            "account_id": account.id,
             "plaid_account_id": plaid_acc['account_id'],
             "name": plaid_acc['name'],
             "mask": plaid_acc.get('mask'),
@@ -180,55 +178,66 @@ async def exchange_public_token(
             "subtype": plaid_acc.get('subtype'),
         })
 
+    # Commit all changes
+    db.commit()
+
     logger.info(
-        f"Created Plaid item {plaid_item_id} with {len(created_accounts)} accounts "
+        f"Created Plaid item {plaid_item.id} with {len(created_accounts)} accounts "
         f"for user {current_user.id}"
     )
 
     return {
         "message": "Successfully linked accounts",
-        "plaid_item_id": plaid_item_id,
+        "plaid_item_id": plaid_item.id,
         "institution_name": institution_name,
         "accounts": created_accounts,
     }
 
 
 @router.get("/items", response_model=List[PlaidItemResponse])
-async def get_plaid_items(current_user: User = Depends(get_current_user)):
+async def get_plaid_items(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
     Get all Plaid items (bank connections) for the current user
     """
-    db = get_db()
-
-    plaid_items = db.find("plaid_items", {"user_id": current_user.id})
+    plaid_items = db.query(PlaidItem).filter(
+        PlaidItem.user_id == current_user.id
+    ).all()
 
     result = []
     for item in plaid_items:
         # Get associated accounts
-        plaid_accounts = db.find("plaid_accounts", {"plaid_item_id": item['id']})
+        plaid_accounts = db.query(PlaidAccount).filter(
+            PlaidAccount.plaid_item_id == item.id
+        ).all()
 
         accounts = []
         for plaid_acc in plaid_accounts:
-            account = db.find_one("accounts", {"id": plaid_acc['account_id']})
+            account = db.query(Account).filter(
+                Account.id == plaid_acc.account_id
+            ).first()
+
             if account:
                 accounts.append({
-                    "id": plaid_acc['id'],
-                    "plaid_account_id": plaid_acc['plaid_account_id'],
-                    "account_id": plaid_acc['account_id'],
-                    "name": plaid_acc['name'],
-                    "mask": plaid_acc.get('mask'),
-                    "type": plaid_acc['type'],
-                    "subtype": plaid_acc.get('subtype'),
-                    "balance": account.get('balance', 0.0),
+                    "id": plaid_acc.id,
+                    "plaid_account_id": plaid_acc.plaid_account_id,
+                    "account_id": plaid_acc.account_id,
+                    "name": plaid_acc.name,
+                    "mask": plaid_acc.mask,
+                    "type": plaid_acc.type,
+                    "subtype": plaid_acc.subtype,
+                    "balance": account.balance,
                 })
 
         result.append(PlaidItemResponse(
-            id=item['id'],
-            institution_id=item['institution_id'],
-            institution_name=item['institution_name'],
-            status=item['status'],
-            created_at=item['created_at'],
-            last_synced=item.get('last_synced'),
+            id=item.id,
+            institution_id=item.institution_id,
+            institution_name=item.institution_name,
+            status=item.status,
+            created_at=item.created_at.isoformat() if item.created_at else "",
+            last_synced=item.last_synced.isoformat() if item.last_synced else None,
             accounts=accounts
         ))
 
@@ -238,18 +247,17 @@ async def get_plaid_items(current_user: User = Depends(get_current_user)):
 @router.post("/sync/{plaid_item_id}", response_model=SyncResponse)
 async def sync_transactions(
     plaid_item_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     Trigger asynchronous transaction sync for a Plaid item
     """
-    db = get_db()
-
     # Verify the item belongs to the user
-    plaid_item = db.find_one("plaid_items", {
-        "id": plaid_item_id,
-        "user_id": current_user.id
-    })
+    plaid_item = db.query(PlaidItem).filter(
+        PlaidItem.id == plaid_item_id,
+        PlaidItem.user_id == current_user.id
+    ).first()
 
     if not plaid_item:
         raise HTTPException(
@@ -296,18 +304,17 @@ async def get_sync_status(
 @router.delete("/disconnect/{plaid_item_id}")
 async def disconnect_plaid_item(
     plaid_item_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
     Disconnect a Plaid item and optionally delete associated accounts
     """
-    db = get_db()
-
     # Verify the item belongs to the user
-    plaid_item = db.find_one("plaid_items", {
-        "id": plaid_item_id,
-        "user_id": current_user.id
-    })
+    plaid_item = db.query(PlaidItem).filter(
+        PlaidItem.id == plaid_item_id,
+        PlaidItem.user_id == current_user.id
+    ).first()
 
     if not plaid_item:
         raise HTTPException(
@@ -316,31 +323,41 @@ async def disconnect_plaid_item(
         )
 
     # Remove from Plaid
-    access_token = plaid_item['access_token']
+    access_token = plaid_item.access_token
     success = plaid_client.remove_item(access_token)
 
     if not success:
         logger.warning(f"Failed to remove item from Plaid, continuing with local deletion")
 
     # Get associated accounts
-    plaid_accounts = db.find("plaid_accounts", {"plaid_item_id": plaid_item_id})
+    plaid_accounts = db.query(PlaidAccount).filter(
+        PlaidAccount.plaid_item_id == plaid_item_id
+    ).all()
 
     # Update accounts to mark as not Plaid-linked
     for plaid_acc in plaid_accounts:
-        db.update(
-            "accounts",
-            {"id": plaid_acc['account_id']},
-            {"is_plaid_linked": 0}
-        )
+        account = db.query(Account).filter(
+            Account.id == plaid_acc.account_id
+        ).first()
+        if account:
+            account.is_plaid_linked = 0
 
     # Delete PlaidAccount mappings
-    db.delete("plaid_accounts", {"plaid_item_id": plaid_item_id})
+    db.query(PlaidAccount).filter(
+        PlaidAccount.plaid_item_id == plaid_item_id
+    ).delete()
 
-    # Delete sync cursor
-    db.delete("plaid_sync_cursors", {"plaid_item_id": plaid_item_id})
+    # Delete sync cursor (imported here to avoid circular import)
+    from app.database.models import PlaidSyncCursor
+    db.query(PlaidSyncCursor).filter(
+        PlaidSyncCursor.plaid_item_id == plaid_item_id
+    ).delete()
 
     # Delete PlaidItem
-    db.delete("plaid_items", {"id": plaid_item_id})
+    db.delete(plaid_item)
+
+    # Commit all changes
+    db.commit()
 
     logger.info(f"Disconnected Plaid item {plaid_item_id} for user {current_user.id}")
 
@@ -350,7 +367,7 @@ async def disconnect_plaid_item(
     }
 
 
-def _map_plaid_account_type(plaid_type: str, plaid_subtype: Optional[str]) -> str:
+def _map_plaid_account_type(plaid_type: str, plaid_subtype: Optional[str]) -> AccountTypeEnum:
     """
     Map Plaid account type/subtype to our AccountTypeEnum
 
@@ -359,23 +376,23 @@ def _map_plaid_account_type(plaid_type: str, plaid_subtype: Optional[str]) -> st
         plaid_subtype: Plaid account subtype
 
     Returns:
-        Our account type string
+        Our account type enum
     """
     # Map based on type and subtype
     if plaid_type == "depository":
         if plaid_subtype in ["checking", "prepaid"]:
-            return "checking"
+            return AccountTypeEnum.CHECKING
         elif plaid_subtype in ["savings", "money market", "cd"]:
-            return "savings"
+            return AccountTypeEnum.SAVINGS
         else:
-            return "checking"  # Default for depository
+            return AccountTypeEnum.CHECKING  # Default for depository
 
     elif plaid_type == "credit":
-        return "credit_card"
+        return AccountTypeEnum.CREDIT_CARD
 
     elif plaid_type == "investment":
-        return "investment"
+        return AccountTypeEnum.INVESTMENT
 
     else:
         # Default for unknown types
-        return "checking"
+        return AccountTypeEnum.CHECKING

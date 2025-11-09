@@ -10,7 +10,8 @@ import uuid
 
 from rq import get_current_job
 
-from app.database.json_db import get_db
+from app.database.postgres_db import get_db_context
+from app.database.models import PlaidItem, PlaidAccount, PlaidSyncCursor, Transaction, Expense, Account
 from app.services.plaid_client import plaid_client
 from app.services.plaid_transaction_mapper import create_mapper
 
@@ -40,227 +41,233 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str):
 
     try:
         update_stage("starting", "Initializing sync")
-        db = get_db()
 
-        # Get Plaid item
-        plaid_item = db.find_one("plaid_items", {
-            "id": plaid_item_id,
-            "user_id": user_id
-        })
+        with get_db_context() as db:
+            # Get Plaid item
+            plaid_item = db.query(PlaidItem).filter(
+                PlaidItem.id == plaid_item_id,
+                PlaidItem.user_id == user_id
+            ).first()
 
-        if not plaid_item:
-            raise ValueError(f"Plaid item {plaid_item_id} not found for user {user_id}")
+            if not plaid_item:
+                raise ValueError(f"Plaid item {plaid_item_id} not found for user {user_id}")
 
-        access_token = plaid_item['access_token']
+            access_token = plaid_item.access_token
 
-        # Get existing cursor for incremental sync
-        cursor_record = db.find_one("plaid_sync_cursors", {"plaid_item_id": plaid_item_id})
-        cursor = cursor_record['cursor'] if cursor_record else None
+            # Get existing cursor for incremental sync
+            cursor_record = db.query(PlaidSyncCursor).filter(
+                PlaidSyncCursor.plaid_item_id == plaid_item_id
+            ).first()
+            cursor = cursor_record.cursor if cursor_record else None
 
-        update_stage("syncing", f"Fetching transactions (cursor: {cursor is not None})")
+            update_stage("syncing", f"Fetching transactions (cursor: {cursor is not None})")
 
-        # Sync transactions from Plaid
-        sync_result = plaid_client.sync_transactions(
-            access_token=access_token,
-            cursor=cursor,
-            count=500
-        )
+            # Sync transactions from Plaid
+            sync_result = plaid_client.sync_transactions(
+                access_token=access_token,
+                cursor=cursor,
+                count=500
+            )
 
-        if not sync_result:
-            raise Exception("Failed to sync transactions from Plaid")
+            if not sync_result:
+                raise Exception("Failed to sync transactions from Plaid")
 
-        # Get PlaidAccount mappings
-        plaid_accounts = db.find("plaid_accounts", {"plaid_item_id": plaid_item_id})
-        plaid_account_map = {
-            pa['plaid_account_id']: pa['account_id']
-            for pa in plaid_accounts
-        }
+            # Get PlaidAccount mappings
+            plaid_accounts = db.query(PlaidAccount).filter(
+                PlaidAccount.plaid_item_id == plaid_item_id
+            ).all()
 
-        # Create transaction mapper
-        mapper = create_mapper(db)
+            plaid_account_map = {
+                pa.plaid_account_id: pa.account_id
+                for pa in plaid_accounts
+            }
 
-        # Process transactions
-        added_count = 0
-        modified_count = 0
-        removed_count = 0
-        duplicate_count = 0
-        expense_count = 0
+            # Create transaction mapper
+            mapper = create_mapper(db)
 
-        update_stage("processing", f"Processing {len(sync_result['added'])} added transactions")
+            # Process transactions
+            added_count = 0
+            modified_count = 0
+            removed_count = 0
+            duplicate_count = 0
+            expense_count = 0
 
-        # Process added transactions
-        for plaid_txn in sync_result['added']:
-            plaid_account_id = plaid_txn['account_id']
-            account_id = plaid_account_map.get(plaid_account_id)
+            update_stage("processing", f"Processing {len(sync_result['added'])} added transactions")
 
-            if not account_id:
-                logger.warning(f"Account not found for Plaid account {plaid_account_id}")
-                continue
-
-            # Get account details
-            account = db.find_one("accounts", {"id": account_id})
-            if not account:
-                continue
-
-            account_type = account['account_type']
-
-            # Check for duplicates
-            if mapper.is_duplicate(plaid_txn, account_id):
-                duplicate_count += 1
-                logger.debug(f"Skipping duplicate transaction: {plaid_txn['transaction_id']}")
-                continue
-
-            # Map to our transaction format
-            txn_data = mapper.map_transaction(plaid_txn, account_id, account_type)
-            txn_data['id'] = str(uuid.uuid4())
-            txn_data['account_id'] = account_id
-
-            # Convert datetime to ISO string for JSON storage
-            if isinstance(txn_data['date'], datetime):
-                txn_data['date'] = txn_data['date'].isoformat()
-
-            # Insert transaction
-            db.insert("transactions", txn_data)
-            added_count += 1
-
-            # Create expense if applicable (for checking/credit card accounts)
-            if account_type in ['checking', 'credit_card', 'savings']:
-                expense_data = mapper.map_to_expense(
-                    plaid_txn,
-                    account_id,
-                    txn_data['id']
-                )
-
-                if expense_data:
-                    expense_data['id'] = str(uuid.uuid4())
-                    expense_data['account_id'] = account_id
-
-                    # Convert datetime to ISO string
-                    if isinstance(expense_data['date'], datetime):
-                        expense_data['date'] = expense_data['date'].isoformat()
-
-                    db.insert("expenses", expense_data)
-                    expense_count += 1
-
-        # Process modified transactions
-        update_stage("processing", f"Processing {len(sync_result['modified'])} modified transactions")
-
-        for plaid_txn in sync_result['modified']:
-            # Find existing transaction by Plaid ID
-            existing_txn = db.find_one("transactions", {
-                "plaid_transaction_id": plaid_txn['transaction_id']
-            })
-
-            if existing_txn:
+            # Process added transactions
+            for plaid_txn in sync_result['added']:
                 plaid_account_id = plaid_txn['account_id']
                 account_id = plaid_account_map.get(plaid_account_id)
 
                 if not account_id:
+                    logger.warning(f"Account not found for Plaid account {plaid_account_id}")
                     continue
 
-                account = db.find_one("accounts", {"id": account_id})
+                # Get account details
+                account = db.query(Account).filter(Account.id == account_id).first()
                 if not account:
                     continue
 
-                # Map updated transaction
-                txn_data = mapper.map_transaction(
-                    plaid_txn,
-                    account_id,
-                    account['account_type']
+                account_type = account.account_type.value
+
+                # Check for duplicates
+                if mapper.is_duplicate(plaid_txn, account_id):
+                    duplicate_count += 1
+                    logger.debug(f"Skipping duplicate transaction: {plaid_txn['transaction_id']}")
+                    continue
+
+                # Map to our transaction format
+                txn_data = mapper.map_transaction(plaid_txn, account_id, account_type)
+
+                # Create transaction
+                transaction = Transaction(
+                    id=str(uuid.uuid4()),
+                    account_id=account_id,
+                    date=txn_data['date'],
+                    type=txn_data['type'],
+                    ticker=txn_data.get('ticker'),
+                    quantity=txn_data.get('quantity'),
+                    price=txn_data.get('price'),
+                    fees=txn_data.get('fees', 0.0),
+                    total=txn_data['total'],
+                    description=txn_data.get('description'),
+                    source=txn_data['source'],
+                    plaid_transaction_id=txn_data['plaid_transaction_id']
                 )
+                db.add(transaction)
+                added_count += 1
 
-                # Convert datetime to ISO string
-                if isinstance(txn_data['date'], datetime):
-                    txn_data['date'] = txn_data['date'].isoformat()
+                # Create expense if applicable (for checking/credit card accounts)
+                if account_type in ['checking', 'credit_card', 'savings']:
+                    expense_data = mapper.map_to_expense(
+                        plaid_txn,
+                        account_id,
+                        transaction.id
+                    )
 
-                # Update transaction
-                db.update(
-                    "transactions",
-                    {"id": existing_txn['id']},
-                    txn_data
+                    if expense_data:
+                        expense = Expense(
+                            id=str(uuid.uuid4()),
+                            account_id=account_id,
+                            transaction_id=transaction.id,
+                            date=expense_data['date'],
+                            description=expense_data['description'],
+                            amount=expense_data['amount'],
+                            category=expense_data.get('category'),
+                            notes=None
+                        )
+                        db.add(expense)
+                        expense_count += 1
+
+            # Process modified transactions
+            update_stage("processing", f"Processing {len(sync_result['modified'])} modified transactions")
+
+            for plaid_txn in sync_result['modified']:
+                # Find existing transaction by Plaid ID
+                existing_txn = db.query(Transaction).filter(
+                    Transaction.plaid_transaction_id == plaid_txn['transaction_id']
+                ).first()
+
+                if existing_txn:
+                    plaid_account_id = plaid_txn['account_id']
+                    account_id = plaid_account_map.get(plaid_account_id)
+
+                    if not account_id:
+                        continue
+
+                    account = db.query(Account).filter(Account.id == account_id).first()
+                    if not account:
+                        continue
+
+                    # Map updated transaction
+                    txn_data = mapper.map_transaction(
+                        plaid_txn,
+                        account_id,
+                        account.account_type.value
+                    )
+
+                    # Update transaction fields
+                    existing_txn.date = txn_data['date']
+                    existing_txn.type = txn_data['type']
+                    existing_txn.total = txn_data['total']
+                    existing_txn.description = txn_data.get('description')
+
+                    modified_count += 1
+
+            # Process removed transactions
+            update_stage("processing", f"Processing {len(sync_result['removed'])} removed transactions")
+
+            for removed in sync_result['removed']:
+                plaid_txn_id = removed['transaction_id']
+
+                # Find and delete transaction
+                existing_txn = db.query(Transaction).filter(
+                    Transaction.plaid_transaction_id == plaid_txn_id
+                ).first()
+
+                if existing_txn:
+                    # Delete associated expense if exists
+                    db.query(Expense).filter(
+                        Expense.transaction_id == existing_txn.id
+                    ).delete()
+
+                    # Delete transaction
+                    db.delete(existing_txn)
+                    removed_count += 1
+
+            # Update or create cursor
+            update_stage("finalizing", "Updating sync cursor")
+
+            next_cursor = sync_result['next_cursor']
+            if cursor_record:
+                cursor_record.cursor = next_cursor
+                cursor_record.last_sync = datetime.utcnow()
+            else:
+                new_cursor = PlaidSyncCursor(
+                    id=str(uuid.uuid4()),
+                    plaid_item_id=plaid_item_id,
+                    cursor=next_cursor,
+                    last_sync=datetime.utcnow()
                 )
-                modified_count += 1
+                db.add(new_cursor)
 
-        # Process removed transactions
-        update_stage("processing", f"Processing {len(sync_result['removed'])} removed transactions")
+            # Update PlaidItem last_synced
+            plaid_item.last_synced = datetime.utcnow()
+            plaid_item.status = "active"
+            plaid_item.error_message = None
 
-        for removed in sync_result['removed']:
-            plaid_txn_id = removed['transaction_id']
+            # Commit all changes
+            db.commit()
 
-            # Find and delete transaction
-            existing_txn = db.find_one("transactions", {
-                "plaid_transaction_id": plaid_txn_id
-            })
+            # Check if there are more transactions to fetch
+            has_more = sync_result.get('has_more', False)
+            if has_more:
+                update_stage("syncing", "Fetching additional transactions")
+                logger.info(f"More transactions available for item {plaid_item_id}, continuing sync...")
+                # Recursively call to get more transactions
+                # In production, you might want to limit recursion depth
+                return run_plaid_sync_job(user_id, plaid_item_id)
 
-            if existing_txn:
-                # Delete associated expense if exists
-                db.delete("expenses", {"transaction_id": existing_txn['id']})
+            update_stage("completed", "Sync completed successfully")
 
-                # Delete transaction
-                db.delete("transactions", {"id": existing_txn['id']})
-                removed_count += 1
-
-        # Update or create cursor
-        update_stage("finalizing", "Updating sync cursor")
-
-        next_cursor = sync_result['next_cursor']
-        if cursor_record:
-            db.update(
-                "plaid_sync_cursors",
-                {"id": cursor_record['id']},
-                {
-                    "cursor": next_cursor,
-                    "last_sync": datetime.utcnow().isoformat()
-                }
-            )
-        else:
-            db.insert("plaid_sync_cursors", {
-                "id": str(uuid.uuid4()),
-                "plaid_item_id": plaid_item_id,
-                "cursor": next_cursor,
-                "last_sync": datetime.utcnow().isoformat()
-            })
-
-        # Update PlaidItem last_synced
-        db.update(
-            "plaid_items",
-            {"id": plaid_item_id},
-            {
-                "last_synced": datetime.utcnow().isoformat(),
-                "status": "active",
-                "error_message": None
+            result = {
+                "status": "success",
+                "added": added_count,
+                "modified": modified_count,
+                "removed": removed_count,
+                "duplicates_skipped": duplicate_count,
+                "expenses_created": expense_count,
+                "has_more": has_more
             }
-        )
 
-        # Check if there are more transactions to fetch
-        has_more = sync_result.get('has_more', False)
-        if has_more:
-            update_stage("syncing", "Fetching additional transactions")
-            logger.info(f"More transactions available for item {plaid_item_id}, continuing sync...")
-            # Recursively call to get more transactions
-            # In production, you might want to limit recursion depth
-            return run_plaid_sync_job(user_id, plaid_item_id)
+            logger.info(
+                f"Plaid sync completed for item {plaid_item_id}: "
+                f"{added_count} added, {modified_count} modified, "
+                f"{removed_count} removed, {duplicate_count} duplicates skipped, "
+                f"{expense_count} expenses created"
+            )
 
-        update_stage("completed", "Sync completed successfully")
-
-        result = {
-            "status": "success",
-            "added": added_count,
-            "modified": modified_count,
-            "removed": removed_count,
-            "duplicates_skipped": duplicate_count,
-            "expenses_created": expense_count,
-            "has_more": has_more
-        }
-
-        logger.info(
-            f"Plaid sync completed for item {plaid_item_id}: "
-            f"{added_count} added, {modified_count} modified, "
-            f"{removed_count} removed, {duplicate_count} duplicates skipped, "
-            f"{expense_count} expenses created"
-        )
-
-        return result
+            return result
 
     except Exception as exc:
         update_stage("failed", str(exc))
@@ -268,15 +275,15 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str):
 
         # Update PlaidItem status
         try:
-            db = get_db()
-            db.update(
-                "plaid_items",
-                {"id": plaid_item_id},
-                {
-                    "status": "error",
-                    "error_message": str(exc)
-                }
-            )
+            with get_db_context() as db:
+                plaid_item = db.query(PlaidItem).filter(
+                    PlaidItem.id == plaid_item_id
+                ).first()
+
+                if plaid_item:
+                    plaid_item.status = "error"
+                    plaid_item.error_message = str(exc)
+                    db.commit()
         except Exception as update_exc:
             logger.error(f"Failed to update PlaidItem status: {update_exc}")
 
