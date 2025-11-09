@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { usePlaidLink } from 'react-plaid-link';
 import { Button, CircularProgress, Alert } from '@mui/material';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
-import api from '../services/api';
+import { createPlaidLinkToken, exchangePlaidToken } from '../services/api';
 
 const PlaidLinkButton = ({ onSuccess, onError, buttonText = "Connect Bank Account", variant = "contained" }) => {
   const [linkToken, setLinkToken] = useState(null);
@@ -15,7 +15,7 @@ const PlaidLinkButton = ({ onSuccess, onError, buttonText = "Connect Bank Accoun
       try {
         setLoading(true);
         setError(null);
-        const response = await api.createPlaidLinkToken();
+        const response = await createPlaidLinkToken();
         setLinkToken(response.data.link_token);
       } catch (err) {
         console.error('Error fetching link token:', err);
@@ -32,7 +32,7 @@ const PlaidLinkButton = ({ onSuccess, onError, buttonText = "Connect Bank Accoun
   const handleSuccess = useCallback(async (publicToken, metadata) => {
     try {
       // Send public token to backend
-      const response = await api.exchangePlaidToken(publicToken, metadata);
+      const response = await exchangePlaidToken(publicToken, metadata);
 
       // Call parent success handler
       if (onSuccess) {
