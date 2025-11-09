@@ -15,12 +15,9 @@ import {
   TableHead,
   TableRow,
   LinearProgress,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Tabs,
-  Tab
+  Tab,
+  TableSortLabel
 } from '@mui/material';
 import { dividendsAPI, accountsAPI, instrumentsAPI } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Line, ComposedChart } from 'recharts';
@@ -41,12 +38,16 @@ const PIE_COLORS = [
 ];
 
 const PRESET_OPTIONS = [
-  { value: '7d', label: '7 Days' },
-  { value: 'thisMonth', label: 'This Month' },
-  { value: 'last3Months', label: 'Last 3 Months' },
-  { value: 'thisYear', label: 'This Year' },
-  { value: 'lastYear', label: 'Last Year' },
-  { value: 'all', label: 'All Time' }
+  { value: '7d', label: '7D' },
+  { value: '30d', label: '30D' },
+  { value: 'thisMonth', label: 'This Mo' },
+  { value: 'lastMonth', label: 'Last Mo' },
+  { value: 'last3Months', label: '3M' },
+  { value: 'last6Months', label: '6M' },
+  { value: 'last12Months', label: '12M' },
+  { value: 'thisYear', label: 'YTD' },
+  { value: 'lastYear', label: 'Last Yr' },
+  { value: 'all', label: 'All' }
 ];
 
 const Dividends = () => {
@@ -68,6 +69,8 @@ const Dividends = () => {
   const [activeTab, setActiveTab] = useState(0);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
+  const [orderBy, setOrderBy] = useState('date');
+  const [order, setOrder] = useState('desc');
   const hasLoadedOnce = useRef(false);
 
   const formatDateToInput = (date) => {
@@ -85,12 +88,30 @@ const Dividends = () => {
         start.setDate(today.getDate() - 6);
         return { start: formatDateToInput(start), end: formatDateToInput(today) };
       },
+      '30d': () => {
+        const start = new Date(today);
+        start.setDate(today.getDate() - 29);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
       thisMonth: () => {
         const start = new Date(today.getFullYear(), today.getMonth(), 1);
         return { start: formatDateToInput(start), end: formatDateToInput(today) };
       },
+      lastMonth: () => {
+        const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const end = new Date(today.getFullYear(), today.getMonth(), 0);
+        return { start: formatDateToInput(start), end: formatDateToInput(end) };
+      },
       last3Months: () => {
         const start = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      last6Months: () => {
+        const start = new Date(today.getFullYear(), today.getMonth() - 5, 1);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      last12Months: () => {
+        const start = new Date(today.getFullYear(), today.getMonth() - 11, 1);
         return { start: formatDateToInput(start), end: formatDateToInput(today) };
       },
       thisYear: () => {
@@ -283,6 +304,17 @@ const Dividends = () => {
     return map;
   }, [instrumentIndustries]);
 
+  const tickerMetadataLookup = useMemo(() => {
+    const map = {};
+    instrumentMetadata.forEach((item) => {
+      map[item.ticker] = {
+        type: item.instrument_type_id ? typeLookup[item.instrument_type_id]?.name : null,
+        industry: item.instrument_industry_id ? industryLookup[item.instrument_industry_id]?.name : null
+      };
+    });
+    return map;
+  }, [instrumentMetadata, typeLookup, industryLookup]);
+
   const tickerData = useMemo(() => {
     if (!summary?.dividends_by_ticker) return [];
     const entries = Object.entries(summary.dividends_by_ticker)
@@ -396,16 +428,66 @@ const Dividends = () => {
       }
     }
 
-    return filtered.map((dividend, index) => ({
-      ...dividend,
-      rowKey: dividend.id || `${dividend.account_id || 'account'}-${dividend.ticker || 'ticker'}-${dividend.date || index}-${index}`,
-      amount: dividend.amount,
-      accountLabel: accountLookup[dividend.account_id]?.label ||
-        (accountLookup[dividend.account_id]
-          ? `${accountLookup[dividend.account_id].institution} - ${accountLookup[dividend.account_id].account_number}`
-          : dividend.account_id)
-    }));
-  }, [dividends, accountLookup, selectedMonth, selectedTicker, selectedType, selectedIndustry, instrumentTypes, instrumentIndustries, instrumentMetadata]);
+    return filtered.map((dividend, index) => {
+      const metadata = tickerMetadataLookup[dividend.ticker] || {};
+      return {
+        ...dividend,
+        rowKey: dividend.id || `${dividend.account_id || 'account'}-${dividend.ticker || 'ticker'}-${dividend.date || index}-${index}`,
+        amount: dividend.amount,
+        accountLabel: accountLookup[dividend.account_id]?.label ||
+          (accountLookup[dividend.account_id]
+            ? `${accountLookup[dividend.account_id].institution} - ${accountLookup[dividend.account_id].account_number}`
+            : dividend.account_id),
+        type: metadata.type || '-',
+        industry: metadata.industry || '-'
+      };
+    });
+  }, [dividends, accountLookup, selectedMonth, selectedTicker, selectedType, selectedIndustry, instrumentTypes, instrumentIndustries, instrumentMetadata, tickerMetadataLookup]);
+
+  const handleRequestSort = useCallback((property) => {
+    const isAsc = orderBy === property && order === 'asc';
+    setOrder(isAsc ? 'desc' : 'asc');
+    setOrderBy(property);
+  }, [orderBy, order]);
+
+  const sortedStatementRows = useMemo(() => {
+    const comparator = (a, b) => {
+      let aValue = a[orderBy];
+      let bValue = b[orderBy];
+
+      // Handle null/undefined values
+      if (aValue === null || aValue === undefined || aValue === '-') aValue = '';
+      if (bValue === null || bValue === undefined || bValue === '-') bValue = '';
+
+      // For date sorting, convert to Date objects
+      if (orderBy === 'date') {
+        aValue = new Date(aValue || 0);
+        bValue = new Date(bValue || 0);
+      }
+
+      // For amount sorting, ensure numeric comparison
+      if (orderBy === 'amount') {
+        aValue = Number(aValue) || 0;
+        bValue = Number(bValue) || 0;
+      }
+
+      // For string comparison, use localeCompare
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return order === 'asc'
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      }
+
+      // For numeric or date comparison
+      if (order === 'asc') {
+        return aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
+      } else {
+        return bValue < aValue ? -1 : bValue > aValue ? 1 : 0;
+      }
+    };
+
+    return [...statementRows].sort(comparator);
+  }, [statementRows, orderBy, order]);
 
   const activePeriodDescription = useMemo(() => {
     if (startDate || endDate) {
@@ -447,136 +529,9 @@ const Dividends = () => {
         Dividend Income
       </Typography>
 
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Stack spacing={2}>
-          <Typography variant="subtitle1">
-            Filter by period
-          </Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            {PRESET_OPTIONS.map((preset) => (
-              <Button
-                key={preset.value}
-                variant={selectedPreset === preset.value ? 'contained' : 'outlined'}
-                size="small"
-                onClick={() => applyPreset(preset.value)}
-              >
-                {preset.label}
-              </Button>
-            ))}
-          </Stack>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
-            <TextField
-              label="Start date"
-              type="date"
-              size="small"
-              value={startDate}
-              onChange={handleStartDateChange}
-              InputLabelProps={{ shrink: true }}
-            />
-            <TextField
-              label="End date"
-              type="date"
-              size="small"
-              value={endDate}
-              onChange={handleEndDateChange}
-              InputLabelProps={{ shrink: true }}
-            />
-            <Button
-              variant="text"
-              size="small"
-              onClick={() => applyPreset('all')}
-            >
-              Clear filters
-            </Button>
-          </Stack>
-
-          <Typography variant="subtitle1" sx={{ mt: 2 }}>
-            Filter by classification
-          </Typography>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="dividend-type-select">Asset Type</InputLabel>
-              <Select
-                labelId="dividend-type-select"
-                value={selectedTypeId}
-                label="Asset Type"
-                onChange={(event) => setSelectedTypeId(event.target.value)}
-                renderValue={(value) => {
-                  if (!value) {
-                    return <em>All types</em>;
-                  }
-                  const info = typeLookup[value];
-                  return (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {renderColorSwatch(info?.color)}
-                      <span>{info?.name || 'Unknown'}</span>
-                    </Box>
-                  );
-                }}
-              >
-                <MenuItem value="">
-                  <em>All types</em>
-                </MenuItem>
-                {instrumentTypes.map((type) => (
-                  <MenuItem key={type.id} value={type.id}>
-                    {renderColorSwatch(type.color)}
-                    {type.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="dividend-industry-select">Industry</InputLabel>
-              <Select
-                labelId="dividend-industry-select"
-                value={selectedIndustryId}
-                label="Industry"
-                onChange={(event) => setSelectedIndustryId(event.target.value)}
-                renderValue={(value) => {
-                  if (!value) {
-                    return <em>All industries</em>;
-                  }
-                  const info = industryLookup[value];
-                  return (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {renderColorSwatch(info?.color)}
-                      <span>{info?.name || 'Unknown'}</span>
-                    </Box>
-                  );
-                }}
-              >
-                <MenuItem value="">
-                  <em>All industries</em>
-                </MenuItem>
-                {instrumentIndustries.map((industry) => (
-                  <MenuItem key={industry.id} value={industry.id}>
-                    {renderColorSwatch(industry.color)}
-                    {industry.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            {(selectedTypeId || selectedIndustryId) && (
-              <Button
-                variant="text"
-                size="small"
-                onClick={() => {
-                  setSelectedTypeId('');
-                  setSelectedIndustryId('');
-                }}
-              >
-                Clear classification
-              </Button>
-            )}
-          </Stack>
-        </Stack>
-      </Paper>
-
       <Grid container spacing={3}>
         <Grid item xs={12}>
-          <Paper sx={{ p: 3 }}>
+          <Paper sx={{ p: 3, position: 'sticky', top: 0, zIndex: 10, boxShadow: 3 }}>
             <Typography variant="h5" gutterBottom>
               Total Dividends: {formatCurrency(summary?.total_dividends || 0)}
             </Typography>
@@ -589,6 +544,49 @@ const Dividends = () => {
 
         <Grid item xs={12}>
           <Paper sx={{ p: 3 }}>
+            <Stack spacing={2} sx={{ mb: 3 }}>
+              <Typography variant="subtitle1">
+                Filter by period
+              </Typography>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ gap: 0.5 }}>
+                {PRESET_OPTIONS.map((preset) => (
+                  <Button
+                    key={preset.value}
+                    variant={selectedPreset === preset.value ? 'contained' : 'outlined'}
+                    size="small"
+                    onClick={() => applyPreset(preset.value)}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+              </Stack>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+                <TextField
+                  label="Start date"
+                  type="date"
+                  size="small"
+                  value={startDate}
+                  onChange={handleStartDateChange}
+                  InputLabelProps={{ shrink: true }}
+                />
+                <TextField
+                  label="End date"
+                  type="date"
+                  size="small"
+                  value={endDate}
+                  onChange={handleEndDateChange}
+                  InputLabelProps={{ shrink: true }}
+                />
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => applyPreset('all')}
+                >
+                  Clear filters
+                </Button>
+              </Stack>
+            </Stack>
+
             <Tabs
               value={activeTab}
               onChange={(e, newValue) => setActiveTab(newValue)}
@@ -931,18 +929,78 @@ const Dividends = () => {
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Date</TableCell>
-                      <TableCell>Ticker</TableCell>
-                      <TableCell>Account</TableCell>
-                      <TableCell align="right">Amount</TableCell>
-                      <TableCell>Currency</TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={orderBy === 'date'}
+                          direction={orderBy === 'date' ? order : 'asc'}
+                          onClick={() => handleRequestSort('date')}
+                        >
+                          Date
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={orderBy === 'ticker'}
+                          direction={orderBy === 'ticker' ? order : 'asc'}
+                          onClick={() => handleRequestSort('ticker')}
+                        >
+                          Ticker
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={orderBy === 'type'}
+                          direction={orderBy === 'type' ? order : 'asc'}
+                          onClick={() => handleRequestSort('type')}
+                        >
+                          Type
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={orderBy === 'industry'}
+                          direction={orderBy === 'industry' ? order : 'asc'}
+                          onClick={() => handleRequestSort('industry')}
+                        >
+                          Industry
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={orderBy === 'accountLabel'}
+                          direction={orderBy === 'accountLabel' ? order : 'asc'}
+                          onClick={() => handleRequestSort('accountLabel')}
+                        >
+                          Account
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell align="right">
+                        <TableSortLabel
+                          active={orderBy === 'amount'}
+                          direction={orderBy === 'amount' ? order : 'asc'}
+                          onClick={() => handleRequestSort('amount')}
+                        >
+                          Amount
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell>
+                        <TableSortLabel
+                          active={orderBy === 'currency'}
+                          direction={orderBy === 'currency' ? order : 'asc'}
+                          onClick={() => handleRequestSort('currency')}
+                        >
+                          Currency
+                        </TableSortLabel>
+                      </TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {statementRows.map((row) => (
+                    {sortedStatementRows.map((row) => (
                       <TableRow key={row.rowKey}>
                         <TableCell>{formatDateTime(row.date)}</TableCell>
                         <TableCell>{row.ticker}</TableCell>
+                        <TableCell>{row.type}</TableCell>
+                        <TableCell>{row.industry}</TableCell>
                         <TableCell>{row.accountLabel || '—'}</TableCell>
                         <TableCell align="right">{formatCurrency(row.amount || 0)}</TableCell>
                         <TableCell>{row.currency || 'CAD'}</TableCell>
