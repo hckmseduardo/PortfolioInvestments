@@ -14,9 +14,13 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  LinearProgress
+  LinearProgress,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem
 } from '@mui/material';
-import { dividendsAPI, accountsAPI } from '../services/api';
+import { dividendsAPI, accountsAPI, instrumentsAPI } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 const PIE_COLORS = [
@@ -50,6 +54,11 @@ const Dividends = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedPreset, setSelectedPreset] = useState('all');
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const [instrumentTypes, setInstrumentTypes] = useState([]);
+  const [instrumentIndustries, setInstrumentIndustries] = useState([]);
+  const [selectedTypeId, setSelectedTypeId] = useState('');
+  const [selectedIndustryId, setSelectedIndustryId] = useState('');
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const hasLoadedOnce = useRef(false);
@@ -113,6 +122,19 @@ const Dividends = () => {
     }
   };
 
+  const loadInstrumentMetadata = useCallback(async () => {
+    try {
+      const [typesRes, industriesRes] = await Promise.all([
+        instrumentsAPI.getTypes(),
+        instrumentsAPI.getIndustries()
+      ]);
+      setInstrumentTypes(typesRes.data || []);
+      setInstrumentIndustries(industriesRes.data || []);
+    } catch (error) {
+      console.error('Error loading instrument metadata:', error);
+    }
+  }, []);
+
   const fetchDividends = useCallback(async () => {
     if (!hasLoadedOnce.current) {
       setLoading(true);
@@ -122,8 +144,21 @@ const Dividends = () => {
 
     try {
       const [summaryResponse, listResponse] = await Promise.all([
-        dividendsAPI.getSummary(undefined, startDate || undefined, endDate || undefined),
-        dividendsAPI.getAll(undefined, undefined, startDate || undefined, endDate || undefined)
+        dividendsAPI.getSummary(
+          undefined,
+          startDate || undefined,
+          endDate || undefined,
+          selectedTypeId || undefined,
+          selectedIndustryId || undefined
+        ),
+        dividendsAPI.getAll(
+          undefined,
+          undefined,
+          startDate || undefined,
+          endDate || undefined,
+          selectedTypeId || undefined,
+          selectedIndustryId || undefined
+        )
       ]);
       setSummary(summaryResponse.data);
       setDividends(listResponse.data || []);
@@ -136,7 +171,11 @@ const Dividends = () => {
       setLoading(false);
       setFetching(false);
     }
-  }, [startDate, endDate]);
+  }, [startDate, endDate, selectedTypeId, selectedIndustryId]);
+
+  useEffect(() => {
+    loadInstrumentMetadata();
+  }, [loadInstrumentMetadata]);
 
   useEffect(() => {
     applyPreset('all');
@@ -206,6 +245,22 @@ const Dividends = () => {
       .sort((a, b) => new Date(`${a.month}-01`) - new Date(`${b.month}-01`));
   }, [summary]);
 
+  const typeLookup = useMemo(() => {
+    const map = {};
+    instrumentTypes.forEach((item) => {
+      map[item.id] = item;
+    });
+    return map;
+  }, [instrumentTypes]);
+
+  const industryLookup = useMemo(() => {
+    const map = {};
+    instrumentIndustries.forEach((item) => {
+      map[item.id] = item;
+    });
+    return map;
+  }, [instrumentIndustries]);
+
   const tickerData = useMemo(() => {
     if (!summary?.dividends_by_ticker) return [];
     const entries = Object.entries(summary.dividends_by_ticker)
@@ -215,18 +270,33 @@ const Dividends = () => {
       }))
       .sort((a, b) => b.value - a.value);
 
-    if (entries.length <= 10) {
-      return entries;
-    }
-
-    const topTen = entries.slice(0, 10);
-    const othersTotal = entries.slice(10).reduce((acc, item) => acc + item.value, 0);
-
-    return [...topTen, { name: 'Others', value: othersTotal }];
+    return entries;
   }, [summary]);
 
+  const handleBarDoubleClick = useCallback((data) => {
+    if (!data || !data.activePayload || !data.activePayload[0]) return;
+    const clickedMonth = data.activePayload[0].payload.month;
+    setSelectedMonth((prev) => (prev === clickedMonth ? '' : clickedMonth));
+  }, []);
+
   const statementRows = useMemo(() => {
-    return dividends.map((dividend, index) => ({
+    let filtered = dividends;
+
+    // Filter by selected month from bar chart
+    if (selectedMonth) {
+      filtered = filtered.filter((dividend) => {
+        if (!dividend.date) return false;
+        try {
+          const date = new Date(dividend.date);
+          const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+          return monthKey === selectedMonth;
+        } catch {
+          return false;
+        }
+      });
+    }
+
+    return filtered.map((dividend, index) => ({
       ...dividend,
       rowKey: dividend.id || `${dividend.account_id || 'account'}-${dividend.ticker || 'ticker'}-${dividend.date || index}-${index}`,
       amount: dividend.amount,
@@ -235,7 +305,7 @@ const Dividends = () => {
           ? `${accountLookup[dividend.account_id].institution} - ${accountLookup[dividend.account_id].account_number}`
           : dividend.account_id)
     }));
-  }, [dividends, accountLookup]);
+  }, [dividends, accountLookup, selectedMonth]);
 
   const activePeriodDescription = useMemo(() => {
     if (startDate || endDate) {
@@ -245,6 +315,21 @@ const Dividends = () => {
     }
     return 'All time';
   }, [startDate, endDate]);
+
+  const renderColorSwatch = (color) => (
+    <Box
+      component="span"
+      sx={{
+        width: 12,
+        height: 12,
+        borderRadius: '50%',
+        display: 'inline-flex',
+        mr: 1,
+        border: '1px solid rgba(0,0,0,0.12)',
+        backgroundColor: color || '#b0bec5'
+      }}
+    />
+  );
 
   if (loading && !summary) {
     return (
@@ -304,6 +389,88 @@ const Dividends = () => {
               Clear filters
             </Button>
           </Stack>
+
+          <Typography variant="subtitle1" sx={{ mt: 2 }}>
+            Filter by classification
+          </Typography>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel id="dividend-type-select">Asset Type</InputLabel>
+              <Select
+                labelId="dividend-type-select"
+                value={selectedTypeId}
+                label="Asset Type"
+                onChange={(event) => setSelectedTypeId(event.target.value)}
+                renderValue={(value) => {
+                  if (!value) {
+                    return <em>All types</em>;
+                  }
+                  const info = typeLookup[value];
+                  return (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {renderColorSwatch(info?.color)}
+                      <span>{info?.name || 'Unknown'}</span>
+                    </Box>
+                  );
+                }}
+              >
+                <MenuItem value="">
+                  <em>All types</em>
+                </MenuItem>
+                {instrumentTypes.map((type) => (
+                  <MenuItem key={type.id} value={type.id}>
+                    {renderColorSwatch(type.color)}
+                    {type.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel id="dividend-industry-select">Industry</InputLabel>
+              <Select
+                labelId="dividend-industry-select"
+                value={selectedIndustryId}
+                label="Industry"
+                onChange={(event) => setSelectedIndustryId(event.target.value)}
+                renderValue={(value) => {
+                  if (!value) {
+                    return <em>All industries</em>;
+                  }
+                  const info = industryLookup[value];
+                  return (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {renderColorSwatch(info?.color)}
+                      <span>{info?.name || 'Unknown'}</span>
+                    </Box>
+                  );
+                }}
+              >
+                <MenuItem value="">
+                  <em>All industries</em>
+                </MenuItem>
+                {instrumentIndustries.map((industry) => (
+                  <MenuItem key={industry.id} value={industry.id}>
+                    {renderColorSwatch(industry.color)}
+                    {industry.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {(selectedTypeId || selectedIndustryId) && (
+              <Button
+                variant="text"
+                size="small"
+                onClick={() => {
+                  setSelectedTypeId('');
+                  setSelectedIndustryId('');
+                }}
+              >
+                Clear classification
+              </Button>
+            )}
+          </Stack>
         </Stack>
       </Paper>
 
@@ -327,14 +494,24 @@ const Dividends = () => {
             </Typography>
             {monthlyData.length > 0 ? (
               <Box sx={{ height: 400 }}>
+                <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+                  Double-click a bar to filter the statement table by that month
+                </Typography>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={monthlyData}>
+                  <BarChart data={monthlyData} onDoubleClick={handleBarDoubleClick}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="label" />
                     <YAxis />
                     <Tooltip formatter={(value) => formatCurrency(value)} />
                     <Legend />
-                    <Bar dataKey="amount" fill="#8884d8" name="Dividend Amount" />
+                    <Bar dataKey="amount" name="Dividend Amount">
+                      {monthlyData.map((entry, index) => (
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={entry.month === selectedMonth ? '#4caf50' : '#8884d8'}
+                        />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </Box>
@@ -403,9 +580,25 @@ const Dividends = () => {
         <Grid item xs={12}>
           <Paper sx={{ p: 3 }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" mb={2}>
-              <Typography variant="h6">
-                Dividends Statement
-              </Typography>
+              <Box>
+                <Typography variant="h6">
+                  Dividends Statement
+                </Typography>
+                {selectedMonth && (
+                  <Typography variant="body2" color="primary" sx={{ mt: 0.5 }}>
+                    Filtered by month: {monthlyData.find(m => m.month === selectedMonth)?.label || selectedMonth}
+                    {' '}
+                    <Button
+                      variant="text"
+                      size="small"
+                      onClick={() => setSelectedMonth('')}
+                      sx={{ ml: 1, minWidth: 'auto', p: 0 }}
+                    >
+                      (Clear)
+                    </Button>
+                  </Typography>
+                )}
+              </Box>
               {fetching && <LinearProgress sx={{ width: 200 }} />}
             </Stack>
             {statementRows.length === 0 ? (

@@ -170,21 +170,25 @@ export const dashboardAPI = {
 };
 
 export const dividendsAPI = {
-  getAll: (accountId, ticker, startDate, endDate) =>
+  getAll: (accountId, ticker, startDate, endDate, instrumentTypeId, instrumentIndustryId) =>
     api.get('/dividends', {
       params: {
         ...(accountId ? { account_id: accountId } : {}),
         ...(ticker ? { ticker } : {}),
         ...(startDate ? { start_date: startDate } : {}),
-        ...(endDate ? { end_date: endDate } : {})
+        ...(endDate ? { end_date: endDate } : {}),
+        ...(instrumentTypeId ? { instrument_type_id: instrumentTypeId } : {}),
+        ...(instrumentIndustryId ? { instrument_industry_id: instrumentIndustryId } : {})
       }
     }),
-  getSummary: (accountId, startDate, endDate) =>
+  getSummary: (accountId, startDate, endDate, instrumentTypeId, instrumentIndustryId) =>
     api.get('/dividends/summary', {
       params: {
         ...(accountId ? { account_id: accountId } : {}),
         ...(startDate ? { start_date: startDate } : {}),
-        ...(endDate ? { end_date: endDate } : {})
+        ...(endDate ? { end_date: endDate } : {}),
+        ...(instrumentTypeId ? { instrument_type_id: instrumentTypeId } : {}),
+        ...(instrumentIndustryId ? { instrument_industry_id: instrumentIndustryId } : {})
       }
     }),
   create: (data) => api.post('/dividends', data),

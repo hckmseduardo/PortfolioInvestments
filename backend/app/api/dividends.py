@@ -78,12 +78,30 @@ async def get_dividends(
     ticker: str = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    instrument_type_id: Optional[str] = None,
+    instrument_industry_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
     db = get_db()
     start_dt = _parse_date(start_date, end_of_day=False)
     end_dt = _parse_date(end_date, end_of_day=True)
-    
+
+    # Get filtered tickers based on instrument classification
+    allowed_tickers = None
+    if instrument_type_id or instrument_industry_id:
+        classification_query = {"user_id": current_user.id}
+        if instrument_type_id:
+            classification_query["instrument_type_id"] = instrument_type_id
+        if instrument_industry_id:
+            classification_query["instrument_industry_id"] = instrument_industry_id
+
+        classifications = db.find("instrument_metadata", classification_query)
+        allowed_tickers = set(c.get("ticker") for c in classifications if c.get("ticker"))
+
+        # If no classifications match, return empty list
+        if not allowed_tickers:
+            return []
+
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
         if not account:
@@ -91,16 +109,16 @@ async def get_dividends(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Account not found"
             )
-        
+
         query = {"account_id": account_id}
         if ticker:
             query["ticker"] = ticker
-        
+
         dividends = db.find("dividends", query)
     else:
         user_accounts = db.find("accounts", {"user_id": current_user.id})
         account_ids = [acc["id"] for acc in user_accounts]
-        
+
         dividends = []
         for acc_id in account_ids:
             query = {"account_id": acc_id}
@@ -108,9 +126,13 @@ async def get_dividends(
                 query["ticker"] = ticker
             dividends.extend(db.find("dividends", query))
 
+    # Filter by instrument classification tickers
+    if allowed_tickers is not None:
+        dividends = [d for d in dividends if d.get("ticker") in allowed_tickers]
+
     dividends = _filter_dividends_by_date(dividends, start_dt, end_dt)
     dividends = sorted(dividends, key=lambda item: item.get("date", ""), reverse=True)
-    
+
     return [Dividend(**div) for div in dividends]
 
 @router.get("/summary", response_model=DividendSummary)
@@ -118,12 +140,36 @@ async def get_dividend_summary(
     account_id: str = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    instrument_type_id: Optional[str] = None,
+    instrument_industry_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
     db = get_db()
     start_dt = _parse_date(start_date, end_of_day=False)
     end_dt = _parse_date(end_date, end_of_day=True)
-    
+
+    # Get filtered tickers based on instrument classification
+    allowed_tickers = None
+    if instrument_type_id or instrument_industry_id:
+        classification_query = {"user_id": current_user.id}
+        if instrument_type_id:
+            classification_query["instrument_type_id"] = instrument_type_id
+        if instrument_industry_id:
+            classification_query["instrument_industry_id"] = instrument_industry_id
+
+        classifications = db.find("instrument_metadata", classification_query)
+        allowed_tickers = set(c.get("ticker") for c in classifications if c.get("ticker"))
+
+        # If no classifications match, return empty summary
+        if not allowed_tickers:
+            return DividendSummary(
+                total_dividends=0,
+                dividends_by_month={},
+                dividends_by_ticker={},
+                period_start=start_dt.isoformat() if start_dt else None,
+                period_end=end_dt.isoformat() if end_dt else None
+            )
+
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
         if not account:
@@ -135,10 +181,14 @@ async def get_dividend_summary(
     else:
         user_accounts = db.find("accounts", {"user_id": current_user.id})
         account_ids = [acc["id"] for acc in user_accounts]
-        
+
         dividends = []
         for acc_id in account_ids:
             dividends.extend(db.find("dividends", {"account_id": acc_id}))
+
+    # Filter by instrument classification tickers
+    if allowed_tickers is not None:
+        dividends = [d for d in dividends if d.get("ticker") in allowed_tickers]
 
     dividends = _filter_dividends_by_date(dividends, start_dt, end_dt)
     
