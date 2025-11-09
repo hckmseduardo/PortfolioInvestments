@@ -610,10 +610,10 @@ const Dividends = () => {
                 {monthlyData.length > 0 ? (
                   <Box sx={{ height: 450 }}>
                     <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
-                      Double-click a bar to filter the statement table by that month
+                      Click a bar to filter the statement table by that month
                     </Typography>
                     <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={monthlyData} onDoubleClick={handleBarDoubleClick}>
+                      <ComposedChart data={monthlyData} onClick={handleBarDoubleClick}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="label" />
                         <YAxis />
@@ -656,7 +656,7 @@ const Dividends = () => {
                     <Grid item xs={12} md={6}>
                       <Box sx={{ height: 400 }}>
                         <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
-                          Double-click a slice to filter the statement table
+                          Click a slice to filter the statement table
                         </Typography>
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
@@ -724,7 +724,7 @@ const Dividends = () => {
                     <Grid item xs={12} md={6}>
                       <Box sx={{ height: 400 }}>
                         <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
-                          Double-click a slice to filter the statement table
+                          Click a slice to filter the statement table
                         </Typography>
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
@@ -792,7 +792,7 @@ const Dividends = () => {
                     <Grid item xs={12} md={6}>
                       <Box sx={{ height: 400 }}>
                         <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
-                          Double-click a slice to filter the statement table
+                          Click a slice to filter the statement table
                         </Typography>
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
