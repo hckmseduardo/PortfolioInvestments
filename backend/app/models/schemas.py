@@ -197,6 +197,8 @@ class DividendSummary(BaseModel):
     total_dividends: float
     dividends_by_month: dict
     dividends_by_ticker: dict
+    dividends_by_type: dict = {}
+    dividends_by_industry: dict = {}
     period_start: Optional[str] = None
     period_end: Optional[str] = None
 

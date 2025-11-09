@@ -191,29 +191,59 @@ async def get_dividend_summary(
         dividends = [d for d in dividends if d.get("ticker") in allowed_tickers]
 
     dividends = _filter_dividends_by_date(dividends, start_dt, end_dt)
-    
+
     total_dividends = sum(div.get("amount", 0) for div in dividends)
-    
+
     by_month = defaultdict(float)
     by_ticker = defaultdict(float)
-    
+    by_type = defaultdict(float)
+    by_industry = defaultdict(float)
+
+    # Get instrument metadata for classification
+    all_metadata = db.find("instrument_metadata", {"user_id": current_user.id})
+    metadata_lookup = {meta.get("ticker"): meta for meta in all_metadata if meta.get("ticker")}
+
+    # Get type and industry names
+    all_types = db.find("instrument_types", {"user_id": current_user.id})
+    type_lookup = {t.get("id"): t.get("name", "Unknown") for t in all_types}
+
+    all_industries = db.find("instrument_industries", {"user_id": current_user.id})
+    industry_lookup = {i.get("id"): i.get("name", "Unknown") for i in all_industries}
+
     for div in dividends:
         ticker = div.get("ticker", "Unknown")
-        by_ticker[ticker] += div.get("amount", 0)
-        
+        amount = div.get("amount", 0)
+
+        by_ticker[ticker] += amount
+
+        # Aggregate by type
+        metadata = metadata_lookup.get(ticker)
+        if metadata:
+            type_id = metadata.get("instrument_type_id")
+            if type_id:
+                type_name = type_lookup.get(type_id, "Unknown")
+                by_type[type_name] += amount
+
+            industry_id = metadata.get("instrument_industry_id")
+            if industry_id:
+                industry_name = industry_lookup.get(industry_id, "Unknown")
+                by_industry[industry_name] += amount
+
         date_str = div.get("date", "")
         if date_str:
             try:
                 date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
                 month_key = date.strftime("%Y-%m")
-                by_month[month_key] += div.get("amount", 0)
+                by_month[month_key] += amount
             except:
                 pass
-    
+
     return DividendSummary(
         total_dividends=total_dividends,
         dividends_by_month=dict(by_month),
         dividends_by_ticker=dict(by_ticker),
+        dividends_by_type=dict(by_type),
+        dividends_by_industry=dict(by_industry),
         period_start=start_dt.isoformat() if start_dt else None,
         period_end=end_dt.isoformat() if end_dt else None
     )

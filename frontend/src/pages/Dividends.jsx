@@ -18,7 +18,9 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  Tabs,
+  Tab
 } from '@mui/material';
 import { dividendsAPI, accountsAPI, instrumentsAPI } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -59,6 +61,7 @@ const Dividends = () => {
   const [instrumentIndustries, setInstrumentIndustries] = useState([]);
   const [selectedTypeId, setSelectedTypeId] = useState('');
   const [selectedIndustryId, setSelectedIndustryId] = useState('');
+  const [activeTab, setActiveTab] = useState(0);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const hasLoadedOnce = useRef(false);
@@ -272,6 +275,40 @@ const Dividends = () => {
 
     return entries;
   }, [summary]);
+
+  const typeData = useMemo(() => {
+    if (!summary?.dividends_by_type) return [];
+    const entries = Object.entries(summary.dividends_by_type)
+      .map(([typeName, amount]) => {
+        // Find the type object to get its color
+        const typeObj = instrumentTypes.find(t => t.name === typeName);
+        return {
+          name: typeName,
+          value: amount,
+          color: typeObj?.color || '#8884d8'
+        };
+      })
+      .sort((a, b) => b.value - a.value);
+
+    return entries;
+  }, [summary, instrumentTypes]);
+
+  const industryData = useMemo(() => {
+    if (!summary?.dividends_by_industry) return [];
+    const entries = Object.entries(summary.dividends_by_industry)
+      .map(([industryName, amount]) => {
+        // Find the industry object to get its color
+        const industryObj = instrumentIndustries.find(i => i.name === industryName);
+        return {
+          name: industryName,
+          value: amount,
+          color: industryObj?.color || '#82ca9d'
+        };
+      })
+      .sort((a, b) => b.value - a.value);
+
+    return entries;
+  }, [summary, instrumentIndustries]);
 
   const handleBarDoubleClick = useCallback((data) => {
     if (!data || !data.activePayload || !data.activePayload[0]) return;
@@ -487,92 +524,235 @@ const Dividends = () => {
           </Paper>
         </Grid>
 
-        <Grid item xs={12} md={8}>
+        <Grid item xs={12}>
           <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Dividends by Month
-            </Typography>
-            {monthlyData.length > 0 ? (
-              <Box sx={{ height: 400 }}>
-                <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
-                  Double-click a bar to filter the statement table by that month
-                </Typography>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={monthlyData} onDoubleClick={handleBarDoubleClick}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="label" />
-                    <YAxis />
-                    <Tooltip formatter={(value) => formatCurrency(value)} />
-                    <Legend />
-                    <Bar dataKey="amount" name="Dividend Amount">
-                      {monthlyData.map((entry, index) => (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={entry.month === selectedMonth ? '#4caf50' : '#8884d8'}
-                        />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </Box>
-            ) : (
-              <Typography color="textSecondary">
-                No dividend data available
-              </Typography>
-            )}
-          </Paper>
-        </Grid>
+            <Tabs
+              value={activeTab}
+              onChange={(e, newValue) => setActiveTab(newValue)}
+              variant="scrollable"
+              scrollButtons="auto"
+              sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}
+            >
+              <Tab label="By Month" />
+              <Tab label="By Ticker" />
+              <Tab label="By Asset Type" />
+              <Tab label="By Industry" />
+            </Tabs>
 
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Dividends by Ticker
-            </Typography>
-            {tickerData.length > 0 ? (
-              <Box sx={{ height: 400 }}>
-                {fetching && <LinearProgress sx={{ mb: 2 }} />}
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={tickerData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {tickerData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value) => formatCurrency(value)} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <Box sx={{ mt: 2 }}>
-                  {tickerData.map((item, index) => (
-                    <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
-                      <Box display="flex" alignItems="center">
-                        <Box
-                          sx={{
-                            width: 12,
-                            height: 12,
-                            backgroundColor: PIE_COLORS[index % PIE_COLORS.length],
-                            mr: 1
-                          }}
-                        />
-                        <Typography variant="body2">{item.name}</Typography>
-                      </Box>
-                      <Typography variant="body2">{formatCurrency(item.value)}</Typography>
-                    </Box>
-                  ))}
-                </Box>
+            {activeTab === 0 && (
+              <Box>
+                <Typography variant="h6" gutterBottom>
+                  Dividends by Month
+                </Typography>
+                {monthlyData.length > 0 ? (
+                  <Box sx={{ height: 450 }}>
+                    <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+                      Double-click a bar to filter the statement table by that month
+                    </Typography>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={monthlyData} onDoubleClick={handleBarDoubleClick}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="label" />
+                        <YAxis />
+                        <Tooltip formatter={(value) => formatCurrency(value)} />
+                        <Legend />
+                        <Bar dataKey="amount" name="Dividend Amount">
+                          {monthlyData.map((entry, index) => (
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={entry.month === selectedMonth ? '#4caf50' : '#8884d8'}
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Box>
+                ) : (
+                  <Typography color="textSecondary">
+                    No dividend data available
+                  </Typography>
+                )}
               </Box>
-            ) : (
-              <Typography color="textSecondary">
-                No dividend data available
-              </Typography>
+            )}
+
+            {activeTab === 1 && (
+              <Box>
+                <Typography variant="h6" gutterBottom>
+                  Dividends by Ticker
+                </Typography>
+                {tickerData.length > 0 ? (
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} md={6}>
+                      <Box sx={{ height: 400 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={tickerData}
+                              cx="50%"
+                              cy="50%"
+                              labelLine={false}
+                              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                              outerRadius={120}
+                              fill="#8884d8"
+                              dataKey="value"
+                            >
+                              {tickerData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(value) => formatCurrency(value)} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </Box>
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <Box sx={{ maxHeight: 400, overflowY: 'auto' }}>
+                        {tickerData.map((item, index) => (
+                          <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
+                            <Box display="flex" alignItems="center">
+                              <Box
+                                sx={{
+                                  width: 12,
+                                  height: 12,
+                                  backgroundColor: PIE_COLORS[index % PIE_COLORS.length],
+                                  mr: 1,
+                                  borderRadius: '50%'
+                                }}
+                              />
+                              <Typography variant="body2">{item.name}</Typography>
+                            </Box>
+                            <Typography variant="body2">{formatCurrency(item.value)}</Typography>
+                          </Box>
+                        ))}
+                      </Box>
+                    </Grid>
+                  </Grid>
+                ) : (
+                  <Typography color="textSecondary">
+                    No dividend data available
+                  </Typography>
+                )}
+              </Box>
+            )}
+
+            {activeTab === 2 && (
+              <Box>
+                <Typography variant="h6" gutterBottom>
+                  Dividends by Asset Type
+                </Typography>
+                {typeData.length > 0 ? (
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} md={6}>
+                      <Box sx={{ height: 400 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={typeData}
+                              cx="50%"
+                              cy="50%"
+                              labelLine={false}
+                              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                              outerRadius={120}
+                              fill="#8884d8"
+                              dataKey="value"
+                            >
+                              {typeData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(value) => formatCurrency(value)} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </Box>
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <Box sx={{ maxHeight: 400, overflowY: 'auto' }}>
+                        {typeData.map((item, index) => (
+                          <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
+                            <Box display="flex" alignItems="center">
+                              <Box
+                                sx={{
+                                  width: 12,
+                                  height: 12,
+                                  backgroundColor: item.color,
+                                  mr: 1,
+                                  borderRadius: '50%'
+                                }}
+                              />
+                              <Typography variant="body2">{item.name}</Typography>
+                            </Box>
+                            <Typography variant="body2">{formatCurrency(item.value)}</Typography>
+                          </Box>
+                        ))}
+                      </Box>
+                    </Grid>
+                  </Grid>
+                ) : (
+                  <Typography color="textSecondary">
+                    Classify your dividend-paying instruments to see this breakdown.
+                  </Typography>
+                )}
+              </Box>
+            )}
+
+            {activeTab === 3 && (
+              <Box>
+                <Typography variant="h6" gutterBottom>
+                  Dividends by Industry
+                </Typography>
+                {industryData.length > 0 ? (
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} md={6}>
+                      <Box sx={{ height: 400 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={industryData}
+                              cx="50%"
+                              cy="50%"
+                              labelLine={false}
+                              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                              outerRadius={120}
+                              fill="#82ca9d"
+                              dataKey="value"
+                            >
+                              {industryData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(value) => formatCurrency(value)} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </Box>
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <Box sx={{ maxHeight: 400, overflowY: 'auto' }}>
+                        {industryData.map((item, index) => (
+                          <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
+                            <Box display="flex" alignItems="center">
+                              <Box
+                                sx={{
+                                  width: 12,
+                                  height: 12,
+                                  backgroundColor: item.color,
+                                  mr: 1,
+                                  borderRadius: '50%'
+                                }}
+                              />
+                              <Typography variant="body2">{item.name}</Typography>
+                            </Box>
+                            <Typography variant="body2">{formatCurrency(item.value)}</Typography>
+                          </Box>
+                        ))}
+                      </Box>
+                    </Grid>
+                  </Grid>
+                ) : (
+                  <Typography color="textSecondary">
+                    Classify your dividend-paying instruments to see this breakdown.
+                  </Typography>
+                )}
+              </Box>
             )}
           </Paper>
         </Grid>
