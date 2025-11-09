@@ -609,8 +609,8 @@ const Expenses = () => {
 
       {/* Filter Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, height: '100%' }}>
+        <Grid item xs={12}>
+          <Paper sx={{ p: 3 }}>
             <Typography color="textSecondary" gutterBottom>
               Account
             </Typography>
@@ -624,27 +624,6 @@ const Expenses = () => {
                 {accounts.map(account => (
                   <MenuItem key={account.id} value={account.id}>
                     {account.label} ({account.institution})
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, height: '100%' }}>
-            <Typography color="textSecondary" gutterBottom>
-              Category
-            </Typography>
-            <FormControl fullWidth size="small">
-              <Select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                displayEmpty
-              >
-                <MenuItem value="">All Categories</MenuItem>
-                {categories.map(category => (
-                  <MenuItem key={category.id} value={category.name}>
-                    {category.name}
                   </MenuItem>
                 ))}
               </Select>
@@ -811,7 +790,7 @@ const Expenses = () => {
                         outerRadius={70}
                         fill="#8884d8"
                         dataKey="value"
-                        onDoubleClick={(_, index) => {
+                        onClick={(_, index) => {
                           const selected = expenseData[index];
                           if (selected) {
                             setSelectedCategory(selected.name);
@@ -904,7 +883,7 @@ const Expenses = () => {
                   <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={monthlyTrendData}
-                        onDoubleClick={(e) => {
+                        onClick={(e) => {
                           if (!e?.activeLabel) return;
                           const [year, month] = String(e.activeLabel).split('-').map(Number);
                           if (!year || !month) return;
@@ -945,7 +924,28 @@ const Expenses = () => {
                   <TableCell>Date</TableCell>
                   <TableCell>Description</TableCell>
                   <TableCell>Account</TableCell>
-                  <TableCell>Category</TableCell>
+                  <TableCell>
+                    <Box>
+                      <Typography variant="body2" fontWeight="bold" gutterBottom>
+                        Category
+                      </Typography>
+                      <FormControl size="small" fullWidth sx={{ minWidth: 150 }}>
+                        <Select
+                          value={selectedCategory}
+                          onChange={(e) => setSelectedCategory(e.target.value)}
+                          displayEmpty
+                          sx={{ bgcolor: 'background.paper' }}
+                        >
+                          <MenuItem value="">All Categories</MenuItem>
+                          {categories.map(category => (
+                            <MenuItem key={category.id} value={category.name}>
+                              {category.name}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Box>
+                  </TableCell>
                   <TableCell align="right">Amount</TableCell>
                   <TableCell>Notes</TableCell>
                   <TableCell align="center">Actions</TableCell>
