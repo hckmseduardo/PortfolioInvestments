@@ -893,7 +893,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                         />
                       ))}
                     </Pie>
-                    <Tooltip
+                    <RechartsTooltip
                       formatter={(value, name, payload) => [
                         `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
                         payload?.payload?.industry_name || name
@@ -975,7 +975,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                         />
                       ))}
                     </Pie>
-                    <Tooltip
+                    <RechartsTooltip
                       formatter={(value, name, payload) => [
                         `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
                         payload?.payload?.type_name || name

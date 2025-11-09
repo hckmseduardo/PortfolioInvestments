@@ -40,7 +40,7 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-portfolio_user}:${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}@postgres:5432/${POSTGRES_DB:-portfolio}
       - LEGACY_DATA_PATH=/app/data  # Path to legacy JSON files for migration
       - UPLOAD_PATH=/app/uploads
-      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost,http://localhost:80
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost,http://localhost:80,http://app.home,http://app.home:80,https://app.home,https://app.home:443
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
     depends_on:

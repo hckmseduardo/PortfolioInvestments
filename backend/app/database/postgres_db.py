@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 # Global engine and session factory
 engine = None
 SessionLocal = None
+_is_initialized = False
 
 
 def init_db(database_url: str):
@@ -24,7 +25,7 @@ def init_db(database_url: str):
     Args:
         database_url: PostgreSQL connection URL
     """
-    global engine, SessionLocal
+    global engine, SessionLocal, _is_initialized
 
     logger.info(f"Initializing database connection...")
 
@@ -42,6 +43,18 @@ def init_db(database_url: str):
     logger.info("Creating database tables...")
     Base.metadata.create_all(bind=engine)
     logger.info("Database initialized successfully")
+    _is_initialized = True
+
+
+def ensure_db_initialized():
+    """Lazily initialize the database connection if it hasn't been set up yet."""
+    global _is_initialized
+    if _is_initialized and SessionLocal is not None:
+        return
+    from app.config import settings
+    if not settings.DATABASE_URL:
+        raise RuntimeError("DATABASE_URL must be set to use PostgreSQL storage")
+    init_db(settings.DATABASE_URL)
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -51,6 +64,7 @@ def get_db() -> Generator[Session, None, None]:
     Yields:
         Database session
     """
+    ensure_db_initialized()
     db = SessionLocal()
     try:
         yield db
@@ -70,6 +84,7 @@ def get_db_context():
     Yields:
         Database session
     """
+    ensure_db_initialized()
     db = SessionLocal()
     try:
         yield db
@@ -83,7 +98,10 @@ def get_db_context():
 
 def close_db():
     """Close database connection."""
-    global engine
+    global engine, SessionLocal, _is_initialized
     if engine:
         engine.dispose()
         logger.info("Database connection closed")
+    engine = None
+    SessionLocal = None
+    _is_initialized = False

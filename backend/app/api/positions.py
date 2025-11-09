@@ -67,6 +67,19 @@ def _infer_name(description: Optional[str], ticker: str, fallback: Optional[str]
             return candidate
     return ticker
 
+
+def _normalize_future_as_current(as_of: Optional[datetime]) -> Optional[datetime]:
+    """
+    Treat future valuation requests as current snapshot so we don't rebuild
+    historical positions or schedule price jobs for unreal dates.
+    """
+    if not as_of:
+        return None
+    now = datetime.utcnow()
+    if as_of >= now:
+        return None
+    return as_of
+
 def _compute_account_positions_from_transactions(
     db,
     account_id: str,
@@ -459,6 +472,10 @@ async def get_aggregated_positions(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
             )
+        as_of = _normalize_future_as_current(as_of)
+        as_of = _normalize_future_as_current(as_of)
+        as_of = _normalize_future_as_current(as_of)
+        as_of = _normalize_future_as_current(as_of)
 
     aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
     filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
