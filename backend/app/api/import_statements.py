@@ -49,6 +49,29 @@ def _coerce_datetime(value):
     return None
 
 
+def _verify_statement_ownership(db, statement_id: str, user_id: str):
+    """
+    Verify that a statement belongs to one of the user's accounts.
+    Returns the statement if found, raises HTTPException otherwise.
+    """
+    statement = db.find_one("statements", {"id": statement_id})
+    if not statement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Statement not found"
+        )
+
+    # Check if the statement's account belongs to the user
+    account = db.find_one("accounts", {"id": statement["account_id"], "user_id": user_id})
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Statement not found"
+        )
+
+    return statement
+
+
 def _coerce_number(value):
     if isinstance(value, (int, float)):
         return float(value)
@@ -62,14 +85,9 @@ def _coerce_number(value):
 
 
 def compute_statement_metrics(statement_id: str, db):
-    if not statement_id:
-        return {
-            "transaction_first_date": None,
-            "transaction_last_date": None,
-            "credit_volume": 0,
-            "debit_volume": 0,
-        }
-
+    """
+    Compute metrics for a statement by querying transactions linked to it.
+    """
     transactions = db.find("transactions", {"statement_id": statement_id})
     first_date = None
     last_date = None
@@ -100,7 +118,19 @@ def compute_statement_metrics(statement_id: str, db):
         "debit_volume": round(debit_volume, 2),
     }
 
-def recalculate_positions_from_transactions(account_id: str, db):
+def recalculate_positions_from_transactions(account_id: str, db, statement_id: Optional[str] = None):
+    """
+    Recalculate positions from ALL transactions for an account.
+
+    NOTE: Positions are account-wide, not per-statement. They represent the cumulative
+    state of the account based on all transactions. The statement_id parameter is ignored
+    but kept for backward compatibility.
+
+    Args:
+        account_id: The account to recalculate positions for
+        db: Database service instance
+        statement_id: IGNORED - kept for backward compatibility
+    """
     transactions = db.find("transactions", {"account_id": account_id})
     # Filter out transactions with None dates and sort
     transactions = [t for t in transactions if t.get('date') is not None]
@@ -123,14 +153,15 @@ def recalculate_positions_from_transactions(account_id: str, db):
         quantity = txn.get('quantity', 0)
         total = txn.get('total', 0)
 
-        # Handle cash-only transactions first
-        if txn_type in ['deposit', 'bonus']:
+        # Handle cash-only transactions first (case-insensitive comparison)
+        txn_type_upper = (txn_type or '').upper()
+        if txn_type_upper in ['DEPOSIT', 'BONUS']:
             cash_position['quantity'] += total
             cash_position['book_value'] += total
             cash_position['market_value'] += total
             continue
 
-        if txn_type in ['withdrawal', 'fee', 'tax']:
+        if txn_type_upper in ['WITHDRAWAL', 'FEE', 'TAX']:
             # total should reflect the cash change (positive for deposit, negative for withdrawal)
             cash_position['quantity'] += total
             cash_position['book_value'] += total
@@ -154,14 +185,14 @@ def recalculate_positions_from_transactions(account_id: str, db):
 
         position = positions_map[ticker]
 
-        if txn_type == 'buy':
+        if txn_type_upper == 'BUY':
             # Increase holding and book value; cash decreases by the cash spent
             position['quantity'] += quantity
             position['book_value'] += abs(total)
             cash_position['quantity'] -= abs(total)
             cash_position['book_value'] -= abs(total)
             cash_position['market_value'] -= abs(total)
-        elif txn_type == 'sell':
+        elif txn_type_upper == 'SELL':
             # Decrease holding using average cost if possible; cash increases by proceeds
             if position['quantity'] > 0:
                 avg_cost = position['book_value'] / position['quantity']
@@ -172,15 +203,15 @@ def recalculate_positions_from_transactions(account_id: str, db):
             cash_position['quantity'] += abs(total)
             cash_position['book_value'] += abs(total)
             cash_position['market_value'] += abs(total)
-        elif txn_type == 'transfer':
+        elif txn_type_upper == 'TRANSFER':
             # Transfers change quantity but typically don't affect cash
             position['quantity'] += quantity
-        elif txn_type == 'dividend':
+        elif txn_type_upper == 'DIVIDEND':
             # Dividends increase cash
             cash_position['quantity'] += total
             cash_position['book_value'] += total
             cash_position['market_value'] += total
-        elif txn_type == 'interest':
+        elif txn_type_upper == 'INTEREST':
             # Interest increases cash
             cash_position['quantity'] += total
             cash_position['book_value'] += total
@@ -189,6 +220,8 @@ def recalculate_positions_from_transactions(account_id: str, db):
     # Ensure CASH is included in the positions map so it's persisted
     positions_map['CASH'] = cash_position
 
+    # Always delete ALL positions for the account and recalculate from scratch
+    # Positions are account-wide and represent cumulative state, not per-statement
     db.delete_many("positions", {"account_id": account_id})
 
     positions_created = 0
@@ -199,6 +232,7 @@ def recalculate_positions_from_transactions(account_id: str, db):
                 **position_data,
                 "last_updated": datetime.now().isoformat()
             }
+            # Do NOT set statement_id - positions are account-wide, not per-statement
             db.insert("positions", position_doc)
             positions_created += 1
 
@@ -284,6 +318,7 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
         )
 
     transactions_created = 0
+    transactions_skipped = 0
     transaction_first_date = None
     transaction_last_date = None
     credit_volume = 0.0
@@ -291,10 +326,32 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
     for transaction_data in parsed_data.get('transactions', []):
         if transaction_data.get('type') is None:
             continue
+
+        # Check for duplicate transaction (same account, date, type, ticker, quantity, total)
+        # This prevents importing the same transaction multiple times from overlapping statements
+        duplicate_filter = {
+            "account_id": account_id,
+            "date": transaction_data.get('date'),
+            "type": transaction_data.get('type'),
+            "total": transaction_data.get('total')
+        }
+        # Add optional fields to the filter if they exist
+        if transaction_data.get('ticker'):
+            duplicate_filter["ticker"] = transaction_data.get('ticker')
+        if transaction_data.get('quantity') is not None:
+            duplicate_filter["quantity"] = transaction_data.get('quantity')
+
+        existing = db.find("transactions", duplicate_filter)
+        if existing:
+            # Duplicate found - skip this transaction
+            transactions_skipped += 1
+            continue
+
         transaction_doc = {
             **transaction_data,
             "account_id": account_id
         }
+        # Link transaction to statement if statement_id is provided
         if statement_id:
             transaction_doc["statement_id"] = statement_id
         db.insert("transactions", transaction_doc)
@@ -315,23 +372,40 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
                 debit_volume += abs(total_value)
 
     dividends_created = 0
+    dividends_skipped = 0
     for dividend_data in parsed_data.get('dividends', []):
+        # Check for duplicate dividend (same account, ticker, date, amount)
+        duplicate_filter = {
+            "account_id": account_id,
+            "ticker": dividend_data.get('ticker'),
+            "date": dividend_data.get('date'),
+            "amount": dividend_data.get('amount')
+        }
+        existing = db.find("dividends", duplicate_filter)
+        if existing:
+            # Duplicate found - skip this dividend
+            dividends_skipped += 1
+            continue
+
         dividend_doc = {
             **dividend_data,
             "account_id": account_id
         }
+        # Link dividend to statement if statement_id is provided
         if statement_id:
             dividend_doc["statement_id"] = statement_id
         db.insert("dividends", dividend_doc)
         dividends_created += 1
 
-    positions_created = recalculate_positions_from_transactions(account_id, db)
+    positions_created = recalculate_positions_from_transactions(account_id, db, statement_id)
 
     return {
         "account_id": account_id,
         "positions_created": positions_created,
         "transactions_created": transactions_created,
+        "transactions_skipped": transactions_skipped,
         "dividends_created": dividends_created,
+        "dividends_skipped": dividends_skipped,
         "transaction_first_date": transaction_first_date.isoformat() if transaction_first_date else None,
         "transaction_last_date": transaction_last_date.isoformat() if transaction_last_date else None,
         "credit_volume": round(credit_volume, 2),
@@ -381,19 +455,10 @@ async def import_statement(
     statement_doc = {
         "filename": file.filename,
         "file_path": str(file_path),
-        "file_size": os.path.getsize(file_path),
         "file_type": Path(file.filename).suffix.lower(),
-        "status": "queued",
-        "user_id": current_user.id,
         "account_id": account_id,
-        "uploaded_at": datetime.now().isoformat(),
-        "positions_count": 0,
-        "transactions_count": 0,
-        "dividends_count": 0,
-        "transaction_first_date": None,
-        "transaction_last_date": None,
-        "credit_volume": 0,
-        "debit_volume": 0
+        "upload_date": datetime.now(),
+        "transactions_count": 0
     }
     statement = db.insert("statements", statement_doc)
     session.commit()
@@ -421,26 +486,13 @@ async def process_statement(
     session: Session = Depends(get_session)
 ):
     db = get_db_service(session)
-    statement = db.find_one("statements", {"id": statement_id, "user_id": current_user.id})
-
-    if not statement:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Statement not found"
-        )
+    statement = _verify_statement_ownership(db, statement_id, current_user.id)
 
     if not os.path.exists(statement['file_path']):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Statement file not found on disk"
         )
-
-    db.update("statements", statement_id, {
-        "status": "queued",
-        "processed_at": None,
-        "error_message": None
-    })
-    session.commit()
 
     job = enqueue_statement_job(
         user_id=current_user.id,
@@ -460,18 +512,48 @@ async def list_statements(
     session: Session = Depends(get_session)
 ):
     db = get_db_service(session)
-    statements = db.find("statements", {"user_id": current_user.id})
+    # Get user's accounts first, then get statements for those accounts
     accounts = db.find("accounts", {"user_id": current_user.id})
+    account_ids = [acc["id"] for acc in accounts]
     account_lookup = {acc["id"]: acc for acc in accounts}
+
+    # Get all statements for user's accounts
+    statements = []
+    for account_id in account_ids:
+        statements.extend(db.find("statements", {"account_id": account_id}))
 
     for statement in statements:
         account = account_lookup.get(statement.get("account_id"))
         if account:
             statement["account_label"] = account.get("label") or account.get("account_number")
             statement["account_institution"] = account.get("institution")
+            statement["user_id"] = account.get("user_id")
         else:
             statement["account_label"] = None
             statement["account_institution"] = None
+            statement["user_id"] = current_user.id
+
+        # Map database fields to frontend expected fields
+        statement["uploaded_at"] = statement.get("upload_date")
+        statement["transaction_first_date"] = statement.get("start_date")
+        statement["transaction_last_date"] = statement.get("end_date")
+
+        # Add frontend compatibility fields with defaults
+        statement["status"] = "completed"
+        statement["processed_at"] = statement.get("upload_date")  # Use upload_date as processed_at
+        statement["positions_count"] = 0
+        statement["dividends_count"] = 0
+        statement["credit_volume"] = 0.0
+        statement["debit_volume"] = 0.0
+        statement["error_message"] = None
+
+        # Compute file_size from actual file on disk
+        file_path = statement.get("file_path")
+        if file_path and os.path.exists(file_path):
+            statement["file_size"] = os.path.getsize(file_path)
+        else:
+            statement["file_size"] = 0
+
     return statements
 
 @router.post("/statements/{statement_id}/reprocess")
@@ -481,26 +563,13 @@ async def reprocess_statement(
     session: Session = Depends(get_session)
 ):
     db = get_db_service(session)
-    statement = db.find_one("statements", {"id": statement_id, "user_id": current_user.id})
-
-    if not statement:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Statement not found"
-        )
+    statement = _verify_statement_ownership(db, statement_id, current_user.id)
 
     if not os.path.exists(statement['file_path']):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Statement file not found on disk"
         )
-
-    db.update("statements", statement_id, {
-        "status": "queued",
-        "processed_at": None,
-        "error_message": None
-    })
-    session.commit()
 
     job = enqueue_statement_job(
         user_id=current_user.id,
@@ -521,7 +590,15 @@ async def reprocess_all_statements(
     session: Session = Depends(get_session)
 ):
     db = get_db_service(session)
-    statements = db.find("statements", {"user_id": current_user.id})
+
+    # Get user's accounts first
+    accounts = db.find("accounts", {"user_id": current_user.id})
+    account_ids = [acc["id"] for acc in accounts]
+
+    # Get all statements for user's accounts
+    statements = []
+    for account_id in account_ids:
+        statements.extend(db.find("statements", {"account_id": account_id}))
 
     if not statements:
         raise HTTPException(
@@ -537,14 +614,6 @@ async def reprocess_all_statements(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No statements found for selected account"
             )
-
-    for statement in statements:
-        db.update("statements", statement['id'], {
-            "status": "queued",
-            "processed_at": None,
-            "error_message": None
-        })
-    session.commit()
 
     job = enqueue_statement_job(
         user_id=current_user.id,
@@ -566,28 +635,26 @@ async def delete_statement(
     session: Session = Depends(get_session)
 ):
     db = get_db_service(session)
-    statement = db.find_one("statements", {"id": statement_id, "user_id": current_user.id})
+    statement = _verify_statement_ownership(db, statement_id, current_user.id)
+    account_id = statement.get('account_id')
 
-    if not statement:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Statement not found"
-        )
-
-    if statement.get('account_id'):
-        # Delete only transactions and dividends from this specific statement
-        db.delete_many("transactions", {"statement_id": statement_id})
-        db.delete_many("dividends", {"statement_id": statement_id})
-
-        # Delete all positions and recalculate from remaining transactions
-        db.delete_many("positions", {"account_id": statement['account_id']})
-        recalculate_positions_from_transactions(statement['account_id'], db)
-
+    # Delete the physical file
     if os.path.exists(statement['file_path']):
         os.remove(statement['file_path'])
 
+    # Delete the statement record
+    # The CASCADE delete in the database will automatically remove:
+    # - All transactions linked to this statement
+    # - All dividends linked to this statement
+    # - All positions linked to this statement
+    # - All expenses linked to this statement
     db.delete("statements", statement_id)
     session.commit()
+
+    # Recalculate positions from remaining transactions for this account
+    if account_id:
+        recalculate_positions_from_transactions(account_id, db)
+        session.commit()
 
     return {"message": "Statement and associated data deleted successfully"}
 
@@ -622,13 +689,7 @@ async def change_statement_account(
     session: Session = Depends(get_session)
 ):
     db = get_db_service(session)
-    statement = db.find_one("statements", {"id": statement_id, "user_id": current_user.id})
-
-    if not statement:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Statement not found"
-        )
+    statement = _verify_statement_ownership(db, statement_id, current_user.id)
 
     new_account = db.find_one("accounts", {"id": payload.account_id, "user_id": current_user.id})
     if not new_account:
@@ -640,25 +701,20 @@ async def change_statement_account(
     if statement.get("account_id") == payload.account_id:
         return {"message": "Statement already assigned to this account"}
 
-    # Remove existing transactions/dividends tied to this statement
+    # Remove existing data tied to this statement
+    # Delete by statement_id to ensure only this statement's data is removed
     db.delete_many("transactions", {"statement_id": statement_id})
     db.delete_many("dividends", {"statement_id": statement_id})
+    # Note: Positions are NOT deleted per-statement
+
+    # Recalculate positions for the old account if it exists
     old_account_id = statement.get("account_id")
     if old_account_id:
         recalculate_positions_from_transactions(old_account_id, db)
 
     db.update("statements", statement_id, {
         "account_id": payload.account_id,
-        "status": "queued",
-        "processed_at": None,
-        "error_message": None,
-        "positions_count": 0,
-        "transactions_count": 0,
-        "dividends_count": 0,
-        "transaction_first_date": None,
-        "transaction_last_date": None,
-        "credit_volume": 0,
-        "debit_volume": 0
+        "transactions_count": 0
     })
     session.commit()
 

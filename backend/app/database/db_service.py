@@ -14,6 +14,9 @@ from app.database.models import (
     Expense as ExpenseModel, Category as CategoryModel,
     Statement as StatementModel, DashboardLayout as DashboardLayoutModel,
     StockPrice as StockPriceModel,
+    InstrumentType as InstrumentTypeModel,
+    InstrumentIndustry as InstrumentIndustryModel,
+    InstrumentMetadata as InstrumentMetadataModel,
     AccountTypeEnum, TransactionTypeEnum
 )
 
@@ -30,7 +33,10 @@ COLLECTION_MODEL_MAP = {
     "categories": CategoryModel,
     "statements": StatementModel,
     "dashboard_layouts": DashboardLayoutModel,
-    "price_cache": StockPriceModel
+    "price_cache": StockPriceModel,
+    "instrument_types": InstrumentTypeModel,
+    "instrument_industries": InstrumentIndustryModel,
+    "instrument_metadata": InstrumentMetadataModel
 }
 
 
@@ -87,11 +93,17 @@ class DatabaseService:
         if 'created_at' not in document and hasattr(model_class, 'created_at'):
             document['created_at'] = datetime.utcnow()
 
-        # Convert enum strings to enum types
+        # Convert enum strings to enum types (case-insensitive)
         if collection == "accounts" and 'account_type' in document:
-            document['account_type'] = AccountTypeEnum(document['account_type'])
+            account_type_value = document['account_type']
+            if isinstance(account_type_value, str):
+                account_type_value = account_type_value.lower()
+            document['account_type'] = AccountTypeEnum(account_type_value)
         elif collection == "transactions" and 'type' in document:
-            document['type'] = TransactionTypeEnum(document['type'])
+            type_value = document['type']
+            if isinstance(type_value, str):
+                type_value = type_value.upper()  # Convert to uppercase to match database enum
+            document['type'] = TransactionTypeEnum(type_value)
 
         # Create model instance
         instance = model_class(**document)

@@ -18,15 +18,16 @@ class AccountTypeEnum(str, enum.Enum):
 
 
 class TransactionTypeEnum(str, enum.Enum):
-    BUY = "buy"
-    SELL = "sell"
-    DIVIDEND = "dividend"
-    DEPOSIT = "deposit"
-    WITHDRAWAL = "withdrawal"
-    FEE = "fee"
-    BONUS = "bonus"
-    TRANSFER = "transfer"
-    TAX = "tax"
+    BUY = "BUY"
+    SELL = "SELL"
+    DIVIDEND = "DIVIDEND"
+    DEPOSIT = "DEPOSIT"
+    WITHDRAWAL = "WITHDRAWAL"
+    FEE = "FEE"
+    BONUS = "BONUS"
+    TRANSFER = "TRANSFER"
+    TAX = "TAX"
+    INTEREST = "INTEREST"
 
 
 class User(Base):
@@ -89,6 +90,10 @@ class Position(Base):
 
     id = Column(String, primary_key=True)
     account_id = Column(String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    # NOTE: statement_id is deprecated and should not be used
+    # Positions are account-wide and represent cumulative state, not per-statement
+    # This field is kept for backward compatibility but should always be NULL
+    statement_id = Column(String, ForeignKey("statements.id", ondelete="CASCADE"), nullable=True, index=True)
     ticker = Column(String, nullable=False, index=True)
     name = Column(String, nullable=False)
     quantity = Column(Float, nullable=False)
@@ -98,6 +103,7 @@ class Position(Base):
 
     # Relationships
     account = relationship("Account", back_populates="positions")
+    statement = relationship("Statement", back_populates="positions")
 
 
 class Transaction(Base):
@@ -105,6 +111,7 @@ class Transaction(Base):
 
     id = Column(String, primary_key=True)
     account_id = Column(String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    statement_id = Column(String, ForeignKey("statements.id", ondelete="CASCADE"), nullable=True, index=True)
     date = Column(DateTime, nullable=False, index=True)
     type = Column(SQLEnum(TransactionTypeEnum), nullable=False, index=True)
     ticker = Column(String, nullable=True)
@@ -118,6 +125,7 @@ class Transaction(Base):
 
     # Relationships
     account = relationship("Account", back_populates="transactions")
+    statement = relationship("Statement", back_populates="transactions")
     expense = relationship("Expense", back_populates="transaction", uselist=False)
 
 
@@ -126,6 +134,7 @@ class Dividend(Base):
 
     id = Column(String, primary_key=True)
     account_id = Column(String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    statement_id = Column(String, ForeignKey("statements.id", ondelete="CASCADE"), nullable=True, index=True)
     ticker = Column(String, nullable=False, index=True)
     date = Column(DateTime, nullable=False, index=True)
     amount = Column(Float, nullable=False)
@@ -133,6 +142,7 @@ class Dividend(Base):
 
     # Relationships
     account = relationship("Account", back_populates="dividends")
+    statement = relationship("Statement", back_populates="dividends")
 
 
 class Expense(Base):
@@ -140,6 +150,7 @@ class Expense(Base):
 
     id = Column(String, primary_key=True)
     account_id = Column(String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    statement_id = Column(String, ForeignKey("statements.id", ondelete="CASCADE"), nullable=True, index=True)
     transaction_id = Column(String, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True, index=True)
     date = Column(DateTime, nullable=False, index=True)
     description = Column(Text, nullable=False)
@@ -149,6 +160,7 @@ class Expense(Base):
 
     # Relationships
     account = relationship("Account", back_populates="expenses")
+    statement = relationship("Statement", back_populates="expenses")
     transaction = relationship("Transaction", back_populates="expense")
 
 
@@ -172,6 +184,7 @@ class Statement(Base):
     id = Column(String, primary_key=True)
     account_id = Column(String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
     filename = Column(String, nullable=False)
+    file_path = Column(String, nullable=False)  # Full path to the uploaded file
     upload_date = Column(DateTime, default=datetime.utcnow, nullable=False)
     start_date = Column(DateTime, nullable=True)
     end_date = Column(DateTime, nullable=True)
@@ -180,6 +193,10 @@ class Statement(Base):
 
     # Relationships
     account = relationship("Account", back_populates="statements")
+    positions = relationship("Position", back_populates="statement", cascade="all, delete-orphan")
+    transactions = relationship("Transaction", back_populates="statement", cascade="all, delete-orphan")
+    dividends = relationship("Dividend", back_populates="statement", cascade="all, delete-orphan")
+    expenses = relationship("Expense", back_populates="statement", cascade="all, delete-orphan")
 
 
 class PlaidItem(Base):
@@ -247,6 +264,45 @@ class DashboardLayout(Base):
 
     # Relationships
     user = relationship("User", back_populates="dashboard_layouts")
+
+
+class InstrumentType(Base):
+    __tablename__ = "instrument_types"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    color = Column(String, nullable=False)
+
+    # Relationships
+    user = relationship("User", backref="instrument_types")
+
+
+class InstrumentIndustry(Base):
+    __tablename__ = "instrument_industries"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    color = Column(String, nullable=False)
+
+    # Relationships
+    user = relationship("User", backref="instrument_industries")
+
+
+class InstrumentMetadata(Base):
+    __tablename__ = "instrument_metadata"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    ticker = Column(String, nullable=False, index=True)
+    instrument_type_id = Column(String, ForeignKey("instrument_types.id", ondelete="SET NULL"), nullable=True)
+    instrument_industry_id = Column(String, ForeignKey("instrument_industries.id", ondelete="SET NULL"), nullable=True)
+
+    # Relationships
+    user = relationship("User", backref="instrument_metadata")
+    instrument_type = relationship("InstrumentType", backref="metadata")
+    instrument_industry = relationship("InstrumentIndustry", backref="metadata")
 
 
 class StockPrice(Base):

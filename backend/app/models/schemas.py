@@ -10,16 +10,16 @@ class AccountType(str, Enum):
     CREDIT_CARD = "credit_card"
 
 class TransactionType(str, Enum):
-    BUY = "buy"
-    SELL = "sell"
-    DIVIDEND = "dividend"
-    INTEREST = "interest"
-    DEPOSIT = "deposit"
-    WITHDRAWAL = "withdrawal"
-    FEE = "fee"
-    BONUS = "bonus"
-    TRANSFER = "transfer"
-    TAX = "tax"
+    BUY = "BUY"
+    SELL = "SELL"
+    DIVIDEND = "DIVIDEND"
+    INTEREST = "INTEREST"
+    DEPOSIT = "DEPOSIT"
+    WITHDRAWAL = "WITHDRAWAL"
+    FEE = "FEE"
+    BONUS = "BONUS"
+    TRANSFER = "TRANSFER"
+    TAX = "TAX"
 
 class UserBase(BaseModel):
     email: EmailStr
@@ -35,6 +35,19 @@ class User(UserBase):
     id: str
     created_at: datetime
     two_factor_enabled: bool = False
+
+    # Authentication provider
+    auth_provider: str = "local"  # "local", "entra", or "hybrid"
+
+    # Microsoft Entra ID fields
+    entra_id: Optional[str] = None
+    entra_tenant_id: Optional[str] = None
+    entra_email_verified: bool = False
+    entra_linked_at: Optional[datetime] = None
+
+    # Account linking
+    account_linked: bool = False
+    linked_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -281,29 +294,32 @@ class TypeBreakdownSlice(BaseModel):
 class StatementBase(BaseModel):
     filename: str
     file_path: str
-    file_size: int
     file_type: str
-    status: str
-    error_message: Optional[str] = None
+    file_size: int = 0  # Computed from file on disk
+    status: str = "completed"  # Status for frontend compatibility
 
 class StatementCreate(StatementBase):
     account_id: Optional[str] = None
 
 class Statement(StatementBase):
     id: str
-    user_id: str
-    account_id: Optional[str] = None
-    account_label: Optional[str] = None
-    account_institution: Optional[str] = None
-    uploaded_at: datetime
-    processed_at: Optional[datetime] = None
-    positions_count: int = 0
+    user_id: str  # Computed from account.user_id for frontend
+    account_id: str
+    account_label: Optional[str] = None  # Computed field for API response
+    account_institution: Optional[str] = None  # Computed field for API response
+    uploaded_at: datetime  # Map from upload_date for frontend compatibility
+    upload_date: Optional[datetime] = None  # Database field
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
     transactions_count: int = 0
-    dividends_count: int = 0
-    transaction_first_date: Optional[datetime] = None
-    transaction_last_date: Optional[datetime] = None
-    credit_volume: float = 0
-    debit_volume: float = 0
+    processed_at: Optional[datetime] = None  # For frontend compatibility
+    positions_count: int = 0  # For frontend compatibility
+    dividends_count: int = 0  # For frontend compatibility
+    transaction_first_date: Optional[datetime] = None  # Map from start_date
+    transaction_last_date: Optional[datetime] = None  # Map from end_date
+    credit_volume: float = 0  # For frontend compatibility
+    debit_volume: float = 0  # For frontend compatibility
+    error_message: Optional[str] = None  # For frontend compatibility
 
     class Config:
         from_attributes = True

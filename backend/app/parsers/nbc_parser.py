@@ -123,8 +123,6 @@ class NBCParser:
                 "date": date,
                 "type": mapped_type,
                 "description": full_description,
-                "amount": abs(amount),
-                "is_credit": amount > 0,
                 "ticker": "",
                 "quantity": 0,
                 "price": 0.0,

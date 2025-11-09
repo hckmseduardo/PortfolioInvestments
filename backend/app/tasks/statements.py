@@ -45,8 +45,14 @@ def run_statement_job(
 
 
 def _process_statement(db, session, user, statement_id: str, reprocess: bool, new_account_id: Optional[str]):
-    statement = db.find_one("statements", {"id": statement_id, "user_id": user.id})
+    # Get statement and verify ownership through account
+    statement = db.find_one("statements", {"id": statement_id})
     if not statement:
+        raise ValueError("Statement not found")
+
+    # Verify user owns the account
+    account = db.find_one("accounts", {"id": statement["account_id"], "user_id": user.id})
+    if not account:
         raise ValueError("Statement not found")
 
     if not statement.get("file_path"):
@@ -58,24 +64,27 @@ def _process_statement(db, session, user, statement_id: str, reprocess: bool, ne
 
     file_path = statement["file_path"]
 
-    # Update statement record to reflect pending processing
-    db.update("statements", statement_id, {
-        "status": "processing",
-        "processed_at": None,
-        "error_message": None,
-        "account_id": account_id,
-    })
-    session.commit()
+    # Update statement record if account changed
+    if account_id != statement.get("account_id"):
+        db.update("statements", {"id": statement_id}, {
+            "account_id": account_id,
+        })
+        session.commit()
 
     old_account_id = statement.get("account_id")
     if reprocess or (new_account_id and new_account_id != old_account_id):
-        # Remove previously imported records tied to this statement
-        db.delete_many("transactions", {"statement_id": statement_id})
-        db.delete_many("dividends", {"statement_id": statement_id})
-        session.commit()
-        if old_account_id:
-            recalculate_positions_from_transactions(old_account_id, db)
+        # Delete existing data for this statement using statement_id
+        # This ensures only data from this specific statement is removed
+        if statement_id:
+            db.delete_many("transactions", {"statement_id": statement_id})
+            db.delete_many("dividends", {"statement_id": statement_id})
+            # Note: Positions are NOT deleted per-statement, they're recalculated from all transactions
             session.commit()
+
+            # If account changed, recalculate positions for the old account
+            if new_account_id and new_account_id != old_account_id and old_account_id:
+                recalculate_positions_from_transactions(old_account_id, db)
+                session.commit()
 
     try:
         result = process_statement_file(
@@ -93,18 +102,11 @@ def _process_statement(db, session, user, statement_id: str, reprocess: bool, ne
             "debit_volume": result.get("debit_volume", 0),
         }
 
-        db.update("statements", statement_id, {
-            "status": "completed",
-            "processed_at": datetime.now().isoformat(),
-            "account_id": result["account_id"],
-            "positions_count": result["positions_created"],
+        # Update only fields that exist in Statement model
+        db.update("statements", {"id": statement_id}, {
             "transactions_count": result["transactions_created"],
-            "dividends_count": result["dividends_created"],
-            "transaction_first_date": metrics.get("transaction_first_date"),
-            "transaction_last_date": metrics.get("transaction_last_date"),
-            "credit_volume": metrics.get("credit_volume", 0),
-            "debit_volume": metrics.get("debit_volume", 0),
-            "error_message": None
+            "start_date": metrics.get("transaction_first_date"),
+            "end_date": metrics.get("transaction_last_date"),
         })
         session.commit()
 
@@ -115,19 +117,26 @@ def _process_statement(db, session, user, statement_id: str, reprocess: bool, ne
 
     except Exception as exc:
         logger.error("Statement job failed for %s: %s", statement_id, exc, exc_info=True)
-        db.update("statements", statement_id, {
-            "status": "failed",
-            "processed_at": datetime.now().isoformat(),
-            "error_message": str(exc)
-        })
-        session.commit()
+        # Note: Statement model doesn't store status/error fields anymore
+        # Errors are tracked by the job queue system
+        session.rollback()
         raise
 
 
 def _reprocess_all_statements(db, session, user, account_scope: Optional[str]):
-    statements = db.find("statements", {"user_id": user.id})
+    # Get user's accounts first
+    accounts = db.find("accounts", {"user_id": user.id})
+    account_ids = [acc["id"] for acc in accounts]
+
     if account_scope:
-        statements = [stmt for stmt in statements if stmt.get("account_id") == account_scope]
+        if account_scope not in account_ids:
+            raise ValueError("Account not found")
+        account_ids = [account_scope]
+
+    # Get statements for user's accounts
+    statements = []
+    for account_id in account_ids:
+        statements.extend(db.find("statements", {"account_id": account_id}))
 
     if not statements:
         raise ValueError("No statements found to reprocess")
