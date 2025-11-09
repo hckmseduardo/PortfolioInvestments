@@ -20,19 +20,38 @@ import {
   CircularProgress,
   Card,
   CardContent,
-  Grid
+  Grid,
+  Button,
+  Stack
 } from '@mui/material';
 import { transactionsAPI, accountsAPI, importAPI } from '../services/api';
 import { format, subDays, startOfMonth, startOfYear, subMonths, subYears } from 'date-fns';
+
+const PRESET_OPTIONS = [
+  { value: '7d', label: '7D' },
+  { value: '30d', label: '30D' },
+  { value: 'thisMonth', label: 'This Mo' },
+  { value: 'lastMonth', label: 'Last Mo' },
+  { value: 'last3Months', label: '3M' },
+  { value: 'last6Months', label: '6M' },
+  { value: 'last12Months', label: '12M' },
+  { value: 'thisYear', label: 'YTD' },
+  { value: 'lastYear', label: 'Last Yr' },
+  { value: 'all', label: 'All' }
+];
+
+const formatDateToInput = (date) => {
+  return format(date, 'yyyy-MM-dd');
+};
 
 const Transactions = () => {
   const [transactions, setTransactions] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [statements, setStatements] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState('');
-  const [filterType, setFilterType] = useState('all');
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [balance, setBalance] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -45,7 +64,7 @@ const Transactions = () => {
   useEffect(() => {
     fetchTransactions();
     fetchBalance();
-  }, [selectedAccount, filterType, customStartDate, customEndDate]);
+  }, [selectedAccount, startDate, endDate]);
 
   const fetchAccounts = async () => {
     try {
@@ -65,51 +84,84 @@ const Transactions = () => {
     }
   };
 
-  const getDateRange = () => {
-    const now = new Date();
-    let startDate = null;
-    let endDate = now;
+  const applyPreset = (presetValue) => {
+    const today = new Date();
+    const presets = {
+      '7d': () => {
+        const start = subDays(today, 6);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      '30d': () => {
+        const start = subDays(today, 29);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      thisMonth: () => {
+        const start = startOfMonth(today);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      lastMonth: () => {
+        const start = startOfMonth(subMonths(today, 1));
+        const end = new Date(today.getFullYear(), today.getMonth(), 0);
+        return { start: formatDateToInput(start), end: formatDateToInput(end) };
+      },
+      last3Months: () => {
+        const start = startOfMonth(subMonths(today, 2));
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      last6Months: () => {
+        const start = startOfMonth(subMonths(today, 5));
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      last12Months: () => {
+        const start = startOfMonth(subMonths(today, 11));
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      thisYear: () => {
+        const start = startOfYear(today);
+        return { start: formatDateToInput(start), end: formatDateToInput(today) };
+      },
+      lastYear: () => {
+        const start = startOfYear(subYears(today, 1));
+        const end = new Date(today.getFullYear() - 1, 11, 31);
+        return { start: formatDateToInput(start), end: formatDateToInput(end) };
+      },
+      all: () => ({ start: '', end: '' })
+    };
 
-    switch (filterType) {
-      case 'last7days':
-        startDate = subDays(now, 7);
-        break;
-      case 'mtd':
-        startDate = startOfMonth(now);
-        break;
-      case 'lastMonth':
-        startDate = startOfMonth(subMonths(now, 1));
-        endDate = startOfMonth(now);
-        break;
-      case 'ytd':
-        startDate = startOfYear(now);
-        break;
-      case 'lastYear':
-        startDate = startOfYear(subYears(now, 1));
-        endDate = startOfYear(now);
-        break;
-      case 'custom':
-        startDate = customStartDate ? new Date(customStartDate) : null;
-        endDate = customEndDate ? new Date(customEndDate) : null;
-        break;
-      case 'all':
-      default:
-        startDate = null;
-        endDate = null;
+    const range = presets[presetValue] ? presets[presetValue]() : presets.all();
+    setSelectedPreset(presetValue);
+    setStartDate(range.start);
+    setEndDate(range.end);
+  };
+
+  const handleStartDateChange = (event) => {
+    const value = event.target.value;
+    setSelectedPreset('custom');
+    setStartDate(value);
+    if (value && endDate && value > endDate) {
+      setEndDate(value);
     }
+  };
 
-    return { startDate, endDate };
+  const handleEndDateChange = (event) => {
+    const value = event.target.value;
+    setSelectedPreset('custom');
+    setEndDate(value);
+    if (value && startDate && value < startDate) {
+      setStartDate(value);
+    }
   };
 
   const fetchTransactions = async () => {
     setLoading(true);
     setError('');
     try {
-      const { startDate, endDate } = getDateRange();
+      const start = startDate ? new Date(startDate).toISOString() : null;
+      const end = endDate ? new Date(endDate).toISOString() : null;
       const response = await transactionsAPI.getAll(
         selectedAccount || null,
-        startDate ? startDate.toISOString() : null,
-        endDate ? endDate.toISOString() : null
+        start,
+        end
       );
       setTransactions(response.data);
     } catch (err) {
@@ -122,10 +174,10 @@ const Transactions = () => {
 
   const fetchBalance = async () => {
     try {
-      const { endDate } = getDateRange();
+      const end = endDate ? new Date(endDate).toISOString() : null;
       const response = await transactionsAPI.getBalance(
         selectedAccount || null,
-        endDate ? endDate.toISOString() : null
+        end
       );
       setBalance(response.data);
     } catch (err) {
@@ -216,74 +268,65 @@ const Transactions = () => {
       </Grid>
 
       <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Filters
-        </Typography>
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={3}>
-            <FormControl fullWidth>
-              <InputLabel>Account</InputLabel>
-              <Select
-                value={selectedAccount}
-                label="Account"
-                onChange={(e) => setSelectedAccount(e.target.value)}
-              >
-                <MenuItem value="">All Accounts</MenuItem>
-                {accounts.map((account) => (
-                  <MenuItem key={account.id} value={account.id}>
-                    {account.institution} - {account.account_number}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+        <Stack spacing={2}>
+          <Box>
+            <Typography variant="subtitle1" sx={{ mb: 1 }}>
+              Filter by period
+            </Typography>
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ gap: 0.5 }}>
+              {PRESET_OPTIONS.map((preset) => (
+                <Button
+                  key={preset.value}
+                  variant={selectedPreset === preset.value ? 'contained' : 'outlined'}
+                  size="small"
+                  onClick={() => applyPreset(preset.value)}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+            </Stack>
+          </Box>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+            <TextField
+              label="Start date"
+              type="date"
+              size="small"
+              value={startDate}
+              onChange={handleStartDateChange}
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              label="End date"
+              type="date"
+              size="small"
+              value={endDate}
+              onChange={handleEndDateChange}
+              InputLabelProps={{ shrink: true }}
+            />
+            <Button variant="text" size="small" onClick={() => applyPreset('all')}>
+              Clear filters
+            </Button>
+          </Stack>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Account</InputLabel>
+                <Select
+                  value={selectedAccount}
+                  label="Account"
+                  onChange={(e) => setSelectedAccount(e.target.value)}
+                >
+                  <MenuItem value="">All Accounts</MenuItem>
+                  {accounts.map((account) => (
+                    <MenuItem key={account.id} value={account.id}>
+                      {account.institution} - {account.account_number}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
           </Grid>
-          <Grid item xs={12} md={3}>
-            <FormControl fullWidth>
-              <InputLabel>Period</InputLabel>
-              <Select
-                value={filterType}
-                label="Period"
-                onChange={(e) => setFilterType(e.target.value)}
-              >
-                <MenuItem value="all">All Time</MenuItem>
-                <MenuItem value="last7days">Last 7 Days</MenuItem>
-                <MenuItem value="mtd">Month to Date</MenuItem>
-                <MenuItem value="lastMonth">Last Month</MenuItem>
-                <MenuItem value="ytd">Year to Date</MenuItem>
-                <MenuItem value="lastYear">Last Year</MenuItem>
-                <MenuItem value="custom">Custom Period</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          {filterType === 'custom' && (
-            <>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  fullWidth
-                  label="Start Date"
-                  type="date"
-                  value={customStartDate}
-                  onChange={(e) => setCustomStartDate(e.target.value)}
-                  InputLabelProps={{
-                    shrink: true,
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  fullWidth
-                  label="End Date"
-                  type="date"
-                  value={customEndDate}
-                  onChange={(e) => setCustomEndDate(e.target.value)}
-                  InputLabelProps={{
-                    shrink: true,
-                  }}
-                />
-              </Grid>
-            </>
-          )}
-        </Grid>
+        </Stack>
       </Paper>
 
       {error && (
