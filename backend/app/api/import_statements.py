@@ -13,6 +13,7 @@ from app.database.json_db import get_db
 from app.parsers.wealthsimple_parser import WealthsimpleParser
 from app.parsers.tangerine_parser import TangerineParser
 from app.parsers.nbc_parser import NBCParser
+from app.parsers.ibkr_parser import InteractiveBrokersParser
 from app.config import settings
 from app.services.job_queue import enqueue_statement_job, get_job_info
 
@@ -99,6 +100,8 @@ def compute_statement_metrics(statement_id: str, db):
 
 def recalculate_positions_from_transactions(account_id: str, db):
     transactions = db.find("transactions", {"account_id": account_id})
+    # Filter out transactions with None dates and sort
+    transactions = [t for t in transactions if t.get('date') is not None]
     transactions = sorted(transactions, key=lambda x: x.get('date', ''))
 
     positions_map: Dict[str, Dict] = {}
@@ -114,7 +117,7 @@ def recalculate_positions_from_transactions(account_id: str, db):
 
     for txn in transactions:
         txn_type = txn.get('type')
-        ticker = txn.get('ticker', '').strip()
+        ticker = (txn.get('ticker') or '').strip()
         quantity = txn.get('quantity', 0)
         total = txn.get('total', 0)
 
@@ -137,9 +140,10 @@ def recalculate_positions_from_transactions(account_id: str, db):
             continue
 
         if ticker not in positions_map:
+            description = txn.get('description') or ''
             positions_map[ticker] = {
                 'ticker': ticker,
-                'name': txn.get('description', '').split(':')[0].split('-', 1)[-1].strip() if '-' in txn.get('description', '') else ticker,
+                'name': description.split(':')[0].split('-', 1)[-1].strip() if '-' in description else ticker,
                 'quantity': 0,
                 'book_value': 0,
                 'market_value': 0,
@@ -174,6 +178,11 @@ def recalculate_positions_from_transactions(account_id: str, db):
             cash_position['quantity'] += total
             cash_position['book_value'] += total
             cash_position['market_value'] += total
+        elif txn_type == 'interest':
+            # Interest increases cash
+            cash_position['quantity'] += total
+            cash_position['book_value'] += total
+            cash_position['market_value'] += total
 
     # Ensure CASH is included in the positions map so it's persisted
     positions_map['CASH'] = cash_position
@@ -197,7 +206,7 @@ def detect_statement_type(file_path: str) -> str:
     """
     Detect which bank/institution the statement is from.
 
-    Returns: 'wealthsimple', 'tangerine', or 'nbc'
+    Returns: 'wealthsimple', 'tangerine', 'nbc', or 'ibkr'
     """
     file_ext = Path(file_path).suffix.lower()
     filename = Path(file_path).name.lower()
@@ -214,21 +223,25 @@ def detect_statement_type(file_path: str) -> str:
     if file_ext in ['.qfx', '.ofx']:
         return 'tangerine'
 
-    # For CSV, try to detect by reading first few lines
+    # For CSV, try to detect by reading the first chunk
     if file_ext == '.csv':
+        sample = ''
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                first_line = f.readline().lower()
-                # NBC CSV has: Date;Description;Category;Debit;Credit;Balance (semicolon delimiter)
-                if 'debit' in first_line and 'credit' in first_line and 'balance' in first_line and ';' in first_line:
-                    return 'nbc'
-                # Tangerine CSV has: Date,Transaction,Nom,Description,Montant
-                elif 'nom' in first_line and 'montant' in first_line:
-                    return 'tangerine'
-                # Wealthsimple has different headers
-                return 'wealthsimple'
-        except:
-            pass
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                sample = f.read(4096).lower()
+        except Exception:
+            sample = ''
+
+        first_line = sample.splitlines()[0] if sample else ''
+
+        if 'interactive brokers' in sample or 'informe de actividad' in sample:
+            return 'ibkr'
+        if 'debit' in first_line and 'credit' in first_line and 'balance' in first_line and ';' in first_line:
+            return 'nbc'
+        if 'nom' in first_line and 'montant' in first_line:
+            return 'tangerine'
+
+        return 'wealthsimple'
 
     # Default to Wealthsimple for backwards compatibility
     return 'wealthsimple'
@@ -243,6 +256,9 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
         parsed_data = parser.parse()
     elif statement_type == 'tangerine':
         parser = TangerineParser(file_path)
+        parsed_data = parser.parse()
+    elif statement_type == 'ibkr':
+        parser = InteractiveBrokersParser(file_path)
         parsed_data = parser.parse()
     else:
         # Wealthsimple parser

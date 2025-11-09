@@ -13,6 +13,7 @@ class TransactionType(str, Enum):
     BUY = "buy"
     SELL = "sell"
     DIVIDEND = "dividend"
+    INTEREST = "interest"
     DEPOSIT = "deposit"
     WITHDRAWAL = "withdrawal"
     FEE = "fee"
