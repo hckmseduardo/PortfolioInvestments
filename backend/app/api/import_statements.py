@@ -560,9 +560,13 @@ async def delete_statement(
         )
 
     if statement.get('account_id'):
-        db.delete_many("transactions", {"account_id": statement['account_id']})
-        db.delete_many("dividends", {"account_id": statement['account_id']})
+        # Delete only transactions and dividends from this specific statement
+        db.delete_many("transactions", {"statement_id": statement_id})
+        db.delete_many("dividends", {"statement_id": statement_id})
+
+        # Delete all positions and recalculate from remaining transactions
         db.delete_many("positions", {"account_id": statement['account_id']})
+        recalculate_positions_from_transactions(statement['account_id'], db)
 
     if os.path.exists(statement['file_path']):
         os.remove(statement['file_path'])
