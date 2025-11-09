@@ -14,6 +14,7 @@ import {
   Chip,
   FormControl,
   InputLabel,
+  Menu,
   MenuItem,
   Select,
   TextField,
@@ -45,6 +46,7 @@ import {
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { positionsAPI, accountsAPI, instrumentsAPI } from '../services/api';
+import { alpha } from '@mui/material/styles';
 
 const DATE_PRESETS = {
   CURRENT: 'current',
@@ -71,6 +73,19 @@ const COLOR_PALETTE = [
   '#009688',
   '#cddc39'
 ];
+
+const COLUMN_FILTER_DEFAULTS = {
+  ticker: '',
+  name: '',
+  instrument_type_name: '',
+  instrument_industry_name: '',
+  price: '',
+  quantity: '',
+  book_value: '',
+  market_value: '',
+  gain_loss: '',
+  gain_loss_percent: ''
+};
 
 const formatISODate = (date) => date.toISOString().split('T')[0];
 
@@ -141,6 +156,7 @@ const Portfolio = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [orderBy, setOrderBy] = useState('ticker');
   const [order, setOrder] = useState('asc');
+  const [columnFilters, setColumnFilters] = useState({ ...COLUMN_FILTER_DEFAULTS });
   const hasLoadedOnce = useRef(false);
   const priceRefreshTimer = useRef(null);
 
@@ -394,6 +410,89 @@ const Portfolio = () => {
         mr: 1,
         border: '1px solid rgba(0,0,0,0.12)',
         backgroundColor: color || '#b0bec5'
+      }}
+    />
+  );
+
+  const ClassificationTag = ({ value, options, placeholder = 'Unassigned', disabled, onChange }) => {
+    const [anchorEl, setAnchorEl] = useState(null);
+    const selectedOption = options.find((option) => option.id === value) || null;
+    const selectedColor = selectedOption?.color || 'rgba(0,0,0,0.26)';
+
+    const handleOpen = (event) => {
+      if (disabled) return;
+      setAnchorEl(event.currentTarget);
+    };
+
+    const handleClose = () => {
+      setAnchorEl(null);
+    };
+
+    const handleSelect = (optionValue) => {
+      if (disabled) return;
+      onChange(optionValue ?? null);
+      handleClose();
+    };
+
+    return (
+      <>
+        <Chip
+          label={selectedOption?.name || placeholder}
+          size="small"
+          onClick={handleOpen}
+          clickable={!disabled}
+          sx={{
+            borderRadius: '999px',
+            bgcolor: selectedOption ? alpha(selectedColor, 0.15) : 'transparent',
+            border: `1px solid ${selectedOption ? selectedColor : 'rgba(0,0,0,0.12)'}`,
+            color: selectedOption ? selectedColor : 'text.secondary',
+            fontWeight: 500,
+            px: 0.5,
+            cursor: disabled ? 'not-allowed' : 'pointer'
+          }}
+        />
+        <Menu
+          anchorEl={anchorEl}
+          open={Boolean(anchorEl)}
+          onClose={handleClose}
+          keepMounted
+        >
+          <MenuItem onClick={() => handleSelect(null)}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              {renderColorSwatch(null)}
+              <em>Unassigned</em>
+            </Box>
+          </MenuItem>
+          {options.map((option) => (
+            <MenuItem key={option.id} onClick={() => handleSelect(option.id)}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                {renderColorSwatch(option.color)}
+                <span>{option.name}</span>
+              </Box>
+            </MenuItem>
+          ))}
+        </Menu>
+      </>
+    );
+  };
+
+  const renderFilterField = (field, placeholder = 'Filter') => (
+    <TextField
+      size="small"
+      variant="standard"
+      fullWidth
+      placeholder={placeholder}
+      value={columnFilters[field]}
+      onChange={(event) => handleColumnFilterChange(field, event.target.value)}
+      InputProps={{
+        disableUnderline: true,
+        sx: {
+          fontSize: 13,
+          px: 1,
+          py: 0.5,
+          bgcolor: 'action.hover',
+          borderRadius: 1
+        }
       }}
     />
   );
@@ -675,11 +774,72 @@ const Portfolio = () => {
     setSelectedTypeId('');
   }, []);
 
+  const handleColumnFilterChange = useCallback((field, value) => {
+    setColumnFilters((prev) => ({
+      ...prev,
+      [field]: value
+    }));
+  }, []);
+
+  const resetColumnFilters = useCallback(() => {
+    setColumnFilters({ ...COLUMN_FILTER_DEFAULTS });
+  }, []);
+
   const handleRequestSort = useCallback((property) => {
     const isAsc = orderBy === property && order === 'asc';
     setOrder(isAsc ? 'desc' : 'asc');
     setOrderBy(property);
   }, [orderBy, order]);
+
+  const hasColumnFilters = useMemo(
+    () => Object.values(columnFilters).some((value) => String(value || '').trim().length > 0),
+    [columnFilters]
+  );
+
+  const filteredPositions = useMemo(() => {
+    const normalizedFilters = Object.fromEntries(
+      Object.entries(columnFilters).map(([key, value]) => [key, String(value || '').trim().toLowerCase()])
+    );
+
+    const matchesFilter = (value, filterValue) => {
+      if (!filterValue) return true;
+      return String(value ?? '').toLowerCase().includes(filterValue);
+    };
+
+    const isFiltering = Object.values(normalizedFilters).some(Boolean);
+    if (!isFiltering) {
+      return positions;
+    }
+
+    return positions.filter((position) => {
+      if (!matchesFilter(position.ticker, normalizedFilters.ticker)) return false;
+      if (!matchesFilter(position.name, normalizedFilters.name)) return false;
+
+      const typeLabel = position.instrument_type_name || 'Unassigned';
+      if (!matchesFilter(typeLabel, normalizedFilters.instrument_type_name)) return false;
+
+      const industryLabel = position.instrument_industry_name || 'Unassigned';
+      if (!matchesFilter(industryLabel, normalizedFilters.instrument_industry_name)) return false;
+
+      if (!matchesFilter(position.price, normalizedFilters.price)) return false;
+      if (!matchesFilter(position.quantity, normalizedFilters.quantity)) return false;
+      if (!matchesFilter(position.book_value, normalizedFilters.book_value)) return false;
+
+      const marketValue = getDisplayedMarketValue(position) ?? position.market_value ?? position.book_value;
+      if (!matchesFilter(marketValue, normalizedFilters.market_value)) return false;
+
+      if (!matchesFilter(calculateGainLoss(position), normalizedFilters.gain_loss)) return false;
+      if (!matchesFilter(calculateGainLossPercent(position), normalizedFilters.gain_loss_percent)) return false;
+
+      return true;
+    });
+  }, [
+    positions,
+    columnFilters,
+    calculateGainLoss,
+    calculateGainLossPercent,
+    getDisplayedMarketValue
+  ]);
 
   const sortedPositions = useMemo(() => {
     const comparator = (a, b) => {
@@ -735,14 +895,15 @@ const Portfolio = () => {
         : String(bValue).localeCompare(String(aValue));
     };
 
-    return [...positions].sort(comparator);
-  }, [positions, orderBy, order]);
+    return [...filteredPositions].sort(comparator);
+  }, [filteredPositions, orderBy, order]);
 
   const hasFilters = Boolean(
     selectedAccountId ||
     valuationDate ||
     selectedTypeId ||
-    selectedIndustryId
+    selectedIndustryId ||
+    hasColumnFilters
   );
 
   if (loading && positions.length === 0) {
@@ -1125,7 +1286,7 @@ const Portfolio = () => {
         </Typography>
       )}
 
-      {positions.length === 0 ? (
+      {sortedPositions.length === 0 ? (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography variant="h6" color="textSecondary">
             No positions found{hasFilters ? ' for the selected criteria' : ''}
@@ -1135,36 +1296,146 @@ const Portfolio = () => {
               ? 'Try adjusting the account, date, type, or industry filters.'
               : 'Import a statement to see your portfolio'}
           </Typography>
+          {hasColumnFilters && (
+            <Button
+              size="small"
+              variant="text"
+              sx={{ mt: 2 }}
+              onClick={resetColumnFilters}
+            >
+              Clear column filters
+            </Button>
+          )}
         </Paper>
       ) : (
-        <TableContainer component={Paper}>
-          {fetching && <LinearProgress />}
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell><strong>Ticker</strong></TableCell>
-                <TableCell><strong>Name</strong></TableCell>
-                <TableCell><strong>Type</strong></TableCell>
-                <TableCell><strong>Industry</strong></TableCell>
-                <TableCell align="right"><strong>Price</strong></TableCell>
-                <TableCell align="right"><strong>Quantity</strong></TableCell>
-                <TableCell align="right"><strong>Book Value</strong></TableCell>
-                <TableCell align="right"><strong>Market Value</strong></TableCell>
-                <TableCell align="right"><strong>Gain/Loss</strong></TableCell>
-                <TableCell align="right"><strong>Gain/Loss %</strong></TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {positions.map((position) => {
-                const gainLoss = calculateGainLoss(position);
-                const gainLossPercent = calculateGainLossPercent(position);
-                const isPositive = gainLoss >= 0;
-                const livePrice = hasLivePrice(position) && position.price != null ? position.price : null;
-                const displayMarketValue = getDisplayedMarketValue(position);
-                const pricePending = position.price_pending && position.ticker !== 'CASH';
-                const priceFailed = position.price_failed && position.ticker !== 'CASH';
+        <>
+          {hasColumnFilters && (
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+              <Button size="small" onClick={resetColumnFilters}>
+                Clear column filters
+              </Button>
+            </Box>
+          )}
+          <TableContainer component={Paper}>
+            {fetching && <LinearProgress />}
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell sortDirection={orderBy === 'ticker' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'ticker'}
+                      direction={orderBy === 'ticker' ? order : 'asc'}
+                      onClick={() => handleRequestSort('ticker')}
+                    >
+                      <strong>Ticker</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={orderBy === 'name' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'name'}
+                      direction={orderBy === 'name' ? order : 'asc'}
+                      onClick={() => handleRequestSort('name')}
+                    >
+                      <strong>Name</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={orderBy === 'instrument_type_name' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'instrument_type_name'}
+                      direction={orderBy === 'instrument_type_name' ? order : 'asc'}
+                      onClick={() => handleRequestSort('instrument_type_name')}
+                    >
+                      <strong>Type</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={orderBy === 'instrument_industry_name' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'instrument_industry_name'}
+                      direction={orderBy === 'instrument_industry_name' ? order : 'asc'}
+                      onClick={() => handleRequestSort('instrument_industry_name')}
+                    >
+                      <strong>Industry</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell align="right" sortDirection={orderBy === 'price' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'price'}
+                      direction={orderBy === 'price' ? order : 'asc'}
+                      onClick={() => handleRequestSort('price')}
+                    >
+                      <strong>Price</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell align="right" sortDirection={orderBy === 'quantity' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'quantity'}
+                      direction={orderBy === 'quantity' ? order : 'asc'}
+                      onClick={() => handleRequestSort('quantity')}
+                    >
+                      <strong>Quantity</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell align="right" sortDirection={orderBy === 'book_value' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'book_value'}
+                      direction={orderBy === 'book_value' ? order : 'asc'}
+                      onClick={() => handleRequestSort('book_value')}
+                    >
+                      <strong>Book Value</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell align="right" sortDirection={orderBy === 'market_value' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'market_value'}
+                      direction={orderBy === 'market_value' ? order : 'asc'}
+                      onClick={() => handleRequestSort('market_value')}
+                    >
+                      <strong>Market Value</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell align="right" sortDirection={orderBy === 'gain_loss' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'gain_loss'}
+                      direction={orderBy === 'gain_loss' ? order : 'asc'}
+                      onClick={() => handleRequestSort('gain_loss')}
+                    >
+                      <strong>Gain/Loss</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell align="right" sortDirection={orderBy === 'gain_loss_percent' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'gain_loss_percent'}
+                      direction={orderBy === 'gain_loss_percent' ? order : 'asc'}
+                      onClick={() => handleRequestSort('gain_loss_percent')}
+                    >
+                      <strong>Gain/Loss %</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>{renderFilterField('ticker', 'Ticker')}</TableCell>
+                  <TableCell>{renderFilterField('name', 'Name')}</TableCell>
+                  <TableCell>{renderFilterField('instrument_type_name', 'Type')}</TableCell>
+                  <TableCell>{renderFilterField('instrument_industry_name', 'Industry')}</TableCell>
+                  <TableCell align="right">{renderFilterField('price', 'Price')}</TableCell>
+                  <TableCell align="right">{renderFilterField('quantity', 'Qty')}</TableCell>
+                  <TableCell align="right">{renderFilterField('book_value', 'Book')}</TableCell>
+                  <TableCell align="right">{renderFilterField('market_value', 'Market')}</TableCell>
+                  <TableCell align="right">{renderFilterField('gain_loss', 'Gain')}</TableCell>
+                  <TableCell align="right">{renderFilterField('gain_loss_percent', '%')}</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {sortedPositions.map((position) => {
+                  const gainLoss = calculateGainLoss(position);
+                  const gainLossPercent = calculateGainLossPercent(position);
+                  const isPositive = gainLoss >= 0;
+                  const livePrice = hasLivePrice(position) && position.price != null ? position.price : null;
+                  const displayMarketValue = getDisplayedMarketValue(position);
+                  const pricePending = position.price_pending && position.ticker !== 'CASH';
+                  const priceFailed = position.price_failed && position.ticker !== 'CASH';
 
-                return (
+                  return (
                   <TableRow key={position.ticker}>
                     <TableCell>
                       <Chip
@@ -1176,83 +1447,33 @@ const Portfolio = () => {
                     </TableCell>
                     <TableCell>{position.name}</TableCell>
                     <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <FormControl size="small" sx={{ minWidth: 140 }}>
-                          <Select
-                            size="small"
-                            displayEmpty
-                            value={position.instrument_type_id || ''}
-                            onChange={(event) =>
-                              handleClassificationUpdate(position, {
-                                instrument_type_id: event.target.value || null
-                              })
-                            }
-                            disabled={classificationSaving[position.ticker]}
-                            renderValue={(value) => {
-                              if (!value) {
-                                return <em>Unassigned</em>;
-                              }
-                              const info = typeLookup[value];
-                              return (
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  {renderColorSwatch(info?.color)}
-                                  <span>{info?.name || 'Unknown'}</span>
-                                </Box>
-                              );
-                            }}
-                          >
-                            <MenuItem value="">
-                              <em>Unassigned</em>
-                            </MenuItem>
-                            {instrumentTypes.map((type) => (
-                              <MenuItem key={type.id} value={type.id}>
-                                {renderColorSwatch(type.color)}
-                                {type.name}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <ClassificationTag
+                          value={position.instrument_type_id}
+                          options={instrumentTypes}
+                          disabled={classificationSaving[position.ticker]}
+                          onChange={(nextValue) =>
+                            handleClassificationUpdate(position, {
+                              instrument_type_id: nextValue
+                            })
+                          }
+                        />
                         {classificationSaving[position.ticker] && <CircularProgress size={16} />}
-                      </Box>
+                      </Stack>
                     </TableCell>
                     <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <FormControl size="small" sx={{ minWidth: 160 }}>
-                          <Select
-                            size="small"
-                            displayEmpty
-                            value={position.instrument_industry_id || ''}
-                            onChange={(event) =>
-                              handleClassificationUpdate(position, {
-                                instrument_industry_id: event.target.value || null
-                              })
-                            }
-                            disabled={classificationSaving[position.ticker]}
-                            renderValue={(value) => {
-                              if (!value) {
-                                return <em>Unassigned</em>;
-                              }
-                              const info = industryLookup[value];
-                              return (
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  {renderColorSwatch(info?.color)}
-                                  <span>{info?.name || 'Unknown'}</span>
-                                </Box>
-                              );
-                            }}
-                          >
-                            <MenuItem value="">
-                              <em>Unassigned</em>
-                            </MenuItem>
-                            {instrumentIndustries.map((industry) => (
-                              <MenuItem key={industry.id} value={industry.id}>
-                                {renderColorSwatch(industry.color)}
-                                {industry.name}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </Box>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <ClassificationTag
+                          value={position.instrument_industry_id}
+                          options={instrumentIndustries}
+                          disabled={classificationSaving[position.ticker]}
+                          onChange={(nextValue) =>
+                            handleClassificationUpdate(position, {
+                              instrument_industry_id: nextValue
+                            })
+                          }
+                        />
+                      </Stack>
                     </TableCell>
                     <TableCell align="right">
                       {livePrice ? (
@@ -1318,6 +1539,7 @@ const Portfolio = () => {
             </TableBody>
           </Table>
         </TableContainer>
+        </>
       )}
 
       <Dialog open={metadataDialogOpen} onClose={handleMetadataDialogClose} maxWidth="md" fullWidth>

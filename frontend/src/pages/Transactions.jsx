@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Container,
   Paper,
@@ -21,7 +21,8 @@ import {
   CardContent,
   Grid,
   Button,
-  Stack
+  Stack,
+  TableSortLabel
 } from '@mui/material';
 import { transactionsAPI, accountsAPI, importAPI } from '../services/api';
 import { format, subDays, startOfMonth, startOfYear, subMonths, subYears } from 'date-fns';
@@ -43,6 +44,22 @@ const formatDateToInput = (date) => {
   return format(date, 'yyyy-MM-dd');
 };
 
+const TRANSACTION_FILTER_DEFAULTS = {
+  date: '',
+  account: '',
+  type: '',
+  ticker: '',
+  quantityMin: '',
+  quantityMax: '',
+  priceMin: '',
+  priceMax: '',
+  feesMin: '',
+  feesMax: '',
+  totalMin: '',
+  totalMax: '',
+  description: ''
+};
+
 const Transactions = () => {
   const [transactions, setTransactions] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -54,6 +71,8 @@ const Transactions = () => {
   const [balance, setBalance] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [sortConfig, setSortConfig] = useState({ field: 'date', direction: 'desc' });
+  const [filters, setFilters] = useState({ ...TRANSACTION_FILTER_DEFAULTS });
 
   useEffect(() => {
     fetchAccounts();
@@ -218,6 +237,145 @@ const Transactions = () => {
     return statements.filter(s => s.account_id === selectedAccount).length;
   };
 
+  const handleSort = (field) => {
+    setSortConfig((prev) => {
+      if (prev.field === field) {
+        return { field, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { field, direction: 'asc' };
+    });
+  };
+
+  const handleFilterChange = (field, value) => {
+    setFilters((prev) => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const resetFilters = () => {
+    setFilters({ ...TRANSACTION_FILTER_DEFAULTS });
+  };
+
+  const transactionTypes = useMemo(() => {
+    const uniqueTypes = new Set(
+      transactions
+        .map((tx) => tx.type)
+        .filter(Boolean)
+    );
+    return Array.from(uniqueTypes).sort();
+  }, [transactions]);
+
+  const getSortableValue = (transaction, field) => {
+    switch (field) {
+      case 'date':
+        return new Date(transaction.date).getTime();
+      case 'account':
+        return getAccountName(transaction.account_id).toLowerCase();
+      case 'type':
+        return (transaction.type || '').toLowerCase();
+      case 'ticker':
+        return (transaction.ticker || '').toLowerCase();
+      case 'quantity':
+        return Number(transaction.quantity ?? Number.NEGATIVE_INFINITY);
+      case 'price':
+        return Number(transaction.price ?? Number.NEGATIVE_INFINITY);
+      case 'fees':
+        return Number(transaction.fees ?? Number.NEGATIVE_INFINITY);
+      case 'total':
+        return Number(transaction.total ?? Number.NEGATIVE_INFINITY);
+      case 'description':
+        return (transaction.description || '').toLowerCase();
+      default:
+        return transaction[field];
+    }
+  };
+
+  const processedTransactions = useMemo(() => {
+    const normalizedTextFilters = {
+      account: filters.account.trim().toLowerCase(),
+      ticker: filters.ticker.trim().toLowerCase(),
+      description: filters.description.trim().toLowerCase()
+    };
+
+    const passesRangeFilter = (value, min, max) => {
+      if (min !== '' && (value == null || Number(value) < Number(min))) {
+        return false;
+      }
+      if (max !== '' && (value == null || Number(value) > Number(max))) {
+        return false;
+      }
+      return true;
+    };
+
+    const filtered = transactions.filter((tx) => {
+      if (filters.date) {
+        const txDate = formatDateToInput(new Date(tx.date));
+        if (txDate !== filters.date) {
+          return false;
+        }
+      }
+
+      if (normalizedTextFilters.account) {
+        const accountName = getAccountName(tx.account_id).toLowerCase();
+        if (!accountName.includes(normalizedTextFilters.account)) {
+          return false;
+        }
+      }
+
+      if (filters.type && tx.type !== filters.type) {
+        return false;
+      }
+
+      if (normalizedTextFilters.ticker) {
+        const ticker = (tx.ticker || '').toLowerCase();
+        if (!ticker.includes(normalizedTextFilters.ticker)) {
+          return false;
+        }
+      }
+
+      if (!passesRangeFilter(tx.quantity, filters.quantityMin, filters.quantityMax)) {
+        return false;
+      }
+
+      if (!passesRangeFilter(tx.price, filters.priceMin, filters.priceMax)) {
+        return false;
+      }
+
+      if (!passesRangeFilter(tx.fees, filters.feesMin, filters.feesMax)) {
+        return false;
+      }
+
+      if (!passesRangeFilter(tx.total, filters.totalMin, filters.totalMax)) {
+        return false;
+      }
+
+      if (normalizedTextFilters.description) {
+        const description = (tx.description || '').toLowerCase();
+        if (!description.includes(normalizedTextFilters.description)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      const valueA = getSortableValue(a, sortConfig.field);
+      const valueB = getSortableValue(b, sortConfig.field);
+
+      if (valueA < valueB) {
+        return sortConfig.direction === 'asc' ? -1 : 1;
+      }
+      if (valueA > valueB) {
+        return sortConfig.direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+
+    return sorted;
+  }, [transactions, filters, sortConfig, accounts]);
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Typography variant="h4" gutterBottom>
@@ -343,15 +501,228 @@ const Transactions = () => {
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell>Date</TableCell>
-                <TableCell>Account</TableCell>
-                <TableCell>Type</TableCell>
-                <TableCell>Ticker</TableCell>
-                <TableCell align="right">Quantity</TableCell>
-                <TableCell align="right">Price</TableCell>
-                <TableCell align="right">Fees</TableCell>
-                <TableCell align="right">Total</TableCell>
-                <TableCell>Description</TableCell>
+                <TableCell sortDirection={sortConfig.field === 'date' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'date'}
+                    direction={sortConfig.field === 'date' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('date')}
+                  >
+                    Date
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sortDirection={sortConfig.field === 'account' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'account'}
+                    direction={sortConfig.field === 'account' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('account')}
+                  >
+                    Account
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sortDirection={sortConfig.field === 'type' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'type'}
+                    direction={sortConfig.field === 'type' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('type')}
+                  >
+                    Type
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sortDirection={sortConfig.field === 'ticker' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'ticker'}
+                    direction={sortConfig.field === 'ticker' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('ticker')}
+                  >
+                    Ticker
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right" sortDirection={sortConfig.field === 'quantity' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'quantity'}
+                    direction={sortConfig.field === 'quantity' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('quantity')}
+                  >
+                    Quantity
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right" sortDirection={sortConfig.field === 'price' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'price'}
+                    direction={sortConfig.field === 'price' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('price')}
+                  >
+                    Price
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right" sortDirection={sortConfig.field === 'fees' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'fees'}
+                    direction={sortConfig.field === 'fees' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('fees')}
+                  >
+                    Fees
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right" sortDirection={sortConfig.field === 'total' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'total'}
+                    direction={sortConfig.field === 'total' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('total')}
+                  >
+                    Total
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sortDirection={sortConfig.field === 'description' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'description'}
+                    direction={sortConfig.field === 'description' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('description')}
+                  >
+                    Description
+                  </TableSortLabel>
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>
+                  <TextField
+                    type="date"
+                    size="small"
+                    value={filters.date}
+                    onChange={(e) => handleFilterChange('date', e.target.value)}
+                    fullWidth
+                  />
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    placeholder="Search account"
+                    value={filters.account}
+                    onChange={(e) => handleFilterChange('account', e.target.value)}
+                    fullWidth
+                  />
+                </TableCell>
+                <TableCell>
+                  <FormControl size="small" fullWidth>
+                    <Select
+                      value={filters.type}
+                      onChange={(e) => handleFilterChange('type', e.target.value)}
+                      displayEmpty
+                    >
+                      <MenuItem value="">
+                        <em>All Types</em>
+                      </MenuItem>
+                      {transactionTypes.map((type) => (
+                        <MenuItem key={type} value={type}>
+                          {type.toUpperCase()}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    placeholder="Search ticker"
+                    value={filters.ticker}
+                    onChange={(e) => handleFilterChange('ticker', e.target.value)}
+                    fullWidth
+                  />
+                </TableCell>
+                <TableCell align="right">
+                  <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                    <TextField
+                      size="small"
+                      type="number"
+                      placeholder="Min"
+                      value={filters.quantityMin}
+                      onChange={(e) => handleFilterChange('quantityMin', e.target.value)}
+                      sx={{ width: 90 }}
+                    />
+                    <TextField
+                      size="small"
+                      type="number"
+                      placeholder="Max"
+                      value={filters.quantityMax}
+                      onChange={(e) => handleFilterChange('quantityMax', e.target.value)}
+                      sx={{ width: 90 }}
+                    />
+                  </Stack>
+                </TableCell>
+                <TableCell align="right">
+                  <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                    <TextField
+                      size="small"
+                      type="number"
+                      placeholder="Min"
+                      value={filters.priceMin}
+                      onChange={(e) => handleFilterChange('priceMin', e.target.value)}
+                      sx={{ width: 90 }}
+                    />
+                    <TextField
+                      size="small"
+                      type="number"
+                      placeholder="Max"
+                      value={filters.priceMax}
+                      onChange={(e) => handleFilterChange('priceMax', e.target.value)}
+                      sx={{ width: 90 }}
+                    />
+                  </Stack>
+                </TableCell>
+                <TableCell align="right">
+                  <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                    <TextField
+                      size="small"
+                      type="number"
+                      placeholder="Min"
+                      value={filters.feesMin}
+                      onChange={(e) => handleFilterChange('feesMin', e.target.value)}
+                      sx={{ width: 90 }}
+                    />
+                    <TextField
+                      size="small"
+                      type="number"
+                      placeholder="Max"
+                      value={filters.feesMax}
+                      onChange={(e) => handleFilterChange('feesMax', e.target.value)}
+                      sx={{ width: 90 }}
+                    />
+                  </Stack>
+                </TableCell>
+                <TableCell align="right">
+                  <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                    <TextField
+                      size="small"
+                      type="number"
+                      placeholder="Min"
+                      value={filters.totalMin}
+                      onChange={(e) => handleFilterChange('totalMin', e.target.value)}
+                      sx={{ width: 90 }}
+                    />
+                    <TextField
+                      size="small"
+                      type="number"
+                      placeholder="Max"
+                      value={filters.totalMax}
+                      onChange={(e) => handleFilterChange('totalMax', e.target.value)}
+                      sx={{ width: 90 }}
+                    />
+                  </Stack>
+                </TableCell>
+                <TableCell>
+                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
+                    <TextField
+                      size="small"
+                      placeholder="Search description"
+                      value={filters.description}
+                      onChange={(e) => handleFilterChange('description', e.target.value)}
+                      fullWidth
+                    />
+                    <Button variant="text" size="small" onClick={resetFilters}>
+                      Reset
+                    </Button>
+                  </Stack>
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -367,8 +738,14 @@ const Transactions = () => {
                     No transactions found
                   </TableCell>
                 </TableRow>
+              ) : processedTransactions.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} align="center">
+                    No transactions match the selected filters
+                  </TableCell>
+                </TableRow>
               ) : (
-                transactions.map((transaction) => (
+                processedTransactions.map((transaction) => (
                   <TableRow key={transaction.id}>
                     <TableCell>
                       {format(new Date(transaction.date), 'MMM dd, yyyy')}

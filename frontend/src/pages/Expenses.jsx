@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Container,
   Paper,
@@ -28,7 +28,9 @@ import {
   Tabs,
   Tab,
   CircularProgress,
-  Stack
+  Stack,
+  TableSortLabel,
+  Checkbox
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -69,6 +71,15 @@ const PRESET_OPTIONS = [
 
 const DEFAULT_PRESET = 'thisMonth';
 
+const TABLE_FILTER_DEFAULTS = {
+  date: '',
+  description: '',
+  account: '',
+  amountMin: '',
+  amountMax: '',
+  notes: ''
+};
+
 const formatDateToInput = (date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -98,6 +109,11 @@ const Expenses = () => {
   const [conversionJobStatus, setConversionJobStatus] = useState(null);
   const [conversionStage, setConversionStage] = useState(null);
   const [isConversionRunning, setIsConversionRunning] = useState(false);
+  const [tableSortConfig, setTableSortConfig] = useState({ field: 'date', direction: 'desc' });
+  const [tableFilters, setTableFilters] = useState(() => ({ ...TABLE_FILTER_DEFAULTS }));
+  const [selectedExpenseIds, setSelectedExpenseIds] = useState([]);
+  const [bulkCategory, setBulkCategory] = useState('');
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false);
   const conversionPollRef = useRef(null);
   const conversionJobIdRef = useRef(null);
 
@@ -168,6 +184,62 @@ const Expenses = () => {
     setEndDate(value);
     if (value && startDate && value < startDate) {
       setStartDate(value);
+    }
+  };
+
+  const handleTableSort = (field) => {
+    setTableSortConfig((prev) => {
+      if (prev.field === field) {
+        return { field, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { field, direction: 'asc' };
+    });
+  };
+
+  const handleTableFilterChange = (field, value) => {
+    setTableFilters((prev) => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const resetTableFilters = () => {
+    setTableFilters({ ...TABLE_FILTER_DEFAULTS });
+  };
+
+  const toggleExpenseSelection = (expenseId) => {
+    setSelectedExpenseIds((prev) =>
+      prev.includes(expenseId) ? prev.filter((id) => id !== expenseId) : [...prev, expenseId]
+    );
+  };
+
+  const handleSelectAllExpenses = (checked, expensesSource) => {
+    if (!checked) {
+      setSelectedExpenseIds([]);
+      return;
+    }
+    const ids = expensesSource.map((expense) => expense.id);
+    setSelectedExpenseIds(ids);
+  };
+
+  const handleBulkCategoryApply = async () => {
+    if (!bulkCategory || selectedExpenseIds.length === 0) {
+      return;
+    }
+    setIsBulkUpdating(true);
+    try {
+      await Promise.all(selectedExpenseIds.map((expenseId) => expensesAPI.updateExpenseCategory(expenseId, bulkCategory)));
+      showSnackbar(`Updated ${selectedExpenseIds.length} expenses`, 'success');
+      setSelectedExpenseIds([]);
+      setBulkCategory('');
+      await fetchExpenses();
+      await fetchSummary();
+      await fetchMonthlyComparison();
+    } catch (error) {
+      console.error('Error applying bulk category:', error);
+      showSnackbar('Error applying bulk category', 'error');
+    } finally {
+      setIsBulkUpdating(false);
     }
   };
 
@@ -530,6 +602,51 @@ const Expenses = () => {
     return category?.color || '#757575';
   };
 
+  const getAccountLabel = (accountId) => {
+    const account = accounts.find(a => a.id === accountId);
+    return account?.label || 'Unknown';
+  };
+
+  const renderCategoryLabel = (label, fallbackLabel = 'All Categories') => {
+    if (!label) {
+      return <Typography variant="body2">{fallbackLabel}</Typography>;
+    }
+
+    return (
+      <Stack direction="row" alignItems="center" spacing={1}>
+        <Box
+          sx={{
+            width: 12,
+            height: 12,
+            borderRadius: '50%',
+            bgcolor: getCategoryColor(label),
+            border: '1px solid rgba(0,0,0,0.1)'
+          }}
+        />
+        <Typography variant="body2">{label}</Typography>
+      </Stack>
+    );
+  };
+
+  const getSortableValue = (expense, field) => {
+    switch (field) {
+      case 'date':
+        return new Date(expense.date).getTime();
+      case 'description':
+        return String(expense.description || '').toLowerCase();
+      case 'account':
+        return getAccountLabel(expense.account_id).toLowerCase();
+      case 'category':
+        return String(expense.category || 'Uncategorized').toLowerCase();
+      case 'amount':
+        return Number(expense.amount) || 0;
+      case 'notes':
+        return String(expense.notes || '').toLowerCase();
+      default:
+        return expense[field] ?? '';
+    }
+  };
+
   // Prepare chart data
   const categoryData = Object.entries(summary?.by_category || {})
     .map(([category, amount]) => ({
@@ -570,6 +687,76 @@ const Expenses = () => {
   const monthlyByCategoryData = prepareMonthlyByCategoryData();
   const allCategories = [...new Set(monthlyByCategoryData.flatMap(m => Object.keys(m).filter(k => k !== 'month')))];
 
+  const displayedExpenses = useMemo(() => {
+    const normalizedFilters = {
+      description: tableFilters.description.trim().toLowerCase(),
+      account: tableFilters.account.trim().toLowerCase(),
+      notes: tableFilters.notes.trim().toLowerCase()
+    };
+
+    const filtered = expenses.filter((expense) => {
+      const expenseDate = formatDateToInput(new Date(expense.date));
+
+      if (tableFilters.date && expenseDate !== tableFilters.date) {
+        return false;
+      }
+
+      if (normalizedFilters.description) {
+        const description = String(expense.description || '').toLowerCase();
+        if (!description.includes(normalizedFilters.description)) {
+          return false;
+        }
+      }
+
+      if (normalizedFilters.account) {
+        const accountLabel = getAccountLabel(expense.account_id).toLowerCase();
+        if (!accountLabel.includes(normalizedFilters.account)) {
+          return false;
+        }
+      }
+
+      if (tableFilters.amountMin && Number(expense.amount) < Number(tableFilters.amountMin)) {
+        return false;
+      }
+
+      if (tableFilters.amountMax && Number(expense.amount) > Number(tableFilters.amountMax)) {
+        return false;
+      }
+
+      if (normalizedFilters.notes) {
+        const notes = String(expense.notes || '').toLowerCase();
+        if (!notes.includes(normalizedFilters.notes)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      const valueA = getSortableValue(a, tableSortConfig.field);
+      const valueB = getSortableValue(b, tableSortConfig.field);
+
+      if (valueA < valueB) {
+        return tableSortConfig.direction === 'asc' ? -1 : 1;
+      }
+
+      if (valueA > valueB) {
+        return tableSortConfig.direction === 'asc' ? 1 : -1;
+      }
+
+      return 0;
+    });
+
+    return sorted;
+  }, [expenses, tableFilters, tableSortConfig, accounts]);
+
+  useEffect(() => {
+    setSelectedExpenseIds((prev) =>
+      prev.filter((id) => displayedExpenses.some((expense) => expense.id === id))
+    );
+  }, [displayedExpenses]);
+
   if (loading) {
     return (
       <Container maxWidth="xl" sx={{ mt: 4, mb: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
@@ -577,6 +764,9 @@ const Expenses = () => {
       </Container>
     );
   }
+
+  const allDisplayedSelected = displayedExpenses.length > 0 && selectedExpenseIds.length === displayedExpenses.length;
+  const isIndeterminateSelection = selectedExpenseIds.length > 0 && !allDisplayedSelected;
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
@@ -771,53 +961,97 @@ const Expenses = () => {
             </Grid>
           )}
 
-          {/* Expenses Chart */}
-          {expenseData.length > 0 && (
-            <Grid item xs={12} md={4}>
-              <Paper sx={{ p: 3 }}>
-                <Typography variant="h6" gutterBottom color="error.main">
-                  Expenses by Category
-                </Typography>
-                <Box sx={{ height: 250 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={expenseData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                        outerRadius={70}
-                        fill="#8884d8"
-                        dataKey="value"
-                        onClick={(_, index) => {
-                          const selected = expenseData[index];
-                          if (selected) {
-                            setSelectedCategory(selected.name);
-                            setTabValue(1);
-                          }
-                        }}
-                      >
-                        {expenseData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value) => formatCurrency(value)} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </Box>
-                <Box sx={{ mt: 2 }}>
-                  {expenseData.map((item) => (
-                    <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
-                      <Box display="flex" alignItems="center">
-                        <Box sx={{ width: 12, height: 12, backgroundColor: item.color, mr: 1 }} />
-                        <Typography variant="body2">{item.name}</Typography>
+          {/* Expenses & Monthly Trend */}
+          {(expenseData.length > 0 || monthlyTrendData.length > 0) && (
+            <Grid item xs={12}>
+              <Grid container spacing={3} alignItems="stretch">
+                {expenseData.length > 0 && (
+                  <Grid item xs={12} md={4}>
+                    <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+                      <Typography variant="h6" gutterBottom color="error.main">
+                        Expenses by Category
+                      </Typography>
+                      <Box sx={{ flexGrow: 1, minHeight: 250 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={expenseData}
+                              cx="50%"
+                              cy="50%"
+                              labelLine={false}
+                              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                              outerRadius={70}
+                              fill="#8884d8"
+                              dataKey="value"
+                              onClick={(_, index) => {
+                                const selected = expenseData[index];
+                                if (selected) {
+                                  setSelectedCategory(selected.name);
+                                  setTabValue(1);
+                                }
+                              }}
+                            >
+                              {expenseData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(value) => formatCurrency(value)} />
+                          </PieChart>
+                        </ResponsiveContainer>
                       </Box>
-                      <Typography variant="body2">{formatCurrency(item.value)}</Typography>
-                    </Box>
-                  ))}
-                </Box>
-              </Paper>
+                      <Box sx={{ mt: 2 }}>
+                        {expenseData.map((item) => (
+                          <Box key={item.name} display="flex" justifyContent="space-between" mb={1}>
+                            <Box display="flex" alignItems="center">
+                              <Box sx={{ width: 12, height: 12, backgroundColor: item.color, mr: 1 }} />
+                              <Typography variant="body2">{item.name}</Typography>
+                            </Box>
+                            <Typography variant="body2">{formatCurrency(item.value)}</Typography>
+                          </Box>
+                        ))}
+                      </Box>
+                    </Paper>
+                  </Grid>
+                )}
+                <Grid item xs={12} md={expenseData.length > 0 ? 8 : 12}>
+                  <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+                    <Typography variant="h6" gutterBottom>
+                      Monthly Spending Trend
+                    </Typography>
+                    {monthlyTrendData.length > 0 ? (
+                      <Box sx={{ flexGrow: 1, minHeight: 250 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={monthlyTrendData}
+                            onClick={(e) => {
+                              if (!e?.activeLabel) return;
+                              const [year, month] = String(e.activeLabel).split('-').map(Number);
+                              if (!year || !month) return;
+                              const start = formatDateToInput(new Date(year, month - 1, 1));
+                              const end = formatDateToInput(new Date(year, month, 0));
+                              setSelectedPreset('custom');
+                              setStartDate(start);
+                              setEndDate(end);
+                              setTabValue(0);
+                            }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="month" />
+                            <YAxis />
+                            <Tooltip formatter={(value) => formatCurrency(value)} />
+                            <Legend />
+                            <Bar dataKey="total" fill="#82ca9d" name="Total Expenses" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </Box>
+                    ) : (
+                      <Typography color="textSecondary" sx={{ mt: 2 }}>
+                        No expense data available
+                      </Typography>
+                    )}
+                  </Paper>
+                </Grid>
+              </Grid>
             </Grid>
           )}
 
@@ -873,101 +1107,255 @@ const Expenses = () => {
             </Grid>
           )}
 
-          <Grid item xs={12} md={6}>
-            <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Monthly Spending Trend
-              </Typography>
-              {monthlyTrendData.length > 0 ? (
-                <Box sx={{ height: 300 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={monthlyTrendData}
-                        onClick={(e) => {
-                          if (!e?.activeLabel) return;
-                          const [year, month] = String(e.activeLabel).split('-').map(Number);
-                          if (!year || !month) return;
-                          const start = formatDateToInput(new Date(year, month - 1, 1));
-                          const end = formatDateToInput(new Date(year, month, 0));
-                          setSelectedPreset('custom');
-                          setStartDate(start);
-                          setEndDate(end);
-                          setTabValue(0);
-                        }}
-                      >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <Tooltip formatter={(value) => formatCurrency(value)} />
-                      <Legend />
-                      <Bar dataKey="total" fill="#82ca9d" name="Total Expenses" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </Box>
-              ) : (
-                <Typography color="textSecondary">
-                  No expense data available
-                </Typography>
-              )}
-            </Paper>
-          </Grid>
         </Grid>
       )}
 
       {/* Tab 1: Expense List */}
       {tabValue === 1 && (
         <Paper sx={{ p: 2 }}>
+          {selectedExpenseIds.length > 0 && (
+            <Box
+              sx={{
+                mb: 2,
+                p: 2,
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                display: 'flex',
+                flexDirection: { xs: 'column', md: 'row' },
+                gap: 2,
+                alignItems: { xs: 'flex-start', md: 'center' }
+              }}
+            >
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {selectedExpenseIds.length} selected
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: 200 }}>
+                <InputLabel id="bulk-category-select-label">Category</InputLabel>
+                <Select
+                  labelId="bulk-category-select-label"
+                  value={bulkCategory}
+                  label="Category"
+                  onChange={(event) => setBulkCategory(event.target.value)}
+                  renderValue={(value) => renderCategoryLabel(value, 'Choose category')}
+                >
+                  <MenuItem value="">
+                    <em>Select category</em>
+                  </MenuItem>
+                  {categories.map((category) => (
+                    <MenuItem key={category.id} value={category.name}>
+                      {renderCategoryLabel(category.name, category.name)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={handleBulkCategoryApply}
+                  disabled={!bulkCategory || isBulkUpdating}
+                >
+                  {isBulkUpdating ? 'Applying...' : 'Apply'}
+                </Button>
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => {
+                    setSelectedExpenseIds([]);
+                    setBulkCategory('');
+                  }}
+                >
+                  Clear
+                </Button>
+              </Stack>
+            </Box>
+          )}
           <TableContainer>
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell>Date</TableCell>
-                  <TableCell>Description</TableCell>
-                  <TableCell>Account</TableCell>
-                  <TableCell>
-                    <Box>
-                      <Typography variant="body2" fontWeight="bold" gutterBottom>
-                        Category
-                      </Typography>
-                      <FormControl size="small" fullWidth sx={{ minWidth: 150 }}>
-                        <Select
-                          value={selectedCategory}
-                          onChange={(e) => setSelectedCategory(e.target.value)}
-                          displayEmpty
-                          sx={{ bgcolor: 'background.paper' }}
-                        >
-                          <MenuItem value="">All Categories</MenuItem>
-                          {categories.map(category => (
-                            <MenuItem key={category.id} value={category.name}>
-                              {category.name}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    </Box>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      color="primary"
+                      indeterminate={isIndeterminateSelection}
+                      checked={allDisplayedSelected && displayedExpenses.length > 0}
+                      onChange={(event) => handleSelectAllExpenses(event.target.checked, displayedExpenses)}
+                      inputProps={{ 'aria-label': 'Select all expenses' }}
+                    />
                   </TableCell>
-                  <TableCell align="right">Amount</TableCell>
-                  <TableCell>Notes</TableCell>
+                  <TableCell sortDirection={tableSortConfig.field === 'date' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'date'}
+                      direction={tableSortConfig.field === 'date' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('date')}
+                    >
+                      Date
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={tableSortConfig.field === 'description' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'description'}
+                      direction={tableSortConfig.field === 'description' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('description')}
+                    >
+                      Description
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={tableSortConfig.field === 'account' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'account'}
+                      direction={tableSortConfig.field === 'account' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('account')}
+                    >
+                      Account
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={tableSortConfig.field === 'category' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'category'}
+                      direction={tableSortConfig.field === 'category' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('category')}
+                    >
+                      Category
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell align="right" sortDirection={tableSortConfig.field === 'amount' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'amount'}
+                      direction={tableSortConfig.field === 'amount' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('amount')}
+                    >
+                      Amount
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={tableSortConfig.field === 'notes' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'notes'}
+                      direction={tableSortConfig.field === 'notes' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('notes')}
+                    >
+                      Notes
+                    </TableSortLabel>
+                  </TableCell>
                   <TableCell align="center">Actions</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell />
+                  <TableCell>
+                    <TextField
+                      type="date"
+                      size="small"
+                      value={tableFilters.date}
+                      onChange={(e) => handleTableFilterChange('date', e.target.value)}
+                      fullWidth
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <TextField
+                      size="small"
+                      placeholder="Search description"
+                      value={tableFilters.description}
+                      onChange={(e) => handleTableFilterChange('description', e.target.value)}
+                      fullWidth
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <TextField
+                      size="small"
+                      placeholder="Search account"
+                      value={tableFilters.account}
+                      onChange={(e) => handleTableFilterChange('account', e.target.value)}
+                      fullWidth
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <FormControl size="small" fullWidth>
+                      <Select
+                        value={selectedCategory}
+                        onChange={(e) => setSelectedCategory(e.target.value)}
+                        displayEmpty
+                        renderValue={(value) => renderCategoryLabel(value, 'All Categories')}
+                      >
+                        <MenuItem key="all-categories" value="">
+                          <em>All Categories</em>
+                        </MenuItem>
+                        {categories.map((category) => (
+                          <MenuItem key={category.id} value={category.name}>
+                            {renderCategoryLabel(category.name, category.name)}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </TableCell>
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Min"
+                        value={tableFilters.amountMin}
+                        onChange={(e) => handleTableFilterChange('amountMin', e.target.value)}
+                        sx={{ width: 100 }}
+                      />
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Max"
+                        value={tableFilters.amountMax}
+                        onChange={(e) => handleTableFilterChange('amountMax', e.target.value)}
+                        sx={{ width: 100 }}
+                      />
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <TextField
+                      size="small"
+                      placeholder="Search notes"
+                      value={tableFilters.notes}
+                      onChange={(e) => handleTableFilterChange('notes', e.target.value)}
+                      fullWidth
+                    />
+                  </TableCell>
+                  <TableCell align="center">
+                    <Button
+                      variant="text"
+                      size="small"
+                      onClick={() => {
+                        resetTableFilters();
+                        setSelectedCategory('');
+                      }}
+                    >
+                      Reset
+                    </Button>
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {expenses.length === 0 ? (
+                {displayedExpenses.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
+                    <TableCell colSpan={8} align="center">
                       <Typography color="textSecondary" py={3}>
-                        No expenses found. Try adjusting filters or click "Import from Transactions".
+                        No expenses match the selected filters. Try adjusting them or click "Import from Transactions".
                       </Typography>
                     </TableCell>
                   </TableRow>
                 ) : (
-                  expenses.map((expense) => {
-                    const account = accounts.find(a => a.id === expense.account_id);
+                  displayedExpenses.map((expense) => {
+                    const accountLabel = getAccountLabel(expense.account_id);
+                    const isSelected = selectedExpenseIds.includes(expense.id);
                     return (
-                      <TableRow key={expense.id}>
+                      <TableRow key={expense.id} selected={isSelected}>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            color="primary"
+                            checked={isSelected}
+                            onChange={() => toggleExpenseSelection(expense.id)}
+                          />
+                        </TableCell>
                         <TableCell>{formatDate(expense.date)}</TableCell>
                         <TableCell>{expense.description}</TableCell>
-                        <TableCell>{account?.label || 'Unknown'}</TableCell>
+                        <TableCell>{accountLabel}</TableCell>
                         <TableCell>
                           <FormControl size="small" fullWidth>
                             <Select
@@ -983,10 +1371,14 @@ const Expenses = () => {
                                   borderColor: 'rgba(255,255,255,0.5)'
                                 }
                               }}
+                              renderValue={(value) => renderCategoryLabel(value, 'Uncategorized')}
                             >
+                              <MenuItem key="uncategorized-category" value="Uncategorized">
+                                {renderCategoryLabel('Uncategorized', 'Uncategorized')}
+                              </MenuItem>
                               {categories.map(cat => (
                                 <MenuItem key={cat.id} value={cat.name}>
-                                  {cat.name}
+                                  {renderCategoryLabel(cat.name, cat.name)}
                                 </MenuItem>
                               ))}
                             </Select>

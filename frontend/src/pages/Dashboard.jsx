@@ -18,7 +18,9 @@ import {
   Menu,
   useTheme,
   useMediaQuery,
-  Tooltip
+  Tooltip,
+  Tabs,
+  Tab
 } from '@mui/material';
 import {
   TrendingUp,
@@ -28,9 +30,13 @@ import {
   Refresh,
   Lock,
   LockOpen,
-  Menu as MenuIcon
+  Menu as MenuIcon,
+  AccountBalanceWallet,
+  CreditCard,
+  Savings,
+  Wallet
 } from '@mui/icons-material';
-import { accountsAPI, positionsAPI, dividendsAPI, dashboardAPI } from '../services/api';
+import { accountsAPI, positionsAPI, dividendsAPI, dashboardAPI, transactionsAPI } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Responsive, WidthProvider, utils as RGLUtils } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
@@ -41,6 +47,13 @@ const { compact } = RGLUtils || {};
 const ROW_HEIGHT = 120;
 const GRID_MARGIN = [16, 16];
 const DRAG_START_DELAY = 300;
+const INSIGHT_TABS = [
+  { id: 'performance', label: 'Performance' },
+  { id: 'types', label: 'Asset Types' },
+  { id: 'industries', label: 'Industries' }
+];
+const INSIGHT_AUTO_INTERVAL = 10000;
+const INSIGHT_INTERACTION_TIMEOUT = 20000;
 
 const LAYOUT_PROFILES = [
   'desktop',
@@ -396,7 +409,46 @@ const renderColorSwatch = (color) => (
   />
 );
 
-const StatCard = ({ title, value, icon, color, subtitle }) => (
+const getAccountTypeIcon = (accountType) => {
+  const normalized = String(accountType || '').toLowerCase();
+  const iconProps = { fontSize: 'small' };
+
+  switch (normalized) {
+    case 'credit_card':
+      return <CreditCard {...iconProps} />;
+    case 'savings':
+      return <Savings {...iconProps} />;
+    case 'investment':
+    case 'brokerage':
+      return <TrendingUp {...iconProps} />;
+    case 'checking':
+    case 'chequing':
+      return <AccountBalanceWallet {...iconProps} />;
+    default:
+      return <Wallet {...iconProps} />;
+  }
+};
+
+const formatAccountTypeLabel = (accountType) => {
+  if (!accountType) {
+    return 'Account';
+  }
+  return String(accountType)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const getTileScale = (layoutItem) => {
+  if (!layoutItem) {
+    return 1;
+  }
+  const widthFactor = (layoutItem.w || 3) / 3;
+  const heightFactor = Math.max(layoutItem.h || 1, 1) / 1.2;
+  const combined = (widthFactor + heightFactor) / 2;
+  return Math.max(0.75, Math.min(combined, 2));
+};
+
+const StatCard = ({ title, value, icon, color, subtitle, sizeFactor = 1 }) => (
   <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
     <CardContent sx={{ flexGrow: 1 }}>
       <Typography
@@ -413,9 +465,9 @@ const StatCard = ({ title, value, icon, color, subtitle }) => (
             sx={{
               fontWeight: 600,
               fontSize: {
-                xs: 'clamp(1.5rem, 6vw, 2.5rem)',
-                sm: 'clamp(1.4rem, 4vw, 2.8rem)',
-                lg: 'clamp(1.2rem, 2vw, 3rem)'
+                xs: `clamp(${1.1 * sizeFactor}rem, ${4 * sizeFactor}vw, ${2.4 * sizeFactor}rem)`,
+                sm: `clamp(${1.1 * sizeFactor}rem, ${3 * sizeFactor}vw, ${2.6 * sizeFactor}rem)`,
+                lg: `clamp(${1.1 * sizeFactor}rem, ${2 * sizeFactor}vw, ${2.8 * sizeFactor}rem)`
               },
               lineHeight: 1.1
             }}
@@ -427,8 +479,8 @@ const StatCard = ({ title, value, icon, color, subtitle }) => (
               sx={{
                 color: color || 'textSecondary',
                 fontSize: {
-                  xs: 'clamp(0.75rem, 3vw, 0.95rem)',
-                  lg: 'clamp(0.8rem, 1vw, 1rem)'
+                  xs: `clamp(${0.7 * sizeFactor}rem, ${2.5 * sizeFactor}vw, ${0.95 * sizeFactor}rem)`,
+                  lg: `clamp(${0.75 * sizeFactor}rem, ${1 * sizeFactor}vw, ${1 * sizeFactor}rem)`
                 }
               }}
             >
@@ -447,6 +499,7 @@ const StatCard = ({ title, value, icon, color, subtitle }) => (
 const Dashboard = () => {
   const [summary, setSummary] = useState(null);
   const [accounts, setAccounts] = useState([]);
+  const [accountBalances, setAccountBalances] = useState({});
   const [dividendSummary, setDividendSummary] = useState(null);
   const [industryBreakdown, setIndustryBreakdown] = useState([]);
   const [typeBreakdown, setTypeBreakdown] = useState([]);
@@ -466,11 +519,14 @@ const Dashboard = () => {
   const [performanceYear, setPerformanceYear] = useState('');
   const [performanceData, setPerformanceData] = useState([]);
   const [performanceLoading, setPerformanceLoading] = useState(false);
+  const [insightActiveTab, setInsightActiveTab] = useState(INSIGHT_TABS[0].id);
+  const [isInsightInteracting, setIsInsightInteracting] = useState(false);
   const theme = useTheme();
   const isCompactToolbar = useMediaQuery(theme.breakpoints.down('sm'));
   const [toolbarMenuAnchor, setToolbarMenuAnchor] = useState(null);
   const isToolbarMenuOpen = Boolean(toolbarMenuAnchor);
   const [isLayoutLocked, setIsLayoutLocked] = useState(true);
+  const insightInteractionTimeoutRef = useRef(null);
 
   const valuationDate = useMemo(
     () => computeValuationDate(datePreset, specificMonth, endOfYear),
@@ -502,6 +558,56 @@ const Dashboard = () => {
     fetchLayoutForProfile('desktop', true);
   }, [fetchLayoutForProfile]);
 
+  const clearInsightTimeout = useCallback(() => {
+    if (insightInteractionTimeoutRef.current) {
+      clearTimeout(insightInteractionTimeoutRef.current);
+      insightInteractionTimeoutRef.current = null;
+    }
+  }, []);
+
+  const pauseInsights = useCallback(() => {
+    setIsInsightInteracting(true);
+    clearInsightTimeout();
+  }, [clearInsightTimeout]);
+
+  const resumeInsightsAfter = useCallback(
+    (delay = INSIGHT_INTERACTION_TIMEOUT) => {
+      clearInsightTimeout();
+      insightInteractionTimeoutRef.current = setTimeout(() => {
+        setIsInsightInteracting(false);
+      }, delay);
+    },
+    [clearInsightTimeout]
+  );
+
+  const advanceInsightTab = useCallback(() => {
+    setInsightActiveTab((prev) => {
+      const currentIndex = INSIGHT_TABS.findIndex((tab) => tab.id === prev);
+      if (currentIndex === -1) {
+        return INSIGHT_TABS[0].id;
+      }
+      return INSIGHT_TABS[(currentIndex + 1) % INSIGHT_TABS.length].id;
+    });
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (isInsightInteracting) {
+        return;
+      }
+      advanceInsightTab();
+    }, INSIGHT_AUTO_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [advanceInsightTab, isInsightInteracting]);
+
+  useEffect(
+    () => () => {
+      clearInsightTimeout();
+    },
+    [clearInsightTimeout]
+  );
+
   useEffect(() => {
     if (!currentProfile || currentProfile === 'desktop') {
       return;
@@ -519,6 +625,29 @@ const Dashboard = () => {
   const handleToolbarMenuClose = useCallback(() => {
     setToolbarMenuAnchor(null);
   }, []);
+
+  const handleInsightTabChange = useCallback(
+    (event, newValue) => {
+      if (!newValue) {
+        return;
+      }
+      setInsightActiveTab(newValue);
+      pauseInsights();
+      resumeInsightsAfter(INSIGHT_INTERACTION_TIMEOUT);
+    },
+    [pauseInsights, resumeInsightsAfter]
+  );
+
+  const handleInsightHover = useCallback(
+    (isHovering) => {
+      if (isHovering) {
+        pauseInsights();
+      } else {
+        resumeInsightsAfter(2000);
+      }
+    },
+    [pauseInsights, resumeInsightsAfter]
+  );
 
   const fetchPerformanceSeries = useCallback(async () => {
     const dates = computePerformanceDates(performanceRange, performanceMonth, performanceYear);
@@ -585,6 +714,42 @@ const Dashboard = () => {
 
     fetchData();
   }, [valuationDate, layoutLoading]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadBalances = async () => {
+      if (accounts.length === 0) {
+        if (!isCancelled) {
+          setAccountBalances({});
+        }
+        return;
+      }
+
+      const results = await Promise.all(
+        accounts.map(async (account) => {
+          try {
+            const response = await transactionsAPI.getBalance(account.id);
+            const value = response.data?.balance ?? account.balance ?? 0;
+            return [account.id, value];
+          } catch (error) {
+            console.error(`Error fetching balance for account ${account.id}:`, error);
+            return [account.id, account.balance ?? 0];
+          }
+        })
+      );
+
+      if (!isCancelled) {
+        setAccountBalances(Object.fromEntries(results));
+      }
+    };
+
+    loadBalances();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [accounts]);
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('en-CA', {
@@ -803,6 +968,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
     : new Date().toLocaleDateString();
 
   const renderTile = (id, layoutItem) => {
+    const tileScale = getTileScale(layoutItem);
     switch (id) {
       case 'total_value':
         return (
@@ -811,6 +977,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             value={formatCurrency(summary?.total_market_value || 0)}
             icon={<AccountBalance fontSize="large" />}
             color="primary.main"
+            sizeFactor={tileScale}
           />
         );
       case 'book_value':
@@ -820,6 +987,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             value={formatCurrency(summary?.total_book_value || 0)}
             icon={<AccountBalance fontSize="large" />}
             color="info.main"
+            sizeFactor={tileScale}
           />
         );
       case 'capital_gains':
@@ -830,6 +998,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             icon={gainLossIcon}
             color={gainLossColor}
             subtitle={`${summary?.total_gain_loss_percent?.toFixed(2) || 0}%`}
+            sizeFactor={tileScale}
           />
         );
       case 'dividends':
@@ -839,6 +1008,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             value={formatCurrency(totalDividends)}
             icon={<AttachMoney fontSize="large" />}
             color="success.main"
+            sizeFactor={tileScale}
           />
         );
       case 'total_gains':
@@ -849,6 +1019,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             icon={<TrendingUp fontSize="large" />}
             color={totalGains >= 0 ? 'success.main' : 'error.main'}
             subtitle="Capital gains + dividends"
+            sizeFactor={tileScale}
           />
         );
       case 'accounts_summary':
@@ -859,6 +1030,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             icon={<AccountBalance fontSize="large" />}
             color="info.main"
             subtitle={`${summary?.positions_count || 0} positions`}
+            sizeFactor={tileScale}
           />
         );
       case 'industry_breakdown':
@@ -882,9 +1054,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                       data={industryBreakdown}
                       dataKey="market_value"
                       nameKey="industry_name"
-                      innerRadius="40%"
-                      outerRadius="70%"
-                      paddingAngle={2}
+                      innerRadius="25%"
+                      outerRadius="90%"
+                      paddingAngle={1}
+                      cx="50%"
+                      cy="50%"
                     >
                       {industryBreakdown.map((slice) => (
                         <Cell
@@ -964,9 +1138,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                       data={typeBreakdown}
                       dataKey="market_value"
                       nameKey="type_name"
-                      innerRadius="40%"
-                      outerRadius="70%"
-                      paddingAngle={2}
+                      innerRadius="25%"
+                      outerRadius="90%"
+                      paddingAngle={1}
+                      cx="50%"
+                      cy="50%"
                     >
                       {typeBreakdown.map((slice) => (
                         <Cell
@@ -1025,99 +1201,178 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             )}
           </Paper>
         );
-      case 'performance':
-        return (
-          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Typography
-              variant="caption"
-              color="textSecondary"
-              className="dashboard-tile-handle"
-              sx={{ letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'move', mb: 2 }}
-            >
-              Portfolio Performance
-            </Typography>
-            <Stack
-              direction={{ xs: 'column', md: 'row' }}
-              spacing={2}
-              alignItems={{ xs: 'flex-start', md: 'center' }}
-              sx={{ mb: 2 }}
-            >
-              <FormControl size="small" sx={{ minWidth: 200 }}>
-                <InputLabel id="performance-range-label">Range</InputLabel>
-                <Select
-                  labelId="performance-range-label"
-                  value={performanceRange}
-                  label="Range"
-                  onChange={(event) => setPerformanceRange(event.target.value)}
+      case 'performance': {
+        const chartHeight = Math.max(ROW_HEIGHT * (layoutItem?.h || 2) - 140, 220);
+
+        const renderPieChart = (data, valueKey, nameKey, idKey, emptyMessage) => {
+          if (data.length === 0) {
+            return <Typography color="textSecondary">{emptyMessage}</Typography>;
+          }
+          return (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={data}
+                  dataKey={valueKey}
+                  nameKey={nameKey}
+                  innerRadius="25%"
+                  outerRadius="90%"
+                  paddingAngle={1}
+                  cx="50%"
+                  cy="50%"
                 >
-                  <MenuItem value={PERFORMANCE_PRESETS.LAST_MONTH}>Last Month</MenuItem>
-                  <MenuItem value={PERFORMANCE_PRESETS.LAST_3_MONTHS}>Last 3 Months</MenuItem>
-                  <MenuItem value={PERFORMANCE_PRESETS.LAST_6_MONTHS}>Last 6 Months</MenuItem>
-                  <MenuItem value={PERFORMANCE_PRESETS.LAST_YEAR}>Last Year</MenuItem>
-                  <MenuItem value={PERFORMANCE_PRESETS.YEAR_TO_DATE}>Year to Date</MenuItem>
-                  <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_MONTH}>Specific Month</MenuItem>
-                  <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_YEAR}>Specific Year</MenuItem>
-                </Select>
-              </FormControl>
-              {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_MONTH && (
-                <TextField
-                  label="Month"
-                  type="month"
-                  size="small"
-                  value={performanceMonth}
-                  onChange={(event) => setPerformanceMonth(event.target.value)}
-                  InputLabelProps={{ shrink: true }}
+                  {data.map((slice, index) => {
+                    const sliceKey = slice[idKey] || slice.id || slice[nameKey] || `${nameKey}-${index}`;
+                    return <Cell key={sliceKey} fill={slice.color || '#b0bec5'} />;
+                  })}
+                </Pie>
+                <RechartsTooltip
+                  formatter={(value, name, payload) => [
+                    `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
+                    payload?.payload?.[nameKey] || name
+                  ]}
                 />
-              )}
-              {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_YEAR && (
-                <TextField
-                  label="Year"
-                  type="number"
-                  size="small"
-                  value={performanceYear}
-                  onChange={(event) => setPerformanceYear(event.target.value)}
-                  InputProps={{ inputProps: { min: 1900, max: 9999 } }}
-                />
-              )}
-            </Stack>
-            <Box sx={{ flexGrow: 1, minHeight: ROW_HEIGHT * (layoutItem?.h || 2) - 80 }}>
-              {performanceLoading ? (
-                <Typography color="textSecondary">Loading performance…</Typography>
-              ) : performanceData.length === 0 ? (
-                <Typography color="textSecondary">
-                  No performance data for the selected range.
+              </PieChart>
+            </ResponsiveContainer>
+          );
+        };
+
+        let insightBody;
+        if (insightActiveTab === 'performance') {
+          insightBody = performanceLoading ? (
+            <Typography color="textSecondary">Loading performance…</Typography>
+          ) : performanceData.length === 0 ? (
+            <Typography color="textSecondary">No performance data for the selected range.</Typography>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={performanceData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="label" />
+                <YAxis />
+                <RechartsTooltip formatter={(value) => formatCurrency(value)} />
+                <Legend />
+                <Line type="monotone" dataKey="market_value" stroke="#1976d2" name="Market Value" dot={false} />
+                <Line type="monotone" dataKey="book_value" stroke="#9c27b0" name="Book Value" dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          );
+        } else if (insightActiveTab === 'types') {
+          insightBody = renderPieChart(
+            typeBreakdown,
+            'market_value',
+            'type_name',
+            'type_id',
+            'Assign instrument types to view this chart.'
+          );
+        } else {
+          insightBody = renderPieChart(
+            industryBreakdown,
+            'market_value',
+            'industry_name',
+            'industry_id',
+            'Classify positions to view this chart.'
+          );
+        }
+
+        const footerText =
+          insightActiveTab === 'performance'
+            ? 'Values are sampled at closing balances for the selected period.'
+            : insightActiveTab === 'types'
+              ? 'Allocation based on the instrument type assigned to each position.'
+              : 'Breakdown based on industry classifications.';
+
+        return (
+          <Paper
+            sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}
+            onMouseEnter={() => handleInsightHover(true)}
+            onMouseLeave={() => handleInsightHover(false)}
+          >
+            <Box
+              display="flex"
+              justifyContent="space-between"
+              alignItems={{ xs: 'flex-start', md: 'center' }}
+              flexWrap="wrap"
+              gap={2}
+              className="dashboard-tile-handle"
+              sx={{ cursor: 'move' }}
+            >
+              <Box>
+                <Typography variant="caption" color="textSecondary" sx={{ letterSpacing: '.08em', textTransform: 'uppercase' }}>
+                  Portfolio Insights
                 </Typography>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={performanceData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="label" />
-                    <YAxis />
-                    <RechartsTooltip formatter={(value) => formatCurrency(value)} />
-                    <Legend />
-                    <Line
-                      type="monotone"
-                      dataKey="market_value"
-                      stroke="#1976d2"
-                      name="Market Value"
-                      dot={false}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="book_value"
-                      stroke="#9c27b0"
-                      name="Book Value"
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
+                <Typography variant="body2" color="textSecondary">
+                  {insightActiveTab === 'performance' ? `As of ${asOfLabel}` : 'Auto rotating highlights'}
+                </Typography>
+              </Box>
+              <Tabs
+                value={insightActiveTab}
+                onChange={handleInsightTabChange}
+                variant="scrollable"
+                scrollButtons="auto"
+                textColor="primary"
+                indicatorColor="primary"
+              >
+                {INSIGHT_TABS.map((tab) => (
+                  <Tab key={tab.id} label={tab.label} value={tab.id} disableRipple />
+                ))}
+              </Tabs>
             </Box>
+
+            {insightActiveTab === 'performance' && (
+              <Stack
+                direction={{ xs: 'column', md: 'row' }}
+                spacing={2}
+                alignItems={{ xs: 'flex-start', md: 'center' }}
+                sx={{ mt: 2 }}
+              >
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel id="performance-range-label">Range</InputLabel>
+                  <Select
+                    labelId="performance-range-label"
+                    value={performanceRange}
+                    label="Range"
+                    onChange={(event) => setPerformanceRange(event.target.value)}
+                  >
+                    <MenuItem value={PERFORMANCE_PRESETS.LAST_MONTH}>Last Month</MenuItem>
+                    <MenuItem value={PERFORMANCE_PRESETS.LAST_3_MONTHS}>Last 3 Months</MenuItem>
+                    <MenuItem value={PERFORMANCE_PRESETS.LAST_6_MONTHS}>Last 6 Months</MenuItem>
+                    <MenuItem value={PERFORMANCE_PRESETS.LAST_YEAR}>Last Year</MenuItem>
+                    <MenuItem value={PERFORMANCE_PRESETS.YEAR_TO_DATE}>Year to Date</MenuItem>
+                    <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_MONTH}>Specific Month</MenuItem>
+                    <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_YEAR}>Specific Year</MenuItem>
+                  </Select>
+                </FormControl>
+                {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_MONTH && (
+                  <TextField
+                    label="Month"
+                    type="month"
+                    size="small"
+                    value={performanceMonth}
+                    onChange={(event) => setPerformanceMonth(event.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                )}
+                {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_YEAR && (
+                  <TextField
+                    label="Year"
+                    type="number"
+                    size="small"
+                    value={performanceYear}
+                    onChange={(event) => setPerformanceYear(event.target.value)}
+                    InputProps={{ inputProps: { min: 1900, max: 9999 } }}
+                  />
+                )}
+              </Stack>
+            )}
+
+            <Box sx={{ flexGrow: 1, minHeight: chartHeight, mt: 2 }}>{insightBody}</Box>
+
             <Typography variant="caption" color="textSecondary" sx={{ mt: 2 }}>
-              Values are sampled at closing balances for the selected period.
+              {footerText}
             </Typography>
           </Paper>
         );
+      }
       case 'accounts_list':
         return (
           <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -1136,40 +1391,49 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                 </Typography>
               ) : (
                 <Grid container spacing={2}>
-                  {accounts.map((account) => (
-                    <Grid item xs={12} sm={6} md={4} key={account.id}>
-                      <Paper
-                        variant="outlined"
-                        sx={{
-                          p: 2,
-                          height: '100%',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 0.5
-                        }}
-                      >
-                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                          {account.label || account.institution}
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          {account.institution} · {account.account_type}
-                        </Typography>
-                        {account.account_number && (
-                          <Typography variant="caption" color="textSecondary">
-                            #{account.account_number}
-                          </Typography>
-                        )}
-                        <Box sx={{ mt: 1, display: 'flex', alignItems: 'baseline', gap: 1 }}>
-                          <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
-                            {formatCurrency(account.balance ?? 0)}
-                          </Typography>
-                          <Typography variant="caption" color="textSecondary">
-                            balance
-                          </Typography>
-                        </Box>
-                      </Paper>
-                    </Grid>
-                  ))}
+                  {accounts.map((account) => {
+                    const derivedBalance = accountBalances[account.id] ?? account.balance ?? 0;
+                    const typeLabel = formatAccountTypeLabel(account.account_type);
+                    return (
+                      <Grid item xs={12} sm={6} md={4} key={account.id}>
+                        <Paper
+                          variant="outlined"
+                          sx={{
+                            p: 2,
+                            height: '100%',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 0.5
+                          }}
+                        >
+                          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                            <Box>
+                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                                {account.label || account.institution}
+                              </Typography>
+                              <Typography variant="body2" color="textSecondary">
+                                {account.institution}
+                                {account.account_number ? ` · #${account.account_number}` : ''}
+                              </Typography>
+                            </Box>
+                            <Tooltip title={typeLabel}>
+                              <Box color="text.secondary" display="flex" alignItems="center">
+                                {getAccountTypeIcon(account.account_type)}
+                              </Box>
+                            </Tooltip>
+                          </Stack>
+                          <Box sx={{ mt: 1, display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                            <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
+                              {formatCurrency(derivedBalance)}
+                            </Typography>
+                            <Typography variant="caption" color="textSecondary">
+                              balance
+                            </Typography>
+                          </Box>
+                        </Paper>
+                      </Grid>
+                    );
+                  })}
                 </Grid>
               )}
             </Box>
