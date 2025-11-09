@@ -1,64 +1,67 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import timedelta
+from sqlalchemy.orm import Session
 from app.models.schemas import User, UserCreate, UserLogin, Token, TwoFactorSetup, TwoFactorVerify, TwoFactorDisable
 from app.services.auth import verify_password, get_password_hash, create_access_token, decode_access_token
 from app.services.two_factor import TwoFactorService
-from app.database.json_db import get_db
+from app.database.postgres_db import get_db as get_session
+from app.database.db_service import get_db_service
 from app.config import settings
 import secrets
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
+async def get_current_user(token: str = Depends(oauth2_scheme), session: Session = Depends(get_session)) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     token_data = decode_access_token(token)
     if token_data is None or token_data.email is None:
         raise credentials_exception
-    
-    db = get_db()
+
+    db = get_db_service(session)
     user_doc = db.find_one("users", {"email": token_data.email})
-    
+
     if user_doc is None:
         raise credentials_exception
-    
+
     return User(**user_doc)
 
 @router.post("/register", response_model=User)
-async def register(user: UserCreate):
-    db = get_db()
-    
+async def register(user: UserCreate, session: Session = Depends(get_session)):
+    db = get_db_service(session)
+
     existing_user = db.find_one("users", {"email": user.email})
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
-    
+
     hashed_password = get_password_hash(user.password)
-    
+
     user_doc = {
         "email": user.email,
-        "password_hash": hashed_password
+        "hashed_password": hashed_password
     }
-    
+
     created_user = db.insert("users", user_doc)
-    
+    session.commit()
+
     return User(**created_user)
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    db = get_db()
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: Session = Depends(get_session)):
+    db = get_db_service(session)
 
     user_doc = db.find_one("users", {"email": form_data.username})
 
-    if not user_doc or not verify_password(form_data.password, user_doc["password_hash"]):
+    if not user_doc or not verify_password(form_data.password, user_doc["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -94,9 +97,9 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
 # 2FA Endpoints
 
 @router.post("/2fa/setup", response_model=TwoFactorSetup)
-async def setup_2fa(current_user: User = Depends(get_current_user)):
+async def setup_2fa(current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     """Generate a new 2FA secret and QR code for setup"""
-    db = get_db()
+    db = get_db_service(session)
 
     # Generate secret and QR code
     secret = TwoFactorService.generate_secret()
@@ -116,6 +119,7 @@ async def setup_2fa(current_user: User = Depends(get_current_user)):
             "two_factor_enabled": False
         }
     )
+    session.commit()
 
     return {
         "secret": secret,
@@ -124,9 +128,9 @@ async def setup_2fa(current_user: User = Depends(get_current_user)):
     }
 
 @router.post("/2fa/enable")
-async def enable_2fa(verify_data: TwoFactorVerify, current_user: User = Depends(get_current_user)):
+async def enable_2fa(verify_data: TwoFactorVerify, current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     """Verify the setup code and enable 2FA"""
-    db = get_db()
+    db = get_db_service(session)
 
     user_doc = db.find_one("users", {"email": current_user.email})
 
@@ -149,13 +153,14 @@ async def enable_2fa(verify_data: TwoFactorVerify, current_user: User = Depends(
         {"email": current_user.email},
         {"two_factor_enabled": True}
     )
+    session.commit()
 
     return {"message": "2FA enabled successfully"}
 
 @router.post("/2fa/verify", response_model=Token)
-async def verify_2fa(verify_data: TwoFactorVerify, temp_token: str):
+async def verify_2fa(verify_data: TwoFactorVerify, temp_token: str, session: Session = Depends(get_session)):
     """Verify 2FA code during login"""
-    db = get_db()
+    db = get_db_service(session)
 
     # Decode temp token
     token_data = decode_access_token(temp_token)
@@ -193,6 +198,7 @@ async def verify_2fa(verify_data: TwoFactorVerify, temp_token: str):
                 {"email": token_data.email},
                 {"two_factor_backup_codes": backup_codes}
             )
+            session.commit()
 
     if not is_valid:
         raise HTTPException(
@@ -210,9 +216,9 @@ async def verify_2fa(verify_data: TwoFactorVerify, temp_token: str):
     return {"access_token": access_token, "token_type": "bearer", "requires_2fa": False}
 
 @router.post("/2fa/disable")
-async def disable_2fa(disable_data: TwoFactorDisable, current_user: User = Depends(get_current_user)):
+async def disable_2fa(disable_data: TwoFactorDisable, current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     """Disable 2FA (requires password + current 2FA code)"""
-    db = get_db()
+    db = get_db_service(session)
 
     user_doc = db.find_one("users", {"email": current_user.email})
 
@@ -223,7 +229,7 @@ async def disable_2fa(disable_data: TwoFactorDisable, current_user: User = Depen
         )
 
     # Verify password
-    if not verify_password(disable_data.password, user_doc["password_hash"]):
+    if not verify_password(disable_data.password, user_doc["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect password"
@@ -252,6 +258,7 @@ async def disable_2fa(disable_data: TwoFactorDisable, current_user: User = Depen
             "two_factor_backup_codes": None
         }
     )
+    session.commit()
 
     return {"message": "2FA disabled successfully"}
 

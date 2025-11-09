@@ -3,9 +3,11 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
-from app.database.json_db import get_db
+from app.database.postgres_db import get_db as get_session
+from app.database.db_service import get_db_service
 from app.models.schemas import User
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -213,13 +215,14 @@ def _coerce_layout_container(value: Any) -> Dict[str, List[dict]]:
 @router.get("/layout")
 async def get_layout(
     profile: str = "desktop",
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
     profile = _normalize_profile(profile)
-    db = get_db()
+    db = get_db_service(session)
     record = db.find_one("dashboard_layouts", {"user_id": current_user.id})
     if record:
-        container = _coerce_layout_container(record.get("layout") or record.get("layout_data"))
+        container = _coerce_layout_container(record.get("layout_data") or record.get("layout"))
         profile_layout = container.get(profile)
         layout = _sanitize_layout(profile_layout, profile)
         return {"layout": layout, "profile": profile, "source": "custom"}
@@ -229,27 +232,30 @@ async def get_layout(
 @router.put("/layout")
 async def save_layout(
     payload: DashboardLayoutUpdate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
     profile = _normalize_profile(payload.profile)
     layout = _sanitize_layout(payload.layout, profile)
-    db = get_db()
+    db = get_db_service(session)
     existing = db.find_one("dashboard_layouts", {"user_id": current_user.id})
     if existing:
-        container = _coerce_layout_container(existing.get("layout") or existing.get("layout_data"))
+        container = _coerce_layout_container(existing.get("layout_data") or existing.get("layout"))
         container[profile] = layout
         db.update("dashboard_layouts", existing["id"], {"layout_data": container})
     else:
         db.insert("dashboard_layouts", {"user_id": current_user.id, "layout_data": {profile: layout}})
+    session.commit()
     return {"layout": layout, "profile": profile}
 
 
 @router.delete("/layout")
 async def reset_layout(
     profile: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     profile = _normalize_profile(profile) if profile else None
     record = db.find_one("dashboard_layouts", {"user_id": current_user.id})
     if not record:
@@ -259,13 +265,15 @@ async def reset_layout(
 
     if not profile:
         db.delete("dashboard_layouts", {"user_id": current_user.id})
+        session.commit()
         return {"layout": _get_profile_defaults("desktop"), "profile": "desktop", "source": "default"}
 
-    container = _coerce_layout_container(record.get("layout") or record.get("layout_data"))
+    container = _coerce_layout_container(record.get("layout_data") or record.get("layout"))
     if profile in container:
         del container[profile]
         if container:
             db.update("dashboard_layouts", record["id"], {"layout_data": container})
         else:
             db.delete("dashboard_layouts", {"user_id": current_user.id})
+        session.commit()
     return {"layout": _get_profile_defaults(profile), "profile": profile, "source": "default"}

@@ -2,9 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
 from datetime import datetime
 from collections import defaultdict
+from sqlalchemy.orm import Session
 from app.models.schemas import Dividend, DividendCreate, DividendSummary, User
 from app.api.auth import get_current_user
-from app.database.json_db import get_db
+from app.database.postgres_db import get_db as get_session
+from app.database.db_service import get_db_service
 
 router = APIRouter(prefix="/dividends", tags=["dividends"])
 
@@ -56,20 +58,22 @@ def _filter_dividends_by_date(dividends, start_dt: Optional[datetime], end_dt: O
 @router.post("", response_model=Dividend)
 async def create_dividend(
     dividend: DividendCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     account = db.find_one("accounts", {"id": dividend.account_id, "user_id": current_user.id})
     if not account:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found"
         )
-    
+
     dividend_doc = dividend.model_dump()
     created_dividend = db.insert("dividends", dividend_doc)
-    
+    session.commit()
+
     return Dividend(**created_dividend)
 
 @router.get("", response_model=List[Dividend])
@@ -80,9 +84,10 @@ async def get_dividends(
     end_date: Optional[str] = None,
     instrument_type_id: Optional[str] = None,
     instrument_industry_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     start_dt = _parse_date(start_date, end_of_day=False)
     end_dt = _parse_date(end_date, end_of_day=True)
 
@@ -142,9 +147,10 @@ async def get_dividend_summary(
     end_date: Optional[str] = None,
     instrument_type_id: Optional[str] = None,
     instrument_industry_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     start_dt = _parse_date(start_date, end_of_day=False)
     end_dt = _parse_date(end_date, end_of_day=True)
 
@@ -251,24 +257,26 @@ async def get_dividend_summary(
 @router.delete("/{dividend_id}")
 async def delete_dividend(
     dividend_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     existing_dividend = db.find_one("dividends", {"id": dividend_id})
     if not existing_dividend:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Dividend not found"
         )
-    
+
     account = db.find_one("accounts", {"id": existing_dividend["account_id"], "user_id": current_user.id})
     if not account:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to delete this dividend"
         )
-    
+
     db.delete("dividends", {"id": dividend_id})
-    
+    session.commit()
+
     return {"message": "Dividend deleted successfully"}

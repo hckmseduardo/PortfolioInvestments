@@ -1,7 +1,7 @@
 """
 SQLAlchemy ORM Models for PostgreSQL
 """
-from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Text, Enum as SQLEnum, Integer
+from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Text, Enum as SQLEnum, Integer, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -34,9 +34,26 @@ class User(Base):
 
     id = Column(String, primary_key=True)
     email = Column(String, unique=True, nullable=False, index=True)
-    hashed_password = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=True)  # Nullable for Entra-only users
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    migrated_from_json = Column(DateTime, nullable=True)  # Track when data was migrated
+
+    # Authentication provider tracking
+    auth_provider = Column(String, default="local", nullable=False)  # "local", "entra", "hybrid"
+
+    # Microsoft Entra ID fields
+    entra_id = Column(String, unique=True, nullable=True, index=True)  # Azure AD Object ID
+    entra_tenant_id = Column(String, nullable=True)
+    entra_email_verified = Column(Boolean, default=False, nullable=False)
+    entra_linked_at = Column(DateTime, nullable=True)
+
+    # Account linking
+    account_linked = Column(Boolean, default=False, nullable=False)  # Traditional account linked to Entra
+    linked_at = Column(DateTime, nullable=True)
+
+    # Two-Factor Authentication (for local auth)
+    two_factor_enabled = Column(Boolean, default=False, nullable=False)
+    two_factor_secret = Column(String, nullable=True)
+    two_factor_backup_codes = Column(Text, nullable=True)  # JSON array stored as text
 
     # Relationships
     accounts = relationship("Account", back_populates="user", cascade="all, delete-orphan")

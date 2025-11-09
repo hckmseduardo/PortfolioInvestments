@@ -6,10 +6,12 @@ from pathlib import Path
 import logging
 from datetime import datetime
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from rq.exceptions import NoSuchJobError
 from app.models.schemas import User, Statement
 from app.api.auth import get_current_user
-from app.database.json_db import get_db
+from app.database.postgres_db import get_db as get_session
+from app.database.db_service import get_db_service
 from app.parsers.wealthsimple_parser import WealthsimpleParser
 from app.parsers.tangerine_parser import TangerineParser
 from app.parsers.nbc_parser import NBCParser
@@ -340,7 +342,8 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
 async def import_statement(
     file: UploadFile = File(...),
     account_id: str = Form(...),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
     if not allowed_file(file.filename):
         raise HTTPException(
@@ -348,7 +351,7 @@ async def import_statement(
             detail=f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
         )
 
-    db = get_db()
+    db = get_db_service(session)
 
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
@@ -393,6 +396,7 @@ async def import_statement(
         "debit_volume": 0
     }
     statement = db.insert("statements", statement_doc)
+    session.commit()
 
     # Automatically enqueue processing job
     job = enqueue_statement_job(
@@ -413,9 +417,10 @@ async def import_statement(
 @router.post("/statements/{statement_id}/process")
 async def process_statement(
     statement_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     statement = db.find_one("statements", {"id": statement_id, "user_id": current_user.id})
 
     if not statement:
@@ -435,6 +440,7 @@ async def process_statement(
         "processed_at": None,
         "error_message": None
     })
+    session.commit()
 
     job = enqueue_statement_job(
         user_id=current_user.id,
@@ -449,8 +455,11 @@ async def process_statement(
     }
 
 @router.get("/statements", response_model=List[Statement])
-async def list_statements(current_user: User = Depends(get_current_user)):
-    db = get_db()
+async def list_statements(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    db = get_db_service(session)
     statements = db.find("statements", {"user_id": current_user.id})
     accounts = db.find("accounts", {"user_id": current_user.id})
     account_lookup = {acc["id"]: acc for acc in accounts}
@@ -468,9 +477,10 @@ async def list_statements(current_user: User = Depends(get_current_user)):
 @router.post("/statements/{statement_id}/reprocess")
 async def reprocess_statement(
     statement_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     statement = db.find_one("statements", {"id": statement_id, "user_id": current_user.id})
 
     if not statement:
@@ -490,6 +500,7 @@ async def reprocess_statement(
         "processed_at": None,
         "error_message": None
     })
+    session.commit()
 
     job = enqueue_statement_job(
         user_id=current_user.id,
@@ -502,12 +513,14 @@ async def reprocess_statement(
         "statement_id": statement_id,
         "job_id": job.id
     }
+
 @router.post("/statements/reprocess-all")
 async def reprocess_all_statements(
     payload: Optional[ReprocessAllRequest] = Body(None),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     statements = db.find("statements", {"user_id": current_user.id})
 
     if not statements:
@@ -531,6 +544,7 @@ async def reprocess_all_statements(
             "processed_at": None,
             "error_message": None
         })
+    session.commit()
 
     job = enqueue_statement_job(
         user_id=current_user.id,
@@ -548,9 +562,10 @@ async def reprocess_all_statements(
 @router.delete("/statements/{statement_id}")
 async def delete_statement(
     statement_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     statement = db.find_one("statements", {"id": statement_id, "user_id": current_user.id})
 
     if not statement:
@@ -572,6 +587,7 @@ async def delete_statement(
         os.remove(statement['file_path'])
 
     db.delete("statements", statement_id)
+    session.commit()
 
     return {"message": "Statement and associated data deleted successfully"}
 
@@ -597,13 +613,15 @@ async def get_statement_job_status(
         )
 
     return info
+
 @router.put("/statements/{statement_id}/account")
 async def change_statement_account(
     statement_id: str,
     payload: StatementAccountChangeRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     statement = db.find_one("statements", {"id": statement_id, "user_id": current_user.id})
 
     if not statement:
@@ -642,6 +660,7 @@ async def change_statement_account(
         "credit_volume": 0,
         "debit_volume": 0
     })
+    session.commit()
 
     job = enqueue_statement_job(
         user_id=current_user.id,

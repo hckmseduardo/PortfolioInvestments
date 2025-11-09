@@ -1,20 +1,27 @@
 from pydantic_settings import BaseSettings
 from pydantic import Field, field_validator
 from typing import List, Optional
-from pathlib import Path
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_DATA_PATH = BASE_DIR / "data"
 
 class Settings(BaseSettings):
     SECRET_KEY: str = "your-secret-key-change-this-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    # Microsoft Entra ID Configuration
+    ENTRA_CLIENT_ID: Optional[str] = None
+    ENTRA_CLIENT_SECRET: Optional[str] = None
+    ENTRA_TENANT_ID: Optional[str] = None
+    ENTRA_AUTHORITY: Optional[str] = None  # Auto-constructed if not provided
+    ENTRA_REDIRECT_URI: str = "http://localhost:3000/api/auth/entra/callback"
+    ENTRA_SCOPES: str = "User.Read email profile openid"
+
+    # Authentication Strategy
+    AUTH_ALLOW_TRADITIONAL: bool = True  # Allow email/password login
+    AUTH_ALLOW_ENTRA: bool = True  # Allow Entra ID login
+    AUTH_REQUIRE_ENTRA: bool = False  # Force Entra ID authentication (for future migration)
+
     # Database configuration
-    DATABASE_URL: Optional[str] = None  # PostgreSQL URL
-    DATABASE_PATH: str = str(DEFAULT_DATA_PATH)  # Legacy JSON path (kept for backward compatibility)
-    LEGACY_DATA_PATH: str = str(DEFAULT_DATA_PATH)  # Path to JSON files for migration
+    DATABASE_URL: str  # PostgreSQL URL (required)
 
     UPLOAD_PATH: str = "./uploads"
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173,http://localhost,http://localhost:80,http://app.home,https://app.home"
@@ -91,12 +98,31 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
 
     @property
-    def use_postgres(self) -> bool:
-        """Check if PostgreSQL should be used instead of JSON."""
-        return self.DATABASE_URL is not None
+    def entra_authority_url(self) -> Optional[str]:
+        """Get the Entra ID authority URL."""
+        if self.ENTRA_AUTHORITY:
+            return self.ENTRA_AUTHORITY
+        if self.ENTRA_TENANT_ID:
+            return f"https://login.microsoftonline.com/{self.ENTRA_TENANT_ID}"
+        return None
+
+    @property
+    def entra_scopes_list(self) -> List[str]:
+        """Get Entra ID scopes as a list."""
+        return [scope.strip() for scope in self.ENTRA_SCOPES.split(",") if scope.strip()]
+
+    @property
+    def is_entra_configured(self) -> bool:
+        """Check if Entra ID is properly configured."""
+        return all([
+            self.ENTRA_CLIENT_ID,
+            self.ENTRA_CLIENT_SECRET,
+            self.ENTRA_TENANT_ID,
+        ])
 
     class Config:
         env_file = ".env"
+        extra = "ignore"  # Ignore extra environment variables not defined in the model
 
 
 settings = Settings()

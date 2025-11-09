@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List, Optional, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 from app.models.schemas import (
     Position,
     PositionCreate,
@@ -13,7 +14,8 @@ from app.models.schemas import (
     TypeBreakdownSlice,
 )
 from app.api.auth import get_current_user
-from app.database.json_db import get_db
+from app.database.postgres_db import get_db as get_session
+from app.database.db_service import get_db_service
 from app.config import settings
 from app.services.market_data import market_service, PriceQuote
 from app.services.job_queue import enqueue_price_fetch_job
@@ -423,20 +425,22 @@ def _build_breakdown_slices(
 @router.post("", response_model=Position)
 async def create_position(
     position: PositionCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     account = db.find_one("accounts", {"id": position.account_id, "user_id": current_user.id})
     if not account:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found"
         )
-    
+
     position_doc = position.model_dump()
     created_position = db.insert("positions", position_doc)
-    
+    session.commit()
+
     return Position(**created_position)
 
 @router.get("/aggregated", response_model=List[AggregatedPosition])
@@ -445,9 +449,10 @@ async def get_aggregated_positions(
     as_of_date: Optional[str] = None,
     instrument_type_id: Optional[str] = None,
     instrument_industry_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
 
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
@@ -484,10 +489,11 @@ async def get_aggregated_positions(
 @router.get("", response_model=List[Position])
 async def get_positions(
     account_id: str = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
         if not account:
@@ -499,11 +505,11 @@ async def get_positions(
     else:
         user_accounts = db.find("accounts", {"user_id": current_user.id})
         account_ids = [acc["id"] for acc in user_accounts]
-        
+
         positions = []
         for acc_id in account_ids:
             positions.extend(db.find("positions", {"account_id": acc_id}))
-    
+
     return [Position(**pos) for pos in positions]
 
 @router.get("/summary", response_model=PortfolioSummary)
@@ -512,9 +518,10 @@ async def get_portfolio_summary(
     as_of_date: Optional[str] = None,
     instrument_type_id: Optional[str] = None,
     instrument_industry_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
 
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
@@ -570,9 +577,10 @@ async def get_industry_breakdown(
     as_of_date: Optional[str] = None,
     instrument_type_id: Optional[str] = None,
     instrument_industry_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
 
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
@@ -623,9 +631,10 @@ async def get_type_breakdown(
     as_of_date: Optional[str] = None,
     instrument_type_id: Optional[str] = None,
     instrument_industry_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
 
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
@@ -673,40 +682,45 @@ async def get_type_breakdown(
 async def update_position(
     position_id: str,
     position_update: PositionCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     existing_position = db.find_one("positions", {"id": position_id})
     if not existing_position:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Position not found"
         )
-    
+
     account = db.find_one("accounts", {"id": existing_position["account_id"], "user_id": current_user.id})
     if not account:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to update this position"
         )
-    
+
     db.update(
         "positions",
         {"id": position_id},
         position_update.model_dump()
     )
-    
+    session.commit()
+
     updated_position = db.find_one("positions", {"id": position_id})
     return Position(**updated_position)
 
 @router.post("/refresh-prices")
-async def refresh_market_prices(current_user: User = Depends(get_current_user)):
+async def refresh_market_prices(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
     """
     Force refresh all market prices from data sources, bypassing cache.
     Updates position market values and refreshes the price cache.
     """
-    db = get_db()
+    db = get_db_service(session)
 
     user_accounts = db.find("accounts", {"user_id": current_user.id})
     account_ids = [acc["id"] for acc in user_accounts]
@@ -741,6 +755,8 @@ async def refresh_market_prices(current_user: User = Depends(get_current_user)):
             )
             updated_count += 1
 
+    session.commit()
+
     return {
         "message": f"Refreshed {len(prices)} prices and updated {updated_count} positions",
         "prices": prices,
@@ -750,9 +766,10 @@ async def refresh_market_prices(current_user: User = Depends(get_current_user)):
 @router.delete("/{position_id}")
 async def delete_position(
     position_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
 
     existing_position = db.find_one("positions", {"id": position_id})
     if not existing_position:
@@ -769,17 +786,19 @@ async def delete_position(
         )
 
     db.delete("positions", {"id": position_id})
+    session.commit()
 
     return {"message": "Position deleted successfully"}
 
 @router.post("/recalculate")
 async def recalculate_positions(
     account_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
     from app.api.import_statements import recalculate_positions_from_transactions
 
-    db = get_db()
+    db = get_db_service(session)
 
     account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
     if not account:
@@ -789,6 +808,7 @@ async def recalculate_positions(
         )
 
     positions_created = recalculate_positions_from_transactions(account_id, db)
+    session.commit()
 
     return {
         "message": "Positions recalculated successfully",

@@ -3,8 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 from app.config import settings
+from prometheus_fastapi_instrumentator import Instrumentator
 from app.api import (
     auth,
+    auth_entra,
     accounts,
     positions,
     import_statements,
@@ -24,22 +26,17 @@ async def lifespan(app: FastAPI):
     """Handle startup and shutdown events."""
     # Startup
     logger.info("Starting Investment Portfolio Management API")
-
-    if settings.use_postgres:
-        logger.info("Initializing PostgreSQL database...")
-        from app.database.postgres_db import init_db
-        init_db(settings.DATABASE_URL)
-        logger.info("PostgreSQL database initialized")
-    else:
-        logger.info("Using JSON database (legacy mode)")
+    logger.info("Initializing PostgreSQL database...")
+    from app.database.postgres_db import init_db
+    init_db(settings.DATABASE_URL)
+    logger.info("PostgreSQL database initialized")
 
     yield
 
     # Shutdown
     logger.info("Shutting down...")
-    if settings.use_postgres:
-        from app.database.postgres_db import close_db
-        close_db()
+    from app.database.postgres_db import close_db
+    close_db()
 
 
 app = FastAPI(
@@ -60,6 +57,7 @@ app.add_middleware(
 )
 
 api_router.include_router(auth.router)
+api_router.include_router(auth_entra.router)
 api_router.include_router(accounts.router)
 api_router.include_router(positions.router)
 api_router.include_router(import_statements.router)
@@ -71,6 +69,9 @@ api_router.include_router(instruments.router)
 api_router.include_router(plaid.router)
 
 app.include_router(api_router)
+
+# Initialize Prometheus metrics instrumentation
+Instrumentator().instrument(app).expose(app)
 
 @app.get("/")
 async def root():

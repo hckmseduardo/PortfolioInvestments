@@ -1,6 +1,5 @@
-# Database files
-backend/data/*.json
-!backend/data/.gitkeep
+# Legacy JSON database files (no longer used - PostgreSQL only)
+backend/data/
 
 # Uploaded files
 backend/uploads/*

@@ -15,24 +15,20 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 
 
 def get_db() -> Generator:
-    """Get database service (JSON or PostgreSQL)."""
-    if settings.use_postgres:
-        from app.database.postgres_db import get_db as get_pg_db
-        from app.database.db_service import get_db_service
+    """Get database service."""
+    from app.database.postgres_db import get_db as get_pg_db
+    from app.database.db_service import get_db_service
 
-        db_session = next(get_pg_db())
-        db_service = get_db_service(db_session)
-        try:
-            yield db_service
-            db_session.commit()
-        except Exception:
-            db_session.rollback()
-            raise
-        finally:
-            db_session.close()
-    else:
-        from app.database.json_db import get_db as get_json_db
-        yield get_json_db()
+    db_session = next(get_pg_db())
+    db_service = get_db_service(db_session)
+    try:
+        yield db_service
+        db_session.commit()
+    except Exception:
+        db_session.rollback()
+        raise
+    finally:
+        db_session.close()
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db = Depends(get_db)) -> User:
@@ -77,36 +73,9 @@ async def register(user: UserCreate, db = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db = Depends(get_db)):
-    """
-    Login endpoint with automatic data migration from JSON to PostgreSQL.
-
-    On first login with PostgreSQL enabled, automatically migrates user data
-    from JSON files to PostgreSQL database.
-    """
+    """Login endpoint."""
     user_doc = db.find_one("users", {"email": form_data.username})
-    stored_hash = (user_doc or {}).get("hashed_password") or (user_doc or {}).get("password_hash")
-
-    if settings.use_postgres and not stored_hash:
-        try:
-            from app.database.json_db import JSONDatabase
-
-            legacy_db = JSONDatabase(settings.LEGACY_DATA_PATH)
-            legacy_user_doc = legacy_db.find_one("users", {"email": form_data.username})
-        except Exception as legacy_error:
-            logger.error(
-                "Failed to read legacy user data for %s: %s",
-                form_data.username,
-                legacy_error,
-                exc_info=True,
-            )
-        else:
-            if legacy_user_doc:
-                legacy_hash = legacy_user_doc.get("hashed_password") or legacy_user_doc.get("password_hash")
-                if legacy_hash:
-                    stored_hash = legacy_hash
-                    if not user_doc:
-                        user_doc = legacy_user_doc
-                    logger.info("Authenticating %s using legacy JSON data", form_data.username)
+    stored_hash = (user_doc or {}).get("hashed_password")
 
     try:
         password_valid = bool(user_doc) and stored_hash and verify_password(form_data.password, stored_hash)
@@ -119,27 +88,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db = Depends(g
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    # Perform migration if using PostgreSQL and user hasn't been migrated yet
-    if settings.use_postgres:
-        try:
-            from app.database.postgres_db import get_db_context
-            from app.database.migration import migrate_user_on_login
-
-            with get_db_context() as migration_session:
-                was_migrated = migrate_user_on_login(
-                    email=form_data.username,
-                    json_db_path=settings.LEGACY_DATA_PATH,
-                    db_session=migration_session
-                )
-
-                if was_migrated:
-                    logger.info(f"Successfully migrated data for user: {form_data.username}")
-
-        except Exception as e:
-            # Log but don't fail login if migration fails
-            logger.error(f"Migration failed for user {form_data.username}: {e}", exc_info=True)
-            # Continue with login - user can still access their data
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(

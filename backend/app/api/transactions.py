@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional
 from datetime import datetime, timezone
+from sqlalchemy.orm import Session
 from app.models.schemas import Transaction, TransactionCreate, User
 from app.api.auth import get_current_user
-from app.database.json_db import get_db
+from app.database.postgres_db import get_db as get_session
+from app.database.db_service import get_db_service
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -12,9 +14,10 @@ async def get_transactions(
     account_id: Optional[str] = Query(None),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
 
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
@@ -62,9 +65,10 @@ async def get_transactions(
 async def get_account_balance(
     account_id: Optional[str] = Query(None),
     as_of_date: Optional[datetime] = Query(None),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
 
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
@@ -112,46 +116,50 @@ async def get_account_balance(
 @router.post("", response_model=Transaction)
 async def create_transaction(
     transaction: TransactionCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     account = db.find_one("accounts", {"id": transaction.account_id, "user_id": current_user.id})
     if not account:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found"
         )
-    
+
     transaction_doc = {
         **transaction.model_dump(),
         "user_id": current_user.id
     }
-    
+
     created_transaction = db.insert("transactions", transaction_doc)
+    session.commit()
     return Transaction(**created_transaction)
 
 @router.delete("/{transaction_id}")
 async def delete_transaction(
     transaction_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     existing_transaction = db.find_one("transactions", {"id": transaction_id})
     if not existing_transaction:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Transaction not found"
         )
-    
+
     account = db.find_one("accounts", {"id": existing_transaction['account_id'], "user_id": current_user.id})
     if not account:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to delete this transaction"
         )
-    
+
     db.delete("transactions", {"id": transaction_id})
-    
+    session.commit()
+
     return {"message": "Transaction deleted successfully"}

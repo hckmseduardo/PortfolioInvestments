@@ -1,14 +1,13 @@
 """
-Database Service Layer - Unified interface for both JSON and PostgreSQL
+Database Service Layer - PostgreSQL interface
 """
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_
 import uuid
 import logging
 
-from app.config import settings
 from app.database.models import (
     User as UserModel, Account as AccountModel, Position as PositionModel,
     Transaction as TransactionModel, Dividend as DividendModel,
@@ -36,24 +35,18 @@ COLLECTION_MODEL_MAP = {
 
 
 class DatabaseService:
-    """Unified database service that works with both JSON and PostgreSQL."""
+    """Database service for PostgreSQL operations."""
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session):
         """
         Initialize database service.
 
         Args:
-            session: SQLAlchemy session (required if using PostgreSQL)
+            session: SQLAlchemy session (required)
         """
-        self.use_postgres = settings.use_postgres
+        if session is None:
+            raise ValueError("Session is required")
         self.session = session
-
-        if self.use_postgres and session is None:
-            raise ValueError("Session required when using PostgreSQL")
-
-        if not self.use_postgres:
-            from app.database.json_db import JSONDatabase
-            self.json_db = JSONDatabase(settings.DATABASE_PATH)
 
     def _model_to_dict(self, model_instance) -> Dict[str, Any]:
         """Convert SQLAlchemy model instance to dictionary."""
@@ -82,9 +75,6 @@ class DatabaseService:
 
     def insert(self, collection: str, document: Dict[str, Any]) -> Dict[str, Any]:
         """Insert a document into the collection."""
-        if not self.use_postgres:
-            return self.json_db.insert(collection, document)
-
         model_class = COLLECTION_MODEL_MAP.get(collection)
         if not model_class:
             raise ValueError(f"Unknown collection: {collection}")
@@ -112,9 +102,6 @@ class DatabaseService:
 
     def find(self, collection: str, query: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Find documents matching the query."""
-        if not self.use_postgres:
-            return self.json_db.find(collection, query)
-
         model_class = COLLECTION_MODEL_MAP.get(collection)
         if not model_class:
             raise ValueError(f"Unknown collection: {collection}")
@@ -131,9 +118,6 @@ class DatabaseService:
 
     def find_one(self, collection: str, query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Find the first document matching the query."""
-        if not self.use_postgres:
-            return self.json_db.find_one(collection, query)
-
         model_class = COLLECTION_MODEL_MAP.get(collection)
         if not model_class:
             raise ValueError(f"Unknown collection: {collection}")
@@ -150,9 +134,6 @@ class DatabaseService:
     def update(self, collection: str, document_id_or_query: Union[str, Dict[str, Any]],
                update_data: Dict[str, Any] = None) -> int:
         """Update documents matching the query."""
-        if not self.use_postgres:
-            return self.json_db.update(collection, document_id_or_query, update_data)
-
         if update_data is None:
             raise ValueError("update_data is required")
 
@@ -189,9 +170,6 @@ class DatabaseService:
 
     def delete(self, collection: str, document_id_or_query: Union[str, Dict[str, Any]]) -> int:
         """Delete documents matching the query."""
-        if not self.use_postgres:
-            return self.json_db.delete(collection, document_id_or_query)
-
         model_class = COLLECTION_MODEL_MAP.get(collection)
         if not model_class:
             raise ValueError(f"Unknown collection: {collection}")
@@ -219,18 +197,15 @@ class DatabaseService:
 
     def count(self, collection: str, query: Optional[Dict[str, Any]] = None) -> int:
         """Count documents matching the query."""
-        if not self.use_postgres:
-            return self.json_db.count(collection, query)
-
         return len(self.find(collection, query))
 
 
-def get_db_service(session: Optional[Session] = None) -> DatabaseService:
+def get_db_service(session: Session) -> DatabaseService:
     """
     Get database service instance.
 
     Args:
-        session: SQLAlchemy session (required if using PostgreSQL)
+        session: SQLAlchemy session (required)
 
     Returns:
         DatabaseService instance

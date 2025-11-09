@@ -1,9 +1,11 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
-from app.database.json_db import get_db
+from app.database.postgres_db import get_db as get_session
+from app.database.db_service import get_db_service
 from app.models.schemas import (
     InstrumentClassification,
     InstrumentClassificationUpdate,
@@ -39,8 +41,11 @@ def _normalize_name(name: str) -> str:
 
 
 @router.get("/types", response_model=List[InstrumentType])
-async def list_instrument_types(current_user: User = Depends(get_current_user)):
-    db = get_db()
+async def list_instrument_types(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    db = get_db_service(session)
     types = db.find("instrument_types", {"user_id": current_user.id})
     return sorted(types, key=lambda item: item.get("name", "").lower())
 
@@ -48,9 +53,10 @@ async def list_instrument_types(current_user: User = Depends(get_current_user)):
 @router.post("/types", response_model=InstrumentType, status_code=status.HTTP_201_CREATED)
 async def create_instrument_type(
     payload: InstrumentTypeCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     name = _normalize_name(payload.name)
     existing = db.find_one("instrument_types", {"user_id": current_user.id, "name": name})
     if existing:
@@ -63,6 +69,7 @@ async def create_instrument_type(
         "name": name,
         "color": _normalize_color(payload.color, "#8884d8")
     })
+    session.commit()
     return doc
 
 
@@ -70,9 +77,10 @@ async def create_instrument_type(
 async def update_instrument_type(
     type_id: str,
     payload: InstrumentTypeCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     record = db.find_one("instrument_types", {"id": type_id, "user_id": current_user.id})
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Instrument type not found")
@@ -85,19 +93,21 @@ async def update_instrument_type(
             detail="Another instrument type already uses this name"
         )
 
-    db.update("instrument_types", type_id, {
+    db.update("instrument_types", {"id": type_id}, {
         "name": name,
         "color": _normalize_color(payload.color, record.get("color", "#8884d8"))
     })
+    session.commit()
     return db.find_one("instrument_types", {"id": type_id})
 
 
 @router.delete("/types/{type_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_instrument_type(
     type_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     deleted = db.delete("instrument_types", {"id": type_id, "user_id": current_user.id})
     if deleted == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Instrument type not found")
@@ -107,12 +117,16 @@ async def delete_instrument_type(
         {"user_id": current_user.id, "instrument_type_id": type_id},
         {"instrument_type_id": None}
     )
+    session.commit()
     return None
 
 
 @router.get("/industries", response_model=List[InstrumentIndustry])
-async def list_instrument_industries(current_user: User = Depends(get_current_user)):
-    db = get_db()
+async def list_instrument_industries(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    db = get_db_service(session)
     industries = db.find("instrument_industries", {"user_id": current_user.id})
     return sorted(industries, key=lambda item: item.get("name", "").lower())
 
@@ -120,9 +134,10 @@ async def list_instrument_industries(current_user: User = Depends(get_current_us
 @router.post("/industries", response_model=InstrumentIndustry, status_code=status.HTTP_201_CREATED)
 async def create_instrument_industry(
     payload: InstrumentIndustryCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     name = _normalize_name(payload.name)
     existing = db.find_one("instrument_industries", {"user_id": current_user.id, "name": name})
     if existing:
@@ -135,6 +150,7 @@ async def create_instrument_industry(
         "name": name,
         "color": _normalize_color(payload.color, "#82ca9d")
     })
+    session.commit()
     return doc
 
 
@@ -142,9 +158,10 @@ async def create_instrument_industry(
 async def update_instrument_industry(
     industry_id: str,
     payload: InstrumentIndustryCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     record = db.find_one("instrument_industries", {"id": industry_id, "user_id": current_user.id})
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Instrument industry not found")
@@ -157,19 +174,21 @@ async def update_instrument_industry(
             detail="Another instrument industry already uses this name"
         )
 
-    db.update("instrument_industries", industry_id, {
+    db.update("instrument_industries", {"id": industry_id}, {
         "name": name,
         "color": _normalize_color(payload.color, record.get("color", "#82ca9d"))
     })
+    session.commit()
     return db.find_one("instrument_industries", {"id": industry_id})
 
 
 @router.delete("/industries/{industry_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_instrument_industry(
     industry_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
     deleted = db.delete("instrument_industries", {"id": industry_id, "user_id": current_user.id})
     if deleted == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Instrument industry not found")
@@ -178,12 +197,16 @@ async def delete_instrument_industry(
         {"user_id": current_user.id, "instrument_industry_id": industry_id},
         {"instrument_industry_id": None}
     )
+    session.commit()
     return None
 
 
 @router.get("/classifications", response_model=List[InstrumentClassification])
-async def list_classifications(current_user: User = Depends(get_current_user)):
-    db = get_db()
+async def list_classifications(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    db = get_db_service(session)
     records = db.find("instrument_metadata", {"user_id": current_user.id})
     return sorted(records, key=lambda item: item.get("ticker", ""))
 
@@ -192,13 +215,14 @@ async def list_classifications(current_user: User = Depends(get_current_user)):
 async def upsert_classification(
     ticker: str,
     payload: InstrumentClassificationUpdate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
     normalized_ticker = (ticker or "").strip().upper()
     if not normalized_ticker:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ticker is required")
 
-    db = get_db()
+    db = get_db_service(session)
 
     if payload.instrument_type_id:
         type_record = db.find_one("instrument_types", {"id": payload.instrument_type_id, "user_id": current_user.id})
@@ -224,7 +248,8 @@ async def upsert_classification(
     }
 
     if existing:
-        db.update("instrument_metadata", existing["id"], update_doc)
+        db.update("instrument_metadata", {"id": existing["id"]}, update_doc)
+        session.commit()
         return db.find_one("instrument_metadata", {"id": existing["id"]})
 
     doc = db.insert("instrument_metadata", {
@@ -232,18 +257,21 @@ async def upsert_classification(
         "ticker": normalized_ticker,
         **update_doc
     })
+    session.commit()
     return doc
 
 
 @router.delete("/classifications/{ticker}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_classification(
     ticker: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
     normalized_ticker = (ticker or "").strip().upper()
     if not normalized_ticker:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ticker is required")
 
-    db = get_db()
+    db = get_db_service(session)
     db.delete("instrument_metadata", {"user_id": current_user.id, "ticker": normalized_ticker})
+    session.commit()
     return None

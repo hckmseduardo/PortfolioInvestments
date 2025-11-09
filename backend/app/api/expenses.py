@@ -3,10 +3,12 @@ from typing import List, Optional, Tuple, Callable, Dict, Any
 from datetime import datetime, timedelta
 from collections import defaultdict
 import re
+from sqlalchemy.orm import Session
 from rq.exceptions import NoSuchJobError
 from app.models.schemas import Expense, ExpenseCreate, Category, CategoryCreate, User
 from app.api.auth import get_current_user
-from app.database.json_db import get_db
+from app.database.postgres_db import get_db as get_session
+from app.database.db_service import get_db_service
 from app.services.job_queue import enqueue_expense_conversion_job, get_job_info
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
@@ -49,13 +51,14 @@ def _dates_within_tolerance(date_a: Optional[str], date_b: Optional[str], tolera
     return abs((parsed_a - parsed_b).days) <= tolerance_days
 
 
-def auto_categorize_expense(description: str, user_id: str) -> Optional[str]:
+def auto_categorize_expense(description: str, user_id: str, db) -> Optional[str]:
     """
     Auto-categorize an expense based on description and learning from existing expenses.
 
     Args:
         description: Transaction description
         user_id: User ID to get user-specific categorizations
+        db: Database service instance
 
     Returns:
         Category name or None if no match found
@@ -66,7 +69,6 @@ def auto_categorize_expense(description: str, user_id: str) -> Optional[str]:
     description_lower = description.lower()
 
     # First, try to learn from existing expenses
-    db = get_db()
     existing_expenses = db.find("expenses", {})
 
     # Build a map of description patterns to categories from user's history
@@ -160,7 +162,7 @@ def detect_transfers(user_id: str, db, days_tolerance: int = 3) -> List[Tuple[st
 
     Args:
         user_id: User ID to check transfers for
-        db: Database instance
+        db: Database service instance
         days_tolerance: Number of days to look for matching transactions
 
     Returns:
@@ -228,30 +230,33 @@ def detect_transfers(user_id: str, db, days_tolerance: int = 3) -> List[Tuple[st
 @router.post("", response_model=Expense)
 async def create_expense(
     expense: ExpenseCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     account = db.find_one("accounts", {"id": expense.account_id, "user_id": current_user.id})
     if not account:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found"
         )
-    
+
     expense_doc = expense.model_dump()
     created_expense = db.insert("expenses", expense_doc)
-    
+    session.commit()
+
     return Expense(**created_expense)
 
 @router.get("", response_model=List[Expense])
 async def get_expenses(
     account_id: str = None,
     category: str = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
         if not account:
@@ -259,7 +264,7 @@ async def get_expenses(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Account not found"
             )
-        
+
         if not _is_expense_account(account):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -269,30 +274,31 @@ async def get_expenses(
         query = {"account_id": account_id}
         if category:
             query["category"] = category
-        
+
         expenses = db.find("expenses", query)
     else:
         user_accounts = _get_expense_accounts(db, current_user.id)
         if not user_accounts:
             return []
         account_ids = [acc["id"] for acc in user_accounts]
-        
+
         expenses = []
         for acc_id in account_ids:
             query = {"account_id": acc_id}
             if category:
                 query["category"] = category
             expenses.extend(db.find("expenses", query))
-    
+
     return [Expense(**exp) for exp in expenses]
 
 @router.get("/summary")
 async def get_expense_summary(
     account_id: str = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
         if not account:
@@ -316,20 +322,20 @@ async def get_expense_summary(
                 "expense_count": 0
             }
         account_ids = [acc["id"] for acc in user_accounts]
-        
+
         expenses = []
         for acc_id in account_ids:
             expenses.extend(db.find("expenses", {"account_id": acc_id}))
-    
+
     total_expenses = sum(exp.get("amount", 0) for exp in expenses)
-    
+
     by_category = defaultdict(float)
     by_month = defaultdict(float)
-    
+
     for exp in expenses:
         category = exp.get("category", "Uncategorized")
         by_category[category] += exp.get("amount", 0)
-        
+
         date_str = exp.get("date", "")
         if date_str:
             try:
@@ -338,7 +344,7 @@ async def get_expense_summary(
                 by_month[month_key] += exp.get("amount", 0)
             except:
                 pass
-    
+
     return {
         "total_expenses": total_expenses,
         "by_category": dict(by_category),
@@ -350,76 +356,85 @@ async def get_expense_summary(
 async def update_expense(
     expense_id: str,
     expense_update: ExpenseCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     existing_expense = db.find_one("expenses", {"id": expense_id})
     if not existing_expense:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Expense not found"
         )
-    
+
     account = db.find_one("accounts", {"id": existing_expense["account_id"], "user_id": current_user.id})
     if not account:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to update this expense"
         )
-    
+
     db.update(
         "expenses",
         {"id": expense_id},
         expense_update.model_dump()
     )
-    
+
+    session.commit()
     updated_expense = db.find_one("expenses", {"id": expense_id})
     return Expense(**updated_expense)
 
 @router.delete("/{expense_id}")
 async def delete_expense(
     expense_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     existing_expense = db.find_one("expenses", {"id": expense_id})
     if not existing_expense:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Expense not found"
         )
-    
+
     account = db.find_one("accounts", {"id": existing_expense["account_id"], "user_id": current_user.id})
     if not account:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to delete this expense"
         )
-    
+
     db.delete("expenses", {"id": expense_id})
-    
+    session.commit()
+
     return {"message": "Expense deleted successfully"}
 
 @router.post("/categories", response_model=Category)
 async def create_category(
     category: CategoryCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
-    
+    db = get_db_service(session)
+
     category_doc = {
         **category.model_dump(),
         "user_id": current_user.id
     }
-    
+
     created_category = db.insert("categories", category_doc)
+    session.commit()
     return Category(**created_category)
 
 @router.get("/categories", response_model=List[Category])
-async def get_categories(current_user: User = Depends(get_current_user)):
-    db = get_db()
+async def get_categories(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    db = get_db_service(session)
     categories = db.find("categories", {"user_id": current_user.id})
     return [Category(**cat) for cat in categories]
 
@@ -427,9 +442,10 @@ async def get_categories(current_user: User = Depends(get_current_user)):
 async def update_category(
     category_id: str,
     category_update: CategoryCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
 
     existing_category = db.find_one("categories", {"id": category_id, "user_id": current_user.id})
     if not existing_category:
@@ -444,15 +460,17 @@ async def update_category(
         category_update.model_dump()
     )
 
+    session.commit()
     updated_category = db.find_one("categories", {"id": category_id})
     return Category(**updated_category)
 
 @router.delete("/categories/{category_id}")
 async def delete_category(
     category_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
 
     existing_category = db.find_one("categories", {"id": category_id, "user_id": current_user.id})
     if not existing_category:
@@ -462,13 +480,17 @@ async def delete_category(
         )
 
     db.delete("categories", {"id": category_id})
+    session.commit()
 
     return {"message": "Category deleted successfully"}
 
 @router.post("/categories/init-defaults")
-async def initialize_default_categories(current_user: User = Depends(get_current_user)):
+async def initialize_default_categories(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
     """Initialize default expense categories for a user."""
-    db = get_db()
+    db = get_db_service(session)
 
     # Check if user already has categories
     existing_categories = db.find("categories", {"user_id": current_user.id})
@@ -508,6 +530,7 @@ async def initialize_default_categories(current_user: User = Depends(get_current
         created_cat = db.insert("categories", category_doc)
         created_categories.append(created_cat)
 
+    session.commit()
     return {
         "message": "Default categories created successfully",
         "count": len(created_categories),
@@ -518,10 +541,11 @@ async def initialize_default_categories(current_user: User = Depends(get_current
 async def update_expense_category(
     expense_id: str,
     category: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
     """Update just the category of an expense."""
-    db = get_db()
+    db = get_db_service(session)
 
     existing_expense = db.find_one("expenses", {"id": expense_id})
     if not existing_expense:
@@ -543,6 +567,7 @@ async def update_expense_category(
         {"category": category}
     )
 
+    session.commit()
     updated_expense = db.find_one("expenses", {"id": expense_id})
     return Expense(**updated_expense)
 
@@ -550,10 +575,11 @@ async def update_expense_category(
 async def get_monthly_expense_comparison(
     months: int = 6,
     account_id: str = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
     """Get monthly expense comparison for the last N months."""
-    db = get_db()
+    db = get_db_service(session)
 
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
@@ -616,12 +642,15 @@ async def get_monthly_expense_comparison(
     }
 
 @router.post("/detect-transfers")
-async def detect_and_mark_transfers(current_user: User = Depends(get_current_user)):
+async def detect_and_mark_transfers(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
     """
     Detect transfers between accounts and mark them in transactions.
     This helps exclude transfers from expense totals.
     """
-    db = get_db()
+    db = get_db_service(session)
 
     # Detect transfers
     transfers = detect_transfers(current_user.id, db, days_tolerance=5)
@@ -634,6 +663,7 @@ async def detect_and_mark_transfers(current_user: User = Depends(get_current_use
         db.update("transactions", {"id": txn_id2}, {"is_transfer": True, "transfer_pair_id": txn_id1})
         marked_count += 2
 
+    session.commit()
     return {
         "message": f"Detected and marked {len(transfers)} transfer pairs",
         "transfer_pairs": len(transfers),
@@ -643,13 +673,18 @@ async def detect_and_mark_transfers(current_user: User = Depends(get_current_use
 def run_expense_conversion(
     user_id: str,
     account_id: Optional[str] = None,
-    progress_callback: Optional[Callable[[str], None]] = None
+    progress_callback: Optional[Callable[[str], None]] = None,
+    db = None
 ) -> Dict[str, Any]:
     """
     Core logic that converts transactions to expenses for a user.
     Designed to be executed by a background worker.
     """
-    db = get_db()
+    if db is None:
+        from app.database.postgres_db import SessionLocal
+        from app.database.db_service import get_db_service
+        session = SessionLocal()
+        db = get_db_service(session)
 
     def notify(stage: str):
         if progress_callback:
@@ -796,7 +831,7 @@ def run_expense_conversion(
                 expenses_updated += 1
             continue
 
-        category = auto_categorize_expense(txn.get("description", ""), user_id)
+        category = auto_categorize_expense(txn.get("description", ""), user_id, db)
 
         expense_doc = {
             "date": txn.get("date"),
@@ -832,9 +867,10 @@ def run_expense_conversion(
 @router.post("/convert-transactions")
 async def convert_transactions_to_expenses(
     account_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
 ):
-    db = get_db()
+    db = get_db_service(session)
 
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})

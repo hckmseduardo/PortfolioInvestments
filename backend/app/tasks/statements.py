@@ -3,7 +3,8 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Optional
 
-from app.database.json_db import get_db
+from app.database.postgres_db import get_db_context
+from app.database.db_service import get_db_service
 from app.api.import_statements import (
     process_statement_file,
     recalculate_positions_from_transactions,
@@ -23,26 +24,27 @@ def run_statement_job(
     """
     Background entry point for statement processing jobs.
     """
-    db = get_db()
-    user = SimpleNamespace(id=user_id)
+    with get_db_context() as session:
+        db = get_db_service(session)
+        user = SimpleNamespace(id=user_id)
 
-    if action == "process":
-        if not statement_id:
-            raise ValueError("statement_id is required for process action")
-        return _process_statement(db, user, statement_id, reprocess=False, new_account_id=target_account_id)
+        if action == "process":
+            if not statement_id:
+                raise ValueError("statement_id is required for process action")
+            return _process_statement(db, session, user, statement_id, reprocess=False, new_account_id=target_account_id)
 
-    if action == "reprocess":
-        if not statement_id:
-            raise ValueError("statement_id is required for reprocess action")
-        return _process_statement(db, user, statement_id, reprocess=True, new_account_id=target_account_id)
+        if action == "reprocess":
+            if not statement_id:
+                raise ValueError("statement_id is required for reprocess action")
+            return _process_statement(db, session, user, statement_id, reprocess=True, new_account_id=target_account_id)
 
-    if action == "reprocess_all":
-        return _reprocess_all_statements(db, user, account_scope)
+        if action == "reprocess_all":
+            return _reprocess_all_statements(db, session, user, account_scope)
 
-    raise ValueError(f"Unknown statement job action: {action}")
+        raise ValueError(f"Unknown statement job action: {action}")
 
 
-def _process_statement(db, user, statement_id: str, reprocess: bool, new_account_id: Optional[str]):
+def _process_statement(db, session, user, statement_id: str, reprocess: bool, new_account_id: Optional[str]):
     statement = db.find_one("statements", {"id": statement_id, "user_id": user.id})
     if not statement:
         raise ValueError("Statement not found")
@@ -63,14 +65,17 @@ def _process_statement(db, user, statement_id: str, reprocess: bool, new_account
         "error_message": None,
         "account_id": account_id,
     })
+    session.commit()
 
     old_account_id = statement.get("account_id")
     if reprocess or (new_account_id and new_account_id != old_account_id):
         # Remove previously imported records tied to this statement
         db.delete_many("transactions", {"statement_id": statement_id})
         db.delete_many("dividends", {"statement_id": statement_id})
+        session.commit()
         if old_account_id:
             recalculate_positions_from_transactions(old_account_id, db)
+            session.commit()
 
     try:
         result = process_statement_file(
@@ -101,6 +106,7 @@ def _process_statement(db, user, statement_id: str, reprocess: bool, new_account
             "debit_volume": metrics.get("debit_volume", 0),
             "error_message": None
         })
+        session.commit()
 
         return {
             "statement_id": statement_id,
@@ -114,10 +120,11 @@ def _process_statement(db, user, statement_id: str, reprocess: bool, new_account
             "processed_at": datetime.now().isoformat(),
             "error_message": str(exc)
         })
+        session.commit()
         raise
 
 
-def _reprocess_all_statements(db, user, account_scope: Optional[str]):
+def _reprocess_all_statements(db, session, user, account_scope: Optional[str]):
     statements = db.find("statements", {"user_id": user.id})
     if account_scope:
         statements = [stmt for stmt in statements if stmt.get("account_id") == account_scope]
@@ -136,6 +143,7 @@ def _reprocess_all_statements(db, user, account_scope: Optional[str]):
         db.delete_many("transactions", {"account_id": account_id})
         db.delete_many("dividends", {"account_id": account_id})
         db.delete_many("positions", {"account_id": account_id})
+    session.commit()
 
     successful = 0
     failed = 0
@@ -144,6 +152,7 @@ def _reprocess_all_statements(db, user, account_scope: Optional[str]):
         try:
             _process_statement(
                 db=db,
+                session=session,
                 user=user,
                 statement_id=statement["id"],
                 reprocess=True,

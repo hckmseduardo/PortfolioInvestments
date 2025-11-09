@@ -15,47 +15,26 @@ _PRICE_SCHEMA_PREPARED = False
 _retry_client: Optional[Redis] = None
 
 
-def _ensure_collection():
-    """Ensure the price cache collection exists (JSON mode only)."""
-    try:
-        from app.database.json_db import get_db
-        db = get_db()
-        if _COLLECTION not in db.collections:
-            db.collections[_COLLECTION] = db.db_path / f"{_COLLECTION}.json"
-            if not db.collections[_COLLECTION].exists():
-                db.collections[_COLLECTION].write_text("[]")
-    except Exception as e:
-        logger.debug(f"Could not ensure collection (may be using PostgreSQL): {e}")
-
-
 def get_db_service():
-    """Get the appropriate database service based on settings."""
-    from app.config import settings
+    """Get the database service."""
+    from app.database.postgres_db import get_db as get_pg_db
+    from app.database.db_service import get_db_service as get_service
 
-    if settings.use_postgres:
-        from app.database.postgres_db import get_db as get_pg_db
-        from app.database.db_service import get_db_service as get_service
-
-        db_session = next(get_pg_db())
-        return get_service(db_session), db_session
-    else:
-        from app.database.json_db import get_db
-        _ensure_collection()
-        return get_db(), None
+    db_session = next(get_pg_db())
+    return get_service(db_session), db_session
 
 
 def _ensure_price_cache_schema(session) -> None:
     """Ensure Postgres price cache table has optional columns like source."""
     global _PRICE_SCHEMA_PREPARED
-    if _PRICE_SCHEMA_PREPARED or session is None:
+    if _PRICE_SCHEMA_PREPARED:
         return
 
     try:
         session.execute(text("ALTER TABLE price_cache ADD COLUMN IF NOT EXISTS source VARCHAR(255)"))
         session.commit()
     except Exception as e:
-        if session:
-            session.rollback()
+        session.rollback()
         logger.debug(f"Could not ensure price cache schema: {e}")
     finally:
         _PRICE_SCHEMA_PREPARED = True
@@ -99,8 +78,7 @@ def get_historical_price(ticker: str, as_of: datetime) -> Tuple[Optional[float],
         logger.error(f"Error getting historical price for {ticker_key}: {e}")
         return None, None
     finally:
-        if session:
-            session.close()
+        session.close()
 
 
 def get_current_price(ticker: str) -> Tuple[Optional[float], bool, Optional[Dict[str, Any]]]:
@@ -108,9 +86,10 @@ def get_current_price(ticker: str) -> Tuple[Optional[float], bool, Optional[Dict
     Get cached current price if it's not expired (less than 15 minutes old).
 
     Returns:
-        Tuple of (price, is_expired)
+        Tuple of (price, is_expired, metadata)
         - price: The cached price or None if not found
         - is_expired: True if cache is expired or doesn't exist, False otherwise
+        - metadata: Additional cache metadata
     """
     db, session = get_db_service()
 
@@ -136,8 +115,7 @@ def get_current_price(ticker: str) -> Tuple[Optional[float], bool, Optional[Dict
         return record.get("price"), is_expired, record
 
     finally:
-        if session:
-            session.close()
+        session.close()
 
 
 def set_historical_price(ticker: str, as_of: datetime, price: float, source: Optional[str] = None) -> None:
@@ -150,12 +128,11 @@ def set_historical_price(ticker: str, as_of: datetime, price: float, source: Opt
     normalized_date = _normalize_date(as_of)
     normalized_dt = datetime.fromisoformat(normalized_date)
     ticker_key = ticker.upper()
-    is_postgres = session is not None
 
     try:
         existing = db.find_one(_COLLECTION, {
             "ticker": ticker_key,
-            "date": normalized_dt if is_postgres else normalized_date,
+            "date": normalized_dt,
             "is_current": 0
         })
 
@@ -169,23 +146,20 @@ def set_historical_price(ticker: str, as_of: datetime, price: float, source: Opt
             db.insert(_COLLECTION, {
                 "id": str(uuid.uuid4()),
                 "ticker": ticker_key,
-                "date": normalized_dt if is_postgres else normalized_date,
+                "date": normalized_dt,
                 "price": price,
                 "is_current": 0,
                 "cached_at": datetime.now(timezone.utc).isoformat(),
                 "source": source
             })
 
-        if session:
-            session.commit()
+        session.commit()
     except Exception as e:
-        if session:
-            session.rollback()
+        session.rollback()
         logger.error(f"Failed to cache historical price for {ticker_key}: {e}")
         raise
     finally:
-        if session:
-            session.close()
+        session.close()
 
 
 def set_current_price(ticker: str, price: float, source: Optional[str] = None) -> None:
@@ -197,7 +171,6 @@ def set_current_price(ticker: str, price: float, source: Optional[str] = None) -
     _ensure_price_cache_schema(session)
     ticker_key = ticker.upper()
     now = datetime.now(timezone.utc)
-    is_postgres = session is not None
 
     try:
         # For current prices, we store with the current timestamp
@@ -210,7 +183,7 @@ def set_current_price(ticker: str, price: float, source: Optional[str] = None) -
         if existing:
             db.update(_COLLECTION, existing["id"], {
                 "price": price,
-                "date": now if is_postgres else now.isoformat(),
+                "date": now,
                 "cached_at": now.isoformat(),
                 "source": source
             })
@@ -218,23 +191,20 @@ def set_current_price(ticker: str, price: float, source: Optional[str] = None) -
             db.insert(_COLLECTION, {
                 "id": str(uuid.uuid4()),
                 "ticker": ticker_key,
-                "date": now if is_postgres else now.isoformat(),
+                "date": now,
                 "price": price,
                 "is_current": 1,
                 "cached_at": now.isoformat(),
                 "source": source
             })
 
-        if session:
-            session.commit()
+        session.commit()
     except Exception as e:
-        if session:
-            session.rollback()
+        session.rollback()
         logger.error(f"Failed to cache current price for {ticker_key}: {e}")
         raise
     finally:
-        if session:
-            session.close()
+        session.close()
 
 
 def invalidate_current_price(ticker: str) -> None:
@@ -251,16 +221,13 @@ def invalidate_current_price(ticker: str) -> None:
             "is_current": 1
         })
 
-        if session:
-            session.commit()
+        session.commit()
     except Exception as e:
-        if session:
-            session.rollback()
+        session.rollback()
         logger.error(f"Failed to invalidate current price for {ticker_key}: {e}")
         raise
     finally:
-        if session:
-            session.close()
+        session.close()
 
 
 def _normalize_date(as_of: datetime) -> str:
@@ -284,51 +251,27 @@ def get_cached_prices(tickers: List[str], as_of: Optional[datetime]) -> Dict[str
     results: Dict[str, Dict[str, Any]] = {}
 
     try:
-        if session:
-            _ensure_price_cache_schema(session)
-            query = session.query(StockPriceModel).filter(StockPriceModel.ticker.in_(ticker_keys))
-            if as_of:
-                normalized = datetime.fromisoformat(_normalize_date(as_of))
-                query = query.filter(StockPriceModel.is_current == 0, StockPriceModel.date == normalized)
-            else:
-                query = query.filter(StockPriceModel.is_current == 1)
-
-            for row in query.all():
-                results[row.ticker.upper()] = {
-                    "price": row.price,
-                    "cached_at": row.cached_at.isoformat() if row.cached_at else None,
-                    "source": row.source,
-                    "date": row.date.isoformat() if row.date else None,
-                    "is_current": bool(row.is_current)
-                }
+        _ensure_price_cache_schema(session)
+        query = session.query(StockPriceModel).filter(StockPriceModel.ticker.in_(ticker_keys))
+        if as_of:
+            normalized = datetime.fromisoformat(_normalize_date(as_of))
+            query = query.filter(StockPriceModel.is_current == 0, StockPriceModel.date == normalized)
         else:
-            _ensure_collection()
-            all_records = db.find(_COLLECTION, None)
-            normalized = _normalize_date(as_of) if as_of else None
-            for rec in all_records:
-                ticker = (rec.get("ticker") or "").upper()
-                if ticker not in ticker_keys:
-                    continue
-                is_current = rec.get("is_current", 0)
-                if as_of and is_current != 0:
-                    continue
-                if not as_of and is_current != 1:
-                    continue
-                if as_of and rec.get("date") != normalized:
-                    continue
-                results[ticker] = {
-                    "price": rec.get("price"),
-                    "cached_at": rec.get("cached_at"),
-                    "source": rec.get("source"),
-                    "date": rec.get("date"),
-                    "is_current": bool(rec.get("is_current", 0))
-                }
+            query = query.filter(StockPriceModel.is_current == 1)
+
+        for row in query.all():
+            results[row.ticker.upper()] = {
+                "price": row.price,
+                "cached_at": row.cached_at.isoformat() if row.cached_at else None,
+                "source": row.source,
+                "date": row.date.isoformat() if row.date else None,
+                "is_current": bool(row.is_current)
+            }
     except Exception as exc:
         logger.warning("Failed to fetch cached prices for %s: %s", tickers, exc)
         results = {}
     finally:
-        if session:
-            session.close()
+        session.close()
 
     return results
 
