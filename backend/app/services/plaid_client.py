@@ -93,9 +93,15 @@ class PlaidClient:
             )
 
             response = self.client.link_token_create(request)
+
+            # Convert expiration datetime to ISO string format
+            expiration = response['expiration']
+            if isinstance(expiration, datetime):
+                expiration = expiration.isoformat()
+
             return {
                 "link_token": response['link_token'],
-                "expiration": response['expiration'],
+                "expiration": expiration,
             }
         except ApiException as e:
             logger.error(f"Failed to create link token for user {user_id}: {e}")
