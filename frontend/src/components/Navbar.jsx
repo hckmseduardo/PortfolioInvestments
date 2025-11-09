@@ -44,7 +44,7 @@ const Navbar = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const theme = useTheme();
   const { toggleMode, mode } = useThemeMode();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isMobile = useMediaQuery(theme.breakpoints.down('lg'));
 
   const handleMenu = (event) => {
     setAnchorEl(event.currentTarget);

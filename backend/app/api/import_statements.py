@@ -364,7 +364,7 @@ async def import_statement(
         "file_path": str(file_path),
         "file_size": os.path.getsize(file_path),
         "file_type": Path(file.filename).suffix.lower(),
-        "status": "pending",
+        "status": "queued",
         "user_id": current_user.id,
         "account_id": account_id,
         "uploaded_at": datetime.now().isoformat(),
@@ -378,9 +378,19 @@ async def import_statement(
     }
     statement = db.insert("statements", statement_doc)
 
+    # Automatically enqueue processing job
+    job = enqueue_statement_job(
+        user_id=current_user.id,
+        statement_id=statement['id'],
+        action="process",
+    )
+
+    logger.info(f"Statement {statement['id']} uploaded and queued for processing with job {job.id}")
+
     return {
-        "message": "Statement uploaded successfully",
+        "message": "Statement uploaded and queued for processing",
         "statement_id": statement['id'],
+        "job_id": job.id,
         "statement": statement
     }
 
