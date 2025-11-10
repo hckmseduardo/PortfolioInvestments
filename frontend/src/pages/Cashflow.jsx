@@ -1440,7 +1440,7 @@ const Cashflow = () => {
                     getAccountLabel={getAccountLabel}
                     getCategoryColor={getCategoryColor}
                     renderCategoryLabel={renderCategoryLabel}
-                    categories={categories}
+                    categories={categories.filter(cat => cat.type === 'expense')}
                   />
                 ))
               )}
@@ -1578,7 +1578,7 @@ const Cashflow = () => {
                           <MenuItem key="all-categories" value="">
                             <em>All Categories</em>
                           </MenuItem>
-                          {categories.map((category) => (
+                          {categories.filter(cat => cat.type === 'expense').map((category) => (
                             <MenuItem key={category.id} value={category.name}>
                               {renderCategoryLabel(category.name, category.name)}
                             </MenuItem>
@@ -1705,7 +1705,7 @@ const Cashflow = () => {
                               <MenuItem key="uncategorized-category" value="Uncategorized">
                                 {renderCategoryLabel('Uncategorized', 'Uncategorized')}
                               </MenuItem>
-                              {categories.map(cat => (
+                              {categories.filter(cat => cat.type === 'expense').map(cat => (
                                 <MenuItem key={cat.id} value={cat.name}>
                                   {renderCategoryLabel(cat.name, cat.name)}
                                 </MenuItem>
@@ -1780,7 +1780,7 @@ const Cashflow = () => {
                   <MenuItem value="">
                     <em>Select category</em>
                   </MenuItem>
-                  {categories.map((category) => (
+                  {categories.filter(cat => cat.type === 'expense').map((category) => (
                     <MenuItem key={category.id} value={category.name}>
                       {renderCategoryLabel(category.name, category.name)}
                     </MenuItem>

@@ -17,12 +17,16 @@ import {
   LinearProgress,
   Tabs,
   Tab,
-  TableSortLabel
+  TableSortLabel,
+  useMediaQuery,
+  useTheme
 } from '@mui/material';
 import { dividendsAPI, accountsAPI, instrumentsAPI } from '../services/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Line, ComposedChart } from 'recharts';
 import { stickyTableHeadSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
+import { useMobileClick } from '../utils/useMobileClick';
+import DividendCard from '../components/DividendCard';
 
 const PIE_COLORS = [
   '#0088FE',
@@ -53,6 +57,8 @@ const PRESET_OPTIONS = [
 ];
 
 const Dividends = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [summary, setSummary] = useState(null);
   const [dividends, setDividends] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -369,20 +375,25 @@ const Dividends = () => {
     setSelectedMonth((prev) => (prev === clickedMonth ? '' : clickedMonth));
   }, []);
 
-  const handleTickerPieClick = useCallback((data) => {
+  const handleTickerPieClickBase = useCallback((data) => {
     if (!data || !data.name) return;
     setSelectedTicker((prev) => (prev === data.name ? '' : data.name));
   }, []);
 
-  const handleTypePieClick = useCallback((data) => {
+  const handleTypePieClickBase = useCallback((data) => {
     if (!data || !data.name) return;
     setSelectedType((prev) => (prev === data.name ? '' : data.name));
   }, []);
 
-  const handleIndustryPieClick = useCallback((data) => {
+  const handleIndustryPieClickBase = useCallback((data) => {
     if (!data || !data.name) return;
     setSelectedIndustry((prev) => (prev === data.name ? '' : data.name));
   }, []);
+
+  // Use mobile-aware click handlers (double-click on mobile, single-click on desktop)
+  const handleTickerPieClick = useMobileClick(handleTickerPieClickBase);
+  const handleTypePieClick = useMobileClick(handleTypePieClickBase);
+  const handleIndustryPieClick = useMobileClick(handleIndustryPieClickBase);
 
   const statementRows = useMemo(() => {
     let filtered = dividends;
@@ -558,44 +569,96 @@ const Dividends = () => {
         </Grid>
 
         <Grid item xs={12}>
-          <Paper sx={{ p: 3 }}>
-            <Stack spacing={2}>
-              <Typography variant="subtitle1">
+          <Paper sx={{ p: isMobile ? 2 : 3 }}>
+            <Stack spacing={isMobile ? 1.5 : 2}>
+              <Typography variant={isMobile ? 'body1' : 'subtitle1'} sx={{ fontWeight: 600 }}>
                 Filter by period
               </Typography>
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ gap: 0.5 }}>
-                {PRESET_OPTIONS.map((preset) => (
-                  <Button
-                    key={preset.value}
-                    variant={selectedPreset === preset.value ? 'contained' : 'outlined'}
-                    size="small"
-                    onClick={() => applyPreset(preset.value)}
-                  >
-                    {preset.label}
-                  </Button>
-                ))}
-              </Stack>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+
+              {/* Mobile: Grid layout for better touch targets */}
+              {isMobile ? (
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: 1,
+                    mb: 1
+                  }}
+                >
+                  {PRESET_OPTIONS.map((preset) => (
+                    <Button
+                      key={preset.value}
+                      variant={selectedPreset === preset.value ? 'contained' : 'outlined'}
+                      size="medium"
+                      onClick={() => applyPreset(preset.value)}
+                      sx={{
+                        minHeight: 44,
+                        fontSize: '0.875rem',
+                        fontWeight: selectedPreset === preset.value ? 600 : 500,
+                        boxShadow: selectedPreset === preset.value ? 2 : 0,
+                        textTransform: 'none'
+                      }}
+                    >
+                      {preset.label}
+                    </Button>
+                  ))}
+                </Box>
+              ) : (
+                /* Desktop: Row layout */
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ gap: 0.5 }}>
+                  {PRESET_OPTIONS.map((preset) => (
+                    <Button
+                      key={preset.value}
+                      variant={selectedPreset === preset.value ? 'contained' : 'outlined'}
+                      size="small"
+                      onClick={() => applyPreset(preset.value)}
+                    >
+                      {preset.label}
+                    </Button>
+                  ))}
+                </Stack>
+              )}
+
+              {/* Custom Date Range */}
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={isMobile ? 1.5 : 2} alignItems={{ xs: 'stretch', sm: 'center' }}>
                 <TextField
                   label="Start date"
                   type="date"
-                  size="small"
+                  size={isMobile ? 'medium' : 'small'}
                   value={startDate}
                   onChange={handleStartDateChange}
                   InputLabelProps={{ shrink: true }}
+                  fullWidth={isMobile}
+                  sx={isMobile ? {
+                    '& .MuiInputBase-root': {
+                      minHeight: 48
+                    }
+                  } : {}}
                 />
                 <TextField
                   label="End date"
                   type="date"
-                  size="small"
+                  size={isMobile ? 'medium' : 'small'}
                   value={endDate}
                   onChange={handleEndDateChange}
                   InputLabelProps={{ shrink: true }}
+                  fullWidth={isMobile}
+                  sx={isMobile ? {
+                    '& .MuiInputBase-root': {
+                      minHeight: 48
+                    }
+                  } : {}}
                 />
                 <Button
-                  variant="text"
-                  size="small"
+                  variant={isMobile ? 'outlined' : 'text'}
+                  size={isMobile ? 'medium' : 'small'}
                   onClick={() => applyPreset('all')}
+                  fullWidth={isMobile}
+                  sx={isMobile ? {
+                    minHeight: 48,
+                    textTransform: 'none',
+                    fontWeight: 500
+                  } : {}}
                 >
                   Clear filters
                 </Button>
@@ -948,10 +1011,23 @@ const Dividends = () => {
               />
             </Box>
             {statementRows.length === 0 ? (
-              <Typography color="textSecondary">
+              <Typography color="textSecondary" py={isMobile ? 3 : 2}>
                 No dividend transactions for the selected period.
               </Typography>
+            ) : isMobile ? (
+              /* Mobile: Card View */
+              <Box>
+                {sortedStatementRows.map((row) => (
+                  <DividendCard
+                    key={row.rowKey}
+                    row={row}
+                    formatDateTime={formatDateTime}
+                    formatCurrency={formatCurrency}
+                  />
+                ))}
+              </Box>
             ) : (
+              /* Desktop: Table View */
               <TableContainer>
                 <Table size="small" stickyHeader>
                   <TableHead sx={stickyTableHeadSx}>

@@ -33,7 +33,9 @@ import {
   IconButton,
   Snackbar,
   Alert,
-  TableSortLabel
+  TableSortLabel,
+  useMediaQuery,
+  useTheme
 } from '@mui/material';
 import {
   Refresh,
@@ -42,13 +44,15 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Business as BusinessIcon,
-  FilterAlt as FilterIcon
+  FilterAlt as FilterIcon,
+  Clear as ClearIcon
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { positionsAPI, accountsAPI, instrumentsAPI } from '../services/api';
 import { alpha } from '@mui/material/styles';
 import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
+import { useMobileClick } from '../utils/useMobileClick';
 
 const DATE_PRESETS = {
   CURRENT: 'current',
@@ -132,6 +136,8 @@ const computeValuationDate = (preset, specificMonthValue, endOfYearValue) => {
 };
 
 const Portfolio = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [positions, setPositions] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
@@ -756,17 +762,21 @@ const Portfolio = () => {
     [editingIndustry, loadInstrumentMetadata, selectedIndustryId, showSnackbar]
   );
 
-  const handleIndustrySliceClick = useCallback((slice) => {
+  const handleIndustrySliceClickBase = useCallback((slice) => {
     if (!slice) return;
     const sliceId = slice.industry_id ?? UNCLASSIFIED_SENTINEL;
     setSelectedIndustryId((prev) => (prev === sliceId ? '' : sliceId));
   }, []);
 
-  const handleTypeSliceClick = useCallback((slice) => {
+  const handleTypeSliceClickBase = useCallback((slice) => {
     if (!slice) return;
     const sliceId = slice.type_id ?? UNCLASSIFIED_SENTINEL;
     setSelectedTypeId((prev) => (prev === sliceId ? '' : sliceId));
   }, []);
+
+  // Use mobile-aware click handlers (double-click on mobile, single-click on desktop)
+  const handleIndustrySliceClick = useMobileClick(handleIndustrySliceClickBase);
+  const handleTypeSliceClick = useMobileClick(handleTypeSliceClickBase);
 
   const clearIndustryFilter = useCallback(() => {
     setSelectedIndustryId('');
@@ -982,21 +992,26 @@ const Portfolio = () => {
         </Stack>
       </Box>
 
-      <Paper sx={{ p: 2, mb: 3 }}>
+      <Paper sx={{ p: isMobile ? 2 : 2, mb: 3 }}>
         <Stack
           direction={{ xs: 'column', md: 'row' }}
-          spacing={2}
+          spacing={isMobile ? 1.5 : 2}
           useFlexGap
           flexWrap="wrap"
-          alignItems={{ xs: 'flex-start', md: 'center' }}
+          alignItems={{ xs: 'stretch', md: 'center' }}
         >
-          <FormControl size="small" sx={{ minWidth: 200 }}>
+          <FormControl size={isMobile ? 'medium' : 'small'} sx={{ minWidth: isMobile ? '100%' : 200 }}>
             <InputLabel id="portfolio-account-select">Account</InputLabel>
             <Select
               labelId="portfolio-account-select"
               value={selectedAccountId}
               label="Account"
               onChange={(event) => setSelectedAccountId(event.target.value)}
+              sx={isMobile ? {
+                '& .MuiInputBase-root': {
+                  minHeight: 48
+                }
+              } : {}}
             >
               <MenuItem value="">
                 All accounts
@@ -1009,13 +1024,18 @@ const Portfolio = () => {
             </Select>
           </FormControl>
 
-          <FormControl size="small" sx={{ minWidth: 200 }}>
+          <FormControl size={isMobile ? 'medium' : 'small'} sx={{ minWidth: isMobile ? '100%' : 200 }}>
             <InputLabel id="portfolio-date-select">Valuation</InputLabel>
             <Select
               labelId="portfolio-date-select"
               value={datePreset}
               label="Valuation"
               onChange={(event) => setDatePreset(event.target.value)}
+              sx={isMobile ? {
+                '& .MuiInputBase-root': {
+                  minHeight: 48
+                }
+              } : {}}
             >
               <MenuItem value={DATE_PRESETS.CURRENT}>Current Price</MenuItem>
               <MenuItem value={DATE_PRESETS.LAST_MONTH}>Last Month</MenuItem>
@@ -1030,43 +1050,66 @@ const Portfolio = () => {
             <TextField
               label="Month"
               type="month"
-              size="small"
+              size={isMobile ? 'medium' : 'small'}
               value={specificMonth}
               onChange={(event) => setSpecificMonth(event.target.value)}
               InputLabelProps={{ shrink: true }}
+              fullWidth={isMobile}
+              sx={isMobile ? {
+                '& .MuiInputBase-root': {
+                  minHeight: 48
+                }
+              } : {}}
             />
           )}
           {datePreset === DATE_PRESETS.END_OF_YEAR && (
             <TextField
               label="Year"
               type="number"
-              size="small"
+              size={isMobile ? 'medium' : 'small'}
               value={endOfYear}
               onChange={(event) => setEndOfYear(event.target.value)}
               InputProps={{ inputProps: { min: 1900, max: 9999 } }}
+              fullWidth={isMobile}
+              sx={isMobile ? {
+                '& .MuiInputBase-root': {
+                  minHeight: 48
+                }
+              } : {}}
             />
           )}
           {datePreset !== DATE_PRESETS.CURRENT && (
             <Button
-              variant="text"
-              size="small"
+              variant={isMobile ? 'outlined' : 'text'}
+              size={isMobile ? 'medium' : 'small'}
               onClick={() => {
                 setDatePreset(DATE_PRESETS.CURRENT);
                 setSpecificMonth('');
                 setEndOfYear('');
               }}
+              fullWidth={isMobile}
+              sx={isMobile ? {
+                minHeight: 48,
+                textTransform: 'none',
+                fontWeight: 500
+              } : {}}
             >
               Clear selection
             </Button>
           )}
 
-          <FormControl size="small" sx={{ minWidth: 200 }}>
+          <FormControl size={isMobile ? 'medium' : 'small'} sx={{ minWidth: isMobile ? '100%' : 200 }}>
             <InputLabel id="portfolio-type-select">Type</InputLabel>
             <Select
               labelId="portfolio-type-select"
               value={selectedTypeId}
               label="Type"
               onChange={(event) => setSelectedTypeId(event.target.value)}
+              sx={isMobile ? {
+                '& .MuiInputBase-root': {
+                  minHeight: 48
+                }
+              } : {}}
               renderValue={(value) => {
                 if (!value) {
                   return <em>All types</em>;
@@ -1097,13 +1140,18 @@ const Portfolio = () => {
               ))}
             </Select>
           </FormControl>
-          <FormControl size="small" sx={{ minWidth: 200 }}>
+          <FormControl size={isMobile ? 'medium' : 'small'} sx={{ minWidth: isMobile ? '100%' : 200 }}>
             <InputLabel id="portfolio-industry-select">Industry</InputLabel>
             <Select
               labelId="portfolio-industry-select"
               value={selectedIndustryId}
               label="Industry"
               onChange={(event) => setSelectedIndustryId(event.target.value)}
+              sx={isMobile ? {
+                '& .MuiInputBase-root': {
+                  minHeight: 48
+                }
+              } : {}}
               renderValue={(value) => {
                 if (!value) {
                   return <em>All industries</em>;
@@ -1337,7 +1385,7 @@ const Portfolio = () => {
       ) : (
         <>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-            {hasColumnFilters && (
+            {hasColumnFilters && !isMobile && (
               <Button size="small" onClick={resetColumnFilters}>
                 Clear column filters
               </Button>
@@ -1457,7 +1505,18 @@ const Portfolio = () => {
                   <TableCell align="right">{renderFilterField('book_value', 'Book')}</TableCell>
                   <TableCell align="right">{renderFilterField('market_value', 'Market')}</TableCell>
                   <TableCell align="right">{renderFilterField('gain_loss', 'Gain')}</TableCell>
-                  <TableCell align="right">{renderFilterField('gain_loss_percent', '%')}</TableCell>
+                  <TableCell align="right">
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.5 }}>
+                      {renderFilterField('gain_loss_percent', '%')}
+                      {hasColumnFilters && isMobile && (
+                        <Tooltip title="Clear all filters">
+                          <IconButton size="small" onClick={resetColumnFilters} sx={{ p: 0.5 }}>
+                            <ClearIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </Box>
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>

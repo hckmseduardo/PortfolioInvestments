@@ -497,14 +497,31 @@ async def initialize_default_categories(
     if existing_categories:
         return {"message": "Categories already exist", "count": len(existing_categories)}
 
-    # Define default categories with colors
+    # Define default categories with colors - separated by type
     default_categories = [
         # Income categories
-        {"name": "Income", "type": "income", "color": "#4CAF50", "budget_limit": None},
+        {"name": "Salary", "type": "income", "color": "#4CAF50", "budget_limit": None},
+        {"name": "Bonus", "type": "income", "color": "#66BB6A", "budget_limit": None},
+        {"name": "Freelance", "type": "income", "color": "#81C784", "budget_limit": None},
+        {"name": "Dividends", "type": "income", "color": "#A5D6A7", "budget_limit": None},
+        {"name": "Interest", "type": "income", "color": "#C8E6C9", "budget_limit": None},
+        {"name": "Other Income", "type": "income", "color": "#8BC34A", "budget_limit": None},
 
         # Investment categories
-        {"name": "Investment In", "type": "investment", "color": "#1976D2", "budget_limit": None},
-        {"name": "Investment Out", "type": "investment", "color": "#0D47A1", "budget_limit": None},
+        {"name": "Stock Purchase", "type": "investment", "color": "#1976D2", "budget_limit": None},
+        {"name": "ETF Purchase", "type": "investment", "color": "#2196F3", "budget_limit": None},
+        {"name": "Crypto Purchase", "type": "investment", "color": "#42A5F5", "budget_limit": None},
+        {"name": "Retirement Fund", "type": "investment", "color": "#64B5F6", "budget_limit": None},
+        {"name": "Stock Sale", "type": "investment", "color": "#0D47A1", "budget_limit": None},
+        {"name": "ETF Sale", "type": "investment", "color": "#1565C0", "budget_limit": None},
+        {"name": "Crypto Sale", "type": "investment", "color": "#1976D2", "budget_limit": None},
+        {"name": "Other Investment", "type": "investment", "color": "#90CAF9", "budget_limit": None},
+
+        # Transfer categories
+        {"name": "Bank Transfer", "type": "transfer", "color": "#607D8B", "budget_limit": None},
+        {"name": "Credit Card Payment", "type": "transfer", "color": "#78909C", "budget_limit": None},
+        {"name": "Account Transfer", "type": "transfer", "color": "#90A4AE", "budget_limit": None},
+        {"name": "E-Transfer", "type": "transfer", "color": "#B0BEC5", "budget_limit": None},
 
         # Expense categories
         {"name": "Groceries", "type": "expense", "color": "#8BC34A", "budget_limit": None},
@@ -515,10 +532,14 @@ async def initialize_default_categories(
         {"name": "Shopping", "type": "expense", "color": "#00BCD4", "budget_limit": None},
         {"name": "Healthcare", "type": "expense", "color": "#F44336", "budget_limit": None},
         {"name": "Bills", "type": "expense", "color": "#795548", "budget_limit": None},
-        {"name": "Transfer", "type": "transfer", "color": "#607D8B", "budget_limit": None},
         {"name": "ATM", "type": "expense", "color": "#9E9E9E", "budget_limit": None},
         {"name": "Fees", "type": "expense", "color": "#FF5722", "budget_limit": None},
-        {"name": "Uncategorized", "type": "expense", "color": "#757575", "budget_limit": None},
+        {"name": "Insurance", "type": "expense", "color": "#3F51B5", "budget_limit": None},
+        {"name": "Housing", "type": "expense", "color": "#673AB7", "budget_limit": None},
+        {"name": "Education", "type": "expense", "color": "#009688", "budget_limit": None},
+        {"name": "Personal Care", "type": "expense", "color": "#CDDC39", "budget_limit": None},
+        {"name": "Gifts", "type": "expense", "color": "#FFC107", "budget_limit": None},
+        {"name": "Other Expense", "type": "expense", "color": "#757575", "budget_limit": None},
     ]
 
     created_categories = []

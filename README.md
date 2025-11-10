@@ -2,6 +2,14 @@
 
 A comprehensive investment portfolio management platform that allows users to import and analyze their Wealthsimple statements, track account performance, and manage checking account expenses.
 
+## Quick Links
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [API Documentation](#api-endpoints)
+- [Monitoring](#monitoring--observability)
+- [Troubleshooting](#troubleshooting)
+
 ## Features
 
 - **Multi-Bank Statement Import & Processing**:
@@ -32,6 +40,22 @@ A comprehensive investment portfolio management platform that allows users to im
 - **Real-time Market Data**: Automatic price updates with configurable fallbacks (TradingView, Yahoo Finance, Alpha Vantage, TwelveData, Stooq)
 - **Expanded Price Providers**: Alpha Vantage fallback plus TradingView, Stooq, and TwelveData (optional API keys) for improved Canadian coverage
 - **🆕 PostgreSQL Migration**: Seamless migration from JSON to PostgreSQL with automatic data import on first login
+- **Mobile-Optimized Interface**:
+  - Responsive design for all screen sizes (desktop, tablet, mobile)
+  - Touch-friendly interactions with smart double-tap filtering on pie charts
+  - Mobile users can view tooltips before filtering (double-tap), desktop remains single-click
+  - Optimized navigation and controls for mobile devices
+- **Interactive Data Visualization**:
+  - Clickable charts for dynamic filtering
+  - Hover tooltips with detailed information
+  - Time series analysis with custom date ranges
+  - Drill-down capabilities on pie charts
+  - Multi-dimensional data comparison
+- **Export Capabilities**:
+  - PDF reports with formatted data and charts
+  - CSV exports for Excel compatibility
+  - Excel spreadsheets with multiple sheets
+  - Available across Portfolio, Transactions, Dividends, and Expenses pages
 
 ## Tech Stack
 
@@ -46,17 +70,30 @@ A comprehensive investment portfolio management platform that allows users to im
 - **JWT Authentication**: Secure user authentication
 
 ### Frontend
-- **React 18**: Modern UI library
-- **Material-UI**: Component library
-- **Recharts**: Interactive data visualizations
-- **React Router**: Client-side routing
-- **Axios**: HTTP client
+- **React 18**: Modern UI library with hooks and concurrent features
+- **Material-UI v5**: Comprehensive component library with theming
+- **Recharts**: Interactive and responsive data visualizations
+- **React Router v6**: Client-side routing with nested routes
+- **Axios**: HTTP client with request/response interceptors
+- **jsPDF & html2canvas**: Client-side PDF report generation
+- **XLSX**: Excel file generation and parsing
+- **DOMPurify**: XSS protection for user-generated content
 
 ### Infrastructure
-- **Docker**: Containerization
+- **Docker**: Containerization for consistent environments
 - **Docker Compose**: Multi-container orchestration
 - **PostgreSQL 16**: Production database with automatic migration
+- **Redis**: In-memory data store for caching and job queues
 - **Nginx**: Frontend web server and reverse proxy
+- **RQ (Redis Queue)**: Background job processing for async operations
+
+### Monitoring & Observability
+- **Prometheus**: Metrics collection and time-series database
+- **Grafana**: Visual dashboards and alerting
+- **PostgreSQL Exporter**: Database performance metrics
+- **Redis Exporter**: Cache and queue monitoring
+- **Node Exporter**: System-level metrics
+- **cAdvisor**: Container resource usage monitoring
 
 ## Quick Start
 
@@ -69,7 +106,7 @@ A comprehensive investment portfolio management platform that allows users to im
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd InvestingPlataform
+cd PortfolioInvestments
 ```
 
 2. Create environment file:
@@ -106,10 +143,12 @@ docker-compose up --build
 ```
 
 5. Access the application:
-- Frontend: http://localhost
-- Backend API: http://localhost:8000
-- API Documentation: http://localhost:8000/docs
-- pgAdmin (PostgreSQL explorer): http://localhost:5050 (or the port set in `PGADMIN_PORT`)
+- **Frontend**: http://localhost
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+- **pgAdmin** (PostgreSQL explorer): http://localhost:5050 (or the port set in `PGADMIN_PORT`)
+- **Grafana** (Monitoring dashboards): http://localhost:3001 (default credentials: admin/admin)
+- **Prometheus** (Metrics): http://localhost:9090
 - Redis is embedded automatically for background jobs; no manual action required.
 
 **Note**: On first login, your data will be automatically migrated from JSON to PostgreSQL if you have existing data.
@@ -151,8 +190,71 @@ docker-compose up --build
 1. A second worker container (`statement-worker`) listens to the `statement_processing` queue (configurable via `STATEMENT_QUEUE_NAME`).
 2. Uploading a statement stores the file immediately; clicking **Process** or **Reprocess** enqueues a background job handled by the worker so the API never blocks.
 3. You can reprocess every statement (optionally scoped to one account) via `POST /api/import/statements/reprocess-all`. The worker clears prior transactions/dividends/positions for the impacted account(s) and rebuilds them in chronological order.
-4. If a file was assigned to the wrong account, `PUT /api/import/statements/{id}/account` reassigns it, removes the previously imported transactions, recalculates the old account’s positions, and queues a fresh job for the new account.
+4. If a file was assigned to the wrong account, `PUT /api/import/statements/{id}/account` reassigns it, removes the previously imported transactions, recalculates the old account's positions, and queues a fresh job for the new account.
 5. Monitor any statement job via `GET /api/import/jobs/{job_id}`. Responses include queue status plus the worker result payload (counts, per-account summaries, or failure trace) so the UI can poll and surface progress.
+
+## Monitoring & Observability
+
+The platform includes comprehensive monitoring tools for production deployments:
+
+### Accessing Monitoring Tools
+
+1. **Grafana** (http://localhost:3001)
+   - Visual dashboards for all metrics
+   - Default credentials: `admin` / `admin` (change on first login)
+   - Pre-configured data sources for Prometheus
+   - Create custom dashboards for your needs
+
+2. **Prometheus** (http://localhost:9090)
+   - Raw metrics collection interface
+   - Query metrics using PromQL
+   - View targets and their health status
+   - Configure alerting rules
+
+### Available Metrics
+
+- **System Metrics** (via Node Exporter):
+  - CPU usage, memory, disk I/O
+  - Network traffic and connections
+  - System load averages
+
+- **Container Metrics** (via cAdvisor):
+  - Per-container resource usage
+  - CPU, memory, and network statistics
+  - Container health status
+
+- **Database Metrics** (via PostgreSQL Exporter):
+  - Connection pool status
+  - Query performance
+  - Table and index statistics
+  - Transaction rates
+
+- **Cache Metrics** (via Redis Exporter):
+  - Cache hit/miss rates
+  - Memory usage
+  - Queue depths for background jobs
+  - Key eviction statistics
+
+### Setting Up Custom Dashboards
+
+1. Log into Grafana at http://localhost:3001
+2. Navigate to Dashboards → New Dashboard
+3. Add panels with Prometheus as the data source
+4. Use PromQL queries to visualize your metrics
+5. Save and share dashboards with your team
+
+## Performance Optimizations
+
+The platform is built with performance in mind:
+
+- **Async Operations**: Long-running tasks (statement processing, expense conversion) run in background workers
+- **Lazy Loading**: Components and routes load on-demand to reduce initial bundle size
+- **Memoization**: React.memo, useMemo, and useCallback prevent unnecessary re-renders
+- **Background Price Updates**: Portfolio loads instantly while prices fetch asynchronously
+- **Database Indexing**: Optimized queries with proper indexes on frequently accessed columns
+- **Redis Caching**: Frequently accessed data cached to reduce database load
+- **Pagination**: Large datasets handled efficiently with server-side pagination
+- **Optimistic Updates**: UI updates immediately before server confirmation for better UX
 
 ### Migrating Existing JSON Data
 
@@ -261,17 +363,29 @@ npm run dev
 - See total transaction count and imported statements count
 
 ### 4. View Portfolio
-- Dashboard shows overview of all accounts and total portfolio value
-- Portfolio page displays detailed position table with:
-  - Current holdings
-  - Book value vs market value
-  - Unrealized gains/losses
-  - Percentage returns
+- **Dashboard**: Overview of all accounts and total portfolio value with customizable layout
+- **Portfolio Page**: Detailed position table with:
+  - Current holdings with real-time prices
+  - Book value vs market value comparison
+  - Unrealized gains/losses with percentages
+  - Performance returns over time
+- **Interactive Charts**:
+  - Industry allocation pie chart (click/double-tap to filter)
+  - Asset type distribution (click/double-tap to filter)
+  - Historical performance graphs
+- **Date Range Filters**: View portfolio as of specific dates or periods
+- **Instrument Classification**: Assign custom types and industries to your holdings
+- **Export Options**: Generate PDF reports or download CSV/Excel files
 
 ### 5. Track Dividends
-- View total dividend income
-- Bar chart showing dividends by month
-- Pie chart showing dividend distribution by ticker
+- **Summary Overview**: Total dividend income with year-over-year comparison
+- **Monthly Bar Chart**: Interactive chart showing dividends by month (double-click to filter)
+- **Distribution Charts**:
+  - By ticker (click/double-tap to filter)
+  - By asset type (click/double-tap to filter)
+  - By industry (click/double-tap to filter)
+- **Detailed Table**: Sortable dividend payments with filtering options
+- **Export Options**: Download dividend reports in PDF, CSV, or Excel format
 
 ### 6. Manage Expenses
 **NEW: Enhanced Expense Tracking System**
@@ -282,8 +396,10 @@ npm run dev
   - Supports 12 default categories: Groceries, Dining, Transportation, Utilities, Entertainment, Shopping, Healthcare, Bills, Transfer, ATM, Fees, and Uncategorized
 - **Interactive Category Management**:
   - Edit expense categories inline with color-coded dropdowns
+  - Bulk category assignment: Select multiple expenses and categorize at once
   - Create custom categories with your own colors and budget limits
   - Delete or modify existing categories
+  - Visual color picker for category customization
 - **Three-Tab Interface**:
   - **Overview Tab**: Total expenses, category breakdown (pie chart), and monthly trends (bar chart)
   - **Expense List Tab**: Detailed table of all expenses with inline category editing and filtering
@@ -296,11 +412,32 @@ npm run dev
   - Filter by category
   - Real-time updates on filter changes
 - **Re-categorization Support**: As you manually categorize expenses, the system learns and improves future auto-categorization
+- **Mobile Optimization**: Double-tap on pie charts to filter (allows viewing tooltips first)
+- **Export Options**: Download expense reports in PDF, CSV, or Excel format
 
-### 7. Refresh Market Prices
+### 7. Export Data
+- **PDF Reports**: Generate professional formatted reports with charts and data
+  - Includes all visible tables and charts
+  - Preserves formatting and colors
+  - Print-ready output
+- **CSV Export**: Download data for use in Excel or other spreadsheet tools
+  - All filtered data included
+  - Compatible with Excel, Google Sheets, etc.
+- **Excel Export**: Structured spreadsheets with multiple sheets
+  - Separate sheets for different data types
+  - Formatted headers and data
+- **Available On**: Portfolio, Transactions, Dividends, and Expenses pages
+
+### 8. Refresh Market Prices
 - Click "Refresh Prices" on Portfolio page
-- System fetches current market prices from Yahoo Finance
+- System fetches current market prices from multiple sources with automatic fallback:
+  - TradingView (primary)
+  - Yahoo Finance
+  - Alpha Vantage
+  - TwelveData
+  - Stooq
 - Updates all position values automatically
+- Background processing keeps UI responsive
 
 ## API Endpoints
 
@@ -524,55 +661,135 @@ The system automatically detects which bank a statement is from based on:
 ## Project Structure
 
 ```
-InvestingPlataform/
+PortfolioInvestments/
 ├── backend/
 │   ├── app/
-│   │   ├── api/              # API endpoints
-│   │   ├── database/         # JSON database layer
-│   │   ├── models/           # Pydantic schemas
-│   │   ├── parsers/          # Statement parsers
-│   │   ├── services/         # Business logic
-│   │   ├── config.py         # Configuration
-│   │   └── main.py           # FastAPI app
-│   ├── data/                 # JSON database files
-│   ├── uploads/              # Uploaded statements
+│   │   ├── api/              # API endpoints (FastAPI routes)
+│   │   ├── database/         # Database layer (PostgreSQL + legacy JSON)
+│   │   ├── models/           # Pydantic schemas and SQLAlchemy models
+│   │   ├── parsers/          # Statement parsers (Wealthsimple, Tangerine, NBC)
+│   │   ├── services/         # Business logic and external APIs
+│   │   ├── workers/          # Background job workers (RQ)
+│   │   ├── config.py         # Configuration and environment variables
+│   │   └── main.py           # FastAPI application entry point
+│   ├── data/                 # Legacy JSON database files
+│   ├── uploads/              # Uploaded statement files
+│   ├── alembic/              # Database migrations
 │   ├── Dockerfile
 │   └── requirements.txt
+│
 ├── frontend/
 │   ├── src/
-│   │   ├── components/       # React components
-│   │   ├── context/          # React context
-│   │   ├── pages/            # Page components
-│   │   ├── services/         # API services
-│   │   ├── App.jsx           # Main app component
-│   │   └── main.jsx          # Entry point
-│   ├── Dockerfile
-│   ├── nginx.conf
+│   │   ├── components/       # Reusable React components
+│   │   ├── context/          # React context providers (Auth, etc.)
+│   │   ├── pages/            # Page components (Portfolio, Dividends, etc.)
+│   │   ├── services/         # API service layer (Axios)
+│   │   ├── utils/            # Utility functions and hooks
+│   │   ├── App.jsx           # Main app component with routing
+│   │   └── main.jsx          # React entry point
+│   ├── public/               # Static assets
+│   ├── Dockerfile            # Multi-stage build (Node + Nginx)
+│   ├── nginx.conf            # Nginx configuration
+│   ├── vite.config.js        # Vite build configuration
 │   └── package.json
-├── docker-compose.yml
-└── README.md
+│
+├── workers/
+│   ├── expense_worker/       # Expense conversion background worker
+│   ├── statement_worker/     # Statement processing background worker
+│   ├── price_worker/         # Price update background worker
+│   └── plaid_worker/         # Plaid integration worker
+│
+├── monitoring/
+│   ├── prometheus/           # Prometheus configuration
+│   └── grafana/              # Grafana dashboards and provisioning
+│
+├── docker-compose.yml        # Multi-container orchestration
+├── .env.example              # Environment variables template
+├── README.md                 # This file
+└── POSTGRES_MIGRATION.md     # PostgreSQL migration guide
 ```
 
 ## Security Considerations
 
-- JWT tokens for authentication
-- Password hashing with bcrypt
-- CORS configuration
-- File upload validation
-- Environment variable configuration
-- HTTPS recommended for production
+- **Authentication & Authorization**:
+  - JWT tokens with secure token-based authentication
+  - Automatic token refresh mechanism
+  - Session management with expiration
+  - User-scoped data access control
+
+- **Password Security**:
+  - bcrypt hashing with appropriate salt rounds
+  - No plaintext password storage
+  - Secure password reset flows (when implemented)
+
+- **Data Protection**:
+  - SQL injection prevention via SQLAlchemy ORM with parameterized queries
+  - XSS protection with input sanitization (DOMPurify)
+  - CORS configuration for restricted cross-origin requests
+  - File upload validation (type, size, and content checks)
+
+- **Infrastructure Security**:
+  - Environment variables for sensitive configuration
+  - No secrets committed to repository (.env in .gitignore)
+  - HTTPS/TLS ready with nginx configuration
+  - Container isolation via Docker
+  - Network segmentation in docker-compose
+
+- **Best Practices**:
+  - Regular dependency updates
+  - Secure default configurations
+  - Audit logging for sensitive operations
+  - Rate limiting on API endpoints (recommended for production)
+  - Database connection pooling with limits
+
+- **Production Recommendations**:
+  - Enable HTTPS/SSL certificates (Let's Encrypt recommended)
+  - Configure firewall rules
+  - Set up regular database backups
+  - Enable Prometheus alerting for security events
+  - Use strong SECRET_KEY and database passwords
+  - Restrict pgAdmin access in production
 
 ## Future Enhancements
 
-- Multi-currency support
-- Tax loss harvesting suggestions
-- Portfolio rebalancing recommendations
-- Email notifications
-- Mobile responsive design improvements
-- Export reports to PDF/Excel
-- Advanced charting and analytics
-- Benchmark comparisons (S&P 500, TSX)
-- Time-weighted and money-weighted returns
+- **Advanced Features**:
+  - Multi-currency support with real-time conversion
+  - Tax loss harvesting suggestions and tracking
+  - Portfolio rebalancing recommendations based on target allocations
+  - What-if scenarios and portfolio modeling
+  - Tax reporting and capital gains calculations
+
+- **Notifications & Alerts**:
+  - Email notifications for dividends, price alerts, and portfolio milestones
+  - Push notifications for mobile devices
+  - Custom alert rules based on portfolio performance
+
+- **Data & Analytics**:
+  - Benchmark comparisons (S&P 500, TSX, custom indices)
+  - Time-weighted and money-weighted returns (IRR)
+  - Sector correlation analysis
+  - Risk metrics (Sharpe ratio, beta, standard deviation)
+  - Monte Carlo simulations for retirement planning
+
+- **Integrations**:
+  - Plaid integration for automatic bank syncing
+  - Direct broker API connections (Questrade, Interactive Brokers)
+  - Calendar integration for dividend dates
+  - Automated scheduled imports
+
+- **User Experience**:
+  - Native mobile apps (iOS/Android)
+  - Dark mode theme
+  - Customizable dashboard widgets
+  - Multi-user support with family accounts
+  - Internationalization (i18n) for multiple languages
+
+- **Advanced Tools**:
+  - AI-powered investment insights
+  - Automated portfolio analysis reports
+  - Goals tracking (retirement, savings targets)
+  - Debt tracking and payoff calculators
+  - Net worth tracking across all assets
 
 ## Troubleshooting
 
@@ -587,9 +804,32 @@ InvestingPlataform/
 - Verify npm dependencies are installed
 
 ### Statement import failing
-- Verify file format (PDF, CSV, Excel)
+- Verify file format (PDF, CSV, Excel, QFX/OFX)
 - Check file size limits
 - Review backend logs for parsing errors
+- Ensure background workers are running: `docker-compose ps`
+- Check worker logs: `docker-compose logs statement-worker`
+
+### Monitoring tools not accessible
+- Verify all containers are running: `docker-compose ps`
+- Check Grafana logs: `docker-compose logs grafana`
+- Check Prometheus logs: `docker-compose logs prometheus`
+- Ensure ports are not blocked by firewall
+- Default ports: Grafana (3001), Prometheus (9090)
+
+### Background jobs not processing
+- Check Redis is running: `docker-compose ps redis`
+- Verify workers are running: `docker-compose ps | grep worker`
+- Check Redis connection: `docker-compose exec redis redis-cli ping`
+- Review worker logs: `docker-compose logs expense-worker`
+- Clear stuck jobs: Connect to Redis and inspect queues
+
+### Performance issues
+- Check container resource usage: `docker stats`
+- Review Grafana dashboards for bottlenecks
+- Ensure database indexes are created
+- Check Redis memory usage
+- Consider increasing container resource limits in docker-compose.yml
 
 ## Contributing
 
