@@ -38,7 +38,8 @@ import {
   Add as AddIcon,
   Refresh as RefreshIcon,
   Category as CategoryIcon,
-  FilterAlt as FilterAltIcon
+  FilterAlt as FilterAltIcon,
+  Clear as ClearIcon
 } from '@mui/icons-material';
 import { expensesAPI, accountsAPI } from '../services/api';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, LineChart, Line } from 'recharts';
@@ -208,6 +209,61 @@ const Expenses = () => {
 
   const resetTableFilters = () => {
     setTableFilters({ ...TABLE_FILTER_DEFAULTS });
+  };
+
+  const handleFilterByDescription = (description) => {
+    // Set the filter
+    handleTableFilterChange('description', description || '');
+
+    // Auto-select all matching expenses
+    const matchingExpenses = expenses.filter(expense =>
+      String(expense.description || '').toLowerCase() === String(description || '').toLowerCase()
+    );
+    const matchingIds = matchingExpenses.map(exp => exp.id);
+    setSelectedExpenseIds(matchingIds);
+  };
+
+  const handleFilterByAmount = (amount) => {
+    // Filter by amount +/- 10%
+    const amountNum = Number(amount) || 0;
+    const minAmount = amountNum * 0.9;
+    const maxAmount = amountNum * 1.1;
+
+    handleTableFilterChange('amountMin', minAmount.toFixed(2));
+    handleTableFilterChange('amountMax', maxAmount.toFixed(2));
+
+    // Auto-select all matching expenses
+    const matchingExpenses = expenses.filter(expense => {
+      const expAmount = Number(expense.amount) || 0;
+      return expAmount >= minAmount && expAmount <= maxAmount;
+    });
+    const matchingIds = matchingExpenses.map(exp => exp.id);
+    setSelectedExpenseIds(matchingIds);
+  };
+
+  const clearColumnFilter = (column) => {
+    const updates = { ...tableFilters };
+    switch (column) {
+      case 'date':
+        updates.date = '';
+        break;
+      case 'description':
+        updates.description = '';
+        break;
+      case 'account':
+        updates.account = '';
+        break;
+      case 'amount':
+        updates.amountMin = '';
+        updates.amountMax = '';
+        break;
+      case 'notes':
+        updates.notes = '';
+        break;
+      default:
+        break;
+    }
+    setTableFilters(updates);
   };
 
   const toggleExpenseSelection = (expenseId) => {
@@ -1134,7 +1190,7 @@ const Expenses = () => {
 
       {/* Tab 1: Expense List */}
       {tabValue === 1 && (
-        <Paper sx={{ p: 2 }}>
+        <Paper sx={{ p: 2, pb: selectedExpenseIds.length > 0 ? 10 : 2 }}>
           <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
             <ExportButtons
               data={expenseExportData}
@@ -1143,64 +1199,6 @@ const Expenses = () => {
               title="Expenses Report"
             />
           </Box>
-          {selectedExpenseIds.length > 0 && (
-            <Box
-              sx={{
-                mb: 2,
-                p: 2,
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: 1,
-                display: 'flex',
-                flexDirection: { xs: 'column', md: 'row' },
-                gap: 2,
-                alignItems: { xs: 'flex-start', md: 'center' }
-              }}
-            >
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {selectedExpenseIds.length} selected
-              </Typography>
-              <FormControl size="small" sx={{ minWidth: 200 }}>
-                <InputLabel id="bulk-category-select-label">Category</InputLabel>
-                <Select
-                  labelId="bulk-category-select-label"
-                  value={bulkCategory}
-                  label="Category"
-                  onChange={(event) => setBulkCategory(event.target.value)}
-                  renderValue={(value) => renderCategoryLabel(value, 'Choose category')}
-                >
-                  <MenuItem value="">
-                    <em>Select category</em>
-                  </MenuItem>
-                  {categories.map((category) => (
-                    <MenuItem key={category.id} value={category.name}>
-                      {renderCategoryLabel(category.name, category.name)}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <Stack direction="row" spacing={1}>
-                <Button
-                  variant="contained"
-                  size="small"
-                  onClick={handleBulkCategoryApply}
-                  disabled={!bulkCategory || isBulkUpdating}
-                >
-                  {isBulkUpdating ? 'Applying...' : 'Apply'}
-                </Button>
-                <Button
-                  variant="text"
-                  size="small"
-                  onClick={() => {
-                    setSelectedExpenseIds([]);
-                    setBulkCategory('');
-                  }}
-                >
-                  Clear
-                </Button>
-              </Stack>
-            </Box>
-          )}
           <TableContainer>
             <Table stickyHeader>
               <TableHead sx={stickyTableHeadSx}>
@@ -1273,53 +1271,81 @@ const Expenses = () => {
                 <TableRow sx={stickyFilterRowSx}>
                   <TableCell />
                   <TableCell>
-                    <TextField
-                      type="date"
-                      size="small"
-                      value={tableFilters.date}
-                      onChange={(e) => handleTableFilterChange('date', e.target.value)}
-                      fullWidth
-                    />
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        type="date"
+                        size="small"
+                        value={tableFilters.date}
+                        onChange={(e) => handleTableFilterChange('date', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.date && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('date')} title="Clear date filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
                   </TableCell>
                   <TableCell>
-                    <TextField
-                      size="small"
-                      placeholder="Search description"
-                      value={tableFilters.description}
-                      onChange={(e) => handleTableFilterChange('description', e.target.value)}
-                      fullWidth
-                    />
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search description"
+                        value={tableFilters.description}
+                        onChange={(e) => handleTableFilterChange('description', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.description && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('description')} title="Clear description filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
                   </TableCell>
                   <TableCell>
-                    <TextField
-                      size="small"
-                      placeholder="Search account"
-                      value={tableFilters.account}
-                      onChange={(e) => handleTableFilterChange('account', e.target.value)}
-                      fullWidth
-                    />
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search account"
+                        value={tableFilters.account}
+                        onChange={(e) => handleTableFilterChange('account', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.account && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('account')} title="Clear account filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
                   </TableCell>
                   <TableCell>
-                    <FormControl size="small" fullWidth>
-                      <Select
-                        value={selectedCategory}
-                        onChange={(e) => setSelectedCategory(e.target.value)}
-                        displayEmpty
-                        renderValue={(value) => renderCategoryLabel(value, 'All Categories')}
-                      >
-                        <MenuItem key="all-categories" value="">
-                          <em>All Categories</em>
-                        </MenuItem>
-                        {categories.map((category) => (
-                          <MenuItem key={category.id} value={category.name}>
-                            {renderCategoryLabel(category.name, category.name)}
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <FormControl size="small" fullWidth>
+                        <Select
+                          value={selectedCategory}
+                          onChange={(e) => setSelectedCategory(e.target.value)}
+                          displayEmpty
+                          renderValue={(value) => renderCategoryLabel(value, 'All Categories')}
+                        >
+                          <MenuItem key="all-categories" value="">
+                            <em>All Categories</em>
                           </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
+                          {categories.map((category) => (
+                            <MenuItem key={category.id} value={category.name}>
+                              {renderCategoryLabel(category.name, category.name)}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      {selectedCategory && (
+                        <IconButton size="small" onClick={() => setSelectedCategory('')} title="Clear category filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
                   </TableCell>
                   <TableCell align="right">
-                    <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
                       <TextField
                         size="small"
                         type="number"
@@ -1336,27 +1362,40 @@ const Expenses = () => {
                         onChange={(e) => handleTableFilterChange('amountMax', e.target.value)}
                         sx={{ width: 100 }}
                       />
+                      {(tableFilters.amountMin || tableFilters.amountMax) && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('amount')} title="Clear amount filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
                     </Stack>
                   </TableCell>
                   <TableCell>
-                    <TextField
-                      size="small"
-                      placeholder="Search notes"
-                      value={tableFilters.notes}
-                      onChange={(e) => handleTableFilterChange('notes', e.target.value)}
-                      fullWidth
-                    />
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search notes"
+                        value={tableFilters.notes}
+                        onChange={(e) => handleTableFilterChange('notes', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.notes && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('notes')} title="Clear notes filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
                   </TableCell>
                   <TableCell align="center">
                     <Button
                       variant="text"
                       size="small"
+                      startIcon={<ClearIcon />}
                       onClick={() => {
                         resetTableFilters();
                         setSelectedCategory('');
                       }}
                     >
-                      Reset
+                      Clear All
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -1385,12 +1424,12 @@ const Expenses = () => {
                         </TableCell>
                         <TableCell>{formatDate(expense.date)}</TableCell>
                         <TableCell>
-                          <Box display="flex" alignItems="center" gap={1}>
+                          <Box display="flex" alignItems="center" gap={0.5}>
                             {expense.description}
                             <IconButton
                               size="small"
-                              onClick={() => handleTableFilterChange('description', expense.description || '')}
-                              title="Filter by this description"
+                              onClick={() => handleFilterByDescription(expense.description)}
+                              title="Filter and select all with this description"
                               sx={{ ml: 0.5 }}
                             >
                               <FilterAltIcon fontSize="small" />
@@ -1426,7 +1465,19 @@ const Expenses = () => {
                             </Select>
                           </FormControl>
                         </TableCell>
-                        <TableCell align="right">{formatCurrency(expense.amount)}</TableCell>
+                        <TableCell align="right">
+                          <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                            {formatCurrency(expense.amount)}
+                            <IconButton
+                              size="small"
+                              onClick={() => handleFilterByAmount(expense.amount)}
+                              title="Filter and select similar amounts (±10%)"
+                              sx={{ ml: 0.5 }}
+                            >
+                              <FilterAltIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
                         <TableCell>{expense.notes || '-'}</TableCell>
                         <TableCell align="center">
                           <IconButton
@@ -1444,6 +1495,73 @@ const Expenses = () => {
               </TableBody>
             </Table>
           </TableContainer>
+
+          {/* Fixed Bottom Bar for Bulk Category Selection */}
+          {selectedExpenseIds.length > 0 && (
+            <Box
+              sx={{
+                position: 'fixed',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                bgcolor: 'primary.main',
+                color: 'white',
+                p: 2,
+                boxShadow: 3,
+                zIndex: 1000,
+                display: 'flex',
+                flexDirection: { xs: 'column', md: 'row' },
+                gap: 2,
+                alignItems: { xs: 'stretch', md: 'center' },
+                justifyContent: 'center'
+              }}
+            >
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                {selectedExpenseIds.length} expense{selectedExpenseIds.length !== 1 ? 's' : ''} selected
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: 250, bgcolor: 'white', borderRadius: 1 }}>
+                <InputLabel id="bulk-category-bottom-bar-label">Category</InputLabel>
+                <Select
+                  labelId="bulk-category-bottom-bar-label"
+                  value={bulkCategory}
+                  label="Category"
+                  onChange={(event) => setBulkCategory(event.target.value)}
+                  renderValue={(value) => renderCategoryLabel(value, 'Choose category')}
+                >
+                  <MenuItem value="">
+                    <em>Select category</em>
+                  </MenuItem>
+                  {categories.map((category) => (
+                    <MenuItem key={category.id} value={category.name}>
+                      {renderCategoryLabel(category.name, category.name)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  size="large"
+                  onClick={handleBulkCategoryApply}
+                  disabled={!bulkCategory || isBulkUpdating}
+                  sx={{ bgcolor: 'success.main', '&:hover': { bgcolor: 'success.dark' } }}
+                >
+                  {isBulkUpdating ? 'Applying...' : 'Apply Category'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="large"
+                  onClick={() => {
+                    setSelectedExpenseIds([]);
+                    setBulkCategory('');
+                  }}
+                  sx={{ borderColor: 'white', color: 'white', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' } }}
+                >
+                  Clear Selection
+                </Button>
+              </Stack>
+            </Box>
+          )}
         </Paper>
       )}
 
