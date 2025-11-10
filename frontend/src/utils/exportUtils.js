@@ -1,12 +1,6 @@
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
-
-// Ensure autoTable is loaded and extends jsPDF prototype
-// This import is necessary for doc.autoTable() to work
-if (autoTable) {
-  // Reference to prevent tree-shaking
-}
+import 'jspdf-autotable';
 
 /**
  * Export data to Excel file
@@ -51,7 +45,7 @@ export const exportToExcel = (data, columns, filename = 'export') => {
     const ws = XLSX.utils.aoa_to_sheet(wsData);
 
     // Auto-size columns
-    const colWidths = columns.map((col, i) => {
+    const colWidths = columns.map((col) => {
       const headerLength = (col.header || col.field).length;
       const maxDataLength = Math.max(
         ...data.map(row => {
@@ -91,13 +85,6 @@ export const exportToPDF = (data, columns, filename = 'export', title = 'Data Ex
       unit: 'mm',
       format: 'a4'
     });
-
-    // Verify autoTable is available
-    if (typeof doc.autoTable !== 'function') {
-      console.error('autoTable is not available on jsPDF instance');
-      alert('PDF export feature is not properly configured. Please contact support.');
-      return false;
-    }
 
     // Add title
     doc.setFontSize(16);

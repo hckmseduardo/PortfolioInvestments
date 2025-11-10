@@ -394,12 +394,12 @@ const Transactions = () => {
     { field: 'date', header: 'Date', type: 'date' },
     { field: 'account_name', header: 'Account' },
     { field: 'type', header: 'Type' },
+    { field: 'description', header: 'Description' },
     { field: 'ticker', header: 'Ticker' },
     { field: 'quantity', header: 'Quantity', type: 'number' },
     { field: 'price', header: 'Price', type: 'currency' },
     { field: 'fees', header: 'Fees', type: 'currency' },
-    { field: 'total', header: 'Total', type: 'currency' },
-    { field: 'description', header: 'Description' }
+    { field: 'total', header: 'Total', type: 'currency' }
   ], []);
 
   const transactionExportData = useMemo(() =>
@@ -571,6 +571,15 @@ const Transactions = () => {
                     Type
                   </TableSortLabel>
                 </TableCell>
+                <TableCell sortDirection={sortConfig.field === 'description' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'description'}
+                    direction={sortConfig.field === 'description' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('description')}
+                  >
+                    Description
+                  </TableSortLabel>
+                </TableCell>
                 <TableCell sortDirection={sortConfig.field === 'ticker' ? sortConfig.direction : false}>
                   <TableSortLabel
                     active={sortConfig.field === 'ticker'}
@@ -614,15 +623,6 @@ const Transactions = () => {
                     onClick={() => handleSort('total')}
                   >
                     Total
-                  </TableSortLabel>
-                </TableCell>
-                <TableCell sortDirection={sortConfig.field === 'description' ? sortConfig.direction : false}>
-                  <TableSortLabel
-                    active={sortConfig.field === 'description'}
-                    direction={sortConfig.field === 'description' ? sortConfig.direction : 'asc'}
-                    onClick={() => handleSort('description')}
-                  >
-                    Description
                   </TableSortLabel>
                 </TableCell>
                 <TableCell sortDirection={sortConfig.field === 'source' ? sortConfig.direction : false}>
@@ -671,6 +671,15 @@ const Transactions = () => {
                       ))}
                     </Select>
                   </FormControl>
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    placeholder="Search description"
+                    value={filters.description}
+                    onChange={(e) => handleFilterChange('description', e.target.value)}
+                    fullWidth
+                  />
                 </TableCell>
                 <TableCell>
                   <TextField
@@ -762,15 +771,6 @@ const Transactions = () => {
                   </Stack>
                 </TableCell>
                 <TableCell>
-                  <TextField
-                    size="small"
-                    placeholder="Search description"
-                    value={filters.description}
-                    onChange={(e) => handleFilterChange('description', e.target.value)}
-                    fullWidth
-                  />
-                </TableCell>
-                <TableCell>
                   <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
                     <Select
                       size="small"
@@ -828,6 +828,11 @@ const Transactions = () => {
                         size="small"
                       />
                     </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                        {transaction.description || '-'}
+                      </Typography>
+                    </TableCell>
                     <TableCell>{transaction.ticker || '-'}</TableCell>
                     <TableCell align="right">
                       {transaction.quantity ? transaction.quantity.toFixed(4) : '-'}
@@ -849,11 +854,6 @@ const Transactions = () => {
                         }}
                       >
                         {formatCurrency(transaction.total)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
-                        {transaction.description || '-'}
                       </Typography>
                     </TableCell>
                     <TableCell>
