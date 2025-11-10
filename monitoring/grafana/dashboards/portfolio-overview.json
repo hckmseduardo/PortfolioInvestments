@@ -96,33 +96,6 @@
           "expr": "up{job=\"redis\"}",
           "refId": "C",
           "legendFormat": "Redis"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "up{job=\"expense-worker\"}",
-          "refId": "D",
-          "legendFormat": "Expense Worker"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "up{job=\"statement-worker\"}",
-          "refId": "E",
-          "legendFormat": "Statement Worker"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "up{job=\"plaid-worker\"}",
-          "refId": "F",
-          "legendFormat": "Plaid Worker"
         }
       ],
       "title": "Service Health",
@@ -207,7 +180,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(fastapi_requests_total{job=\"backend\"}[5m])",
+          "expr": "rate(http_requests_total{job=\"backend\"}[5m])",
           "refId": "A",
           "legendFormat": "{{method}} {{path}}"
         }
@@ -294,7 +267,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, rate(fastapi_request_duration_seconds_bucket{job=\"backend\"}[5m]))",
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"backend\"}[5m]))",
           "refId": "A",
           "legendFormat": "p95 {{method}} {{path}}"
         },
@@ -303,7 +276,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, rate(fastapi_request_duration_seconds_bucket{job=\"backend\"}[5m]))",
+          "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=\"backend\"}[5m]))",
           "refId": "B",
           "legendFormat": "p99 {{method}} {{path}}"
         }
@@ -762,93 +735,6 @@
         }
       ],
       "title": "Container Memory Usage",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 32
-      },
-      "id": 9,
-      "options": {
-        "legend": {
-          "calcs": ["last"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rq_queue_length{job=~\".*worker\"}",
-          "refId": "A",
-          "legendFormat": "{{queue}} - {{job}}"
-        }
-      ],
-      "title": "Worker Queue Lengths",
       "type": "timeseries"
     }
   ],

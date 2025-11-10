@@ -559,7 +559,7 @@ const Dividends = () => {
 
         <Grid item xs={12}>
           <Paper sx={{ p: 3 }}>
-            <Stack spacing={2} sx={{ mb: 3 }}>
+            <Stack spacing={2}>
               <Typography variant="subtitle1">
                 Filter by period
               </Typography>
@@ -601,7 +601,11 @@ const Dividends = () => {
                 </Button>
               </Stack>
             </Stack>
+          </Paper>
+        </Grid>
 
+        <Grid item xs={12}>
+          <Paper sx={{ p: 3 }}>
             <Tabs
               value={activeTab}
               onChange={(e, newValue) => setActiveTab(newValue)}
