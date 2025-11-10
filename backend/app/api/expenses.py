@@ -721,7 +721,7 @@ def run_expense_conversion(
     transactions = []
     for acc_id in account_ids:
         txns = db.find("transactions", {"account_id": acc_id})
-        transactions.extend([t for t in txns if t.get("type") in ["withdrawal", "fee"]])
+        transactions.extend([t for t in txns if t.get("type") in ["WITHDRAWAL", "FEE"]])
 
     transaction_by_id = {
         txn.get("id"): txn
