@@ -76,7 +76,7 @@ const Navbar = () => {
     { label: 'Dashboard', path: '/', icon: <DashboardIcon /> },
     { label: 'Portfolio', path: '/portfolio', icon: <TrendingUp /> },
     { label: 'Dividends', path: '/dividends', icon: <AttachMoney /> },
-    { label: 'Expenses', path: '/expenses', icon: <Receipt /> },
+    { label: 'Cashflow', path: '/cashflow', icon: <Receipt /> },
     { label: 'Accounts', path: '/accounts', icon: <AccountBalance /> },
     { label: 'Transactions', path: '/transactions', icon: <SwapHoriz /> },
     { label: 'Import', path: '/import', icon: <Upload /> },

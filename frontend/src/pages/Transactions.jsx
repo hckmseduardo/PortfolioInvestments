@@ -395,11 +395,11 @@ const Transactions = () => {
     { field: 'account_name', header: 'Account' },
     { field: 'type', header: 'Type' },
     { field: 'description', header: 'Description' },
+    { field: 'total', header: 'Total', type: 'currency' },
     { field: 'ticker', header: 'Ticker' },
     { field: 'quantity', header: 'Quantity', type: 'number' },
     { field: 'price', header: 'Price', type: 'currency' },
-    { field: 'fees', header: 'Fees', type: 'currency' },
-    { field: 'total', header: 'Total', type: 'currency' }
+    { field: 'fees', header: 'Fees', type: 'currency' }
   ], []);
 
   const transactionExportData = useMemo(() =>
@@ -580,6 +580,15 @@ const Transactions = () => {
                     Description
                   </TableSortLabel>
                 </TableCell>
+                <TableCell align="right" sortDirection={sortConfig.field === 'total' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'total'}
+                    direction={sortConfig.field === 'total' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('total')}
+                  >
+                    Total
+                  </TableSortLabel>
+                </TableCell>
                 <TableCell sortDirection={sortConfig.field === 'ticker' ? sortConfig.direction : false}>
                   <TableSortLabel
                     active={sortConfig.field === 'ticker'}
@@ -614,15 +623,6 @@ const Transactions = () => {
                     onClick={() => handleSort('fees')}
                   >
                     Fees
-                  </TableSortLabel>
-                </TableCell>
-                <TableCell align="right" sortDirection={sortConfig.field === 'total' ? sortConfig.direction : false}>
-                  <TableSortLabel
-                    active={sortConfig.field === 'total'}
-                    direction={sortConfig.field === 'total' ? sortConfig.direction : 'asc'}
-                    onClick={() => handleSort('total')}
-                  >
-                    Total
                   </TableSortLabel>
                 </TableCell>
                 <TableCell sortDirection={sortConfig.field === 'source' ? sortConfig.direction : false}>
@@ -680,6 +680,26 @@ const Transactions = () => {
                     onChange={(e) => handleFilterChange('description', e.target.value)}
                     fullWidth
                   />
+                </TableCell>
+                <TableCell align="right">
+                  <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                    <TextField
+                      size="small"
+                      type="number"
+                      placeholder="Min"
+                      value={filters.totalMin}
+                      onChange={(e) => handleFilterChange('totalMin', e.target.value)}
+                      sx={{ width: 90 }}
+                    />
+                    <TextField
+                      size="small"
+                      type="number"
+                      placeholder="Max"
+                      value={filters.totalMax}
+                      onChange={(e) => handleFilterChange('totalMax', e.target.value)}
+                      sx={{ width: 90 }}
+                    />
+                  </Stack>
                 </TableCell>
                 <TableCell>
                   <TextField
@@ -750,26 +770,6 @@ const Transactions = () => {
                     />
                   </Stack>
                 </TableCell>
-                <TableCell align="right">
-                  <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                    <TextField
-                      size="small"
-                      type="number"
-                      placeholder="Min"
-                      value={filters.totalMin}
-                      onChange={(e) => handleFilterChange('totalMin', e.target.value)}
-                      sx={{ width: 90 }}
-                    />
-                    <TextField
-                      size="small"
-                      type="number"
-                      placeholder="Max"
-                      value={filters.totalMax}
-                      onChange={(e) => handleFilterChange('totalMax', e.target.value)}
-                      sx={{ width: 90 }}
-                    />
-                  </Stack>
-                </TableCell>
                 <TableCell>
                   <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
                     <Select
@@ -833,16 +833,6 @@ const Transactions = () => {
                         {transaction.description || '-'}
                       </Typography>
                     </TableCell>
-                    <TableCell>{transaction.ticker || '-'}</TableCell>
-                    <TableCell align="right">
-                      {transaction.quantity ? transaction.quantity.toFixed(4) : '-'}
-                    </TableCell>
-                    <TableCell align="right">
-                      {transaction.price ? formatCurrency(transaction.price) : '-'}
-                    </TableCell>
-                    <TableCell align="right">
-                      {formatCurrency(transaction.fees)}
-                    </TableCell>
                     <TableCell align="right">
                       <Typography
                         variant="body2"
@@ -855,6 +845,16 @@ const Transactions = () => {
                       >
                         {formatCurrency(transaction.total)}
                       </Typography>
+                    </TableCell>
+                    <TableCell>{transaction.ticker || '-'}</TableCell>
+                    <TableCell align="right">
+                      {transaction.quantity ? transaction.quantity.toFixed(4) : '-'}
+                    </TableCell>
+                    <TableCell align="right">
+                      {transaction.price ? formatCurrency(transaction.price) : '-'}
+                    </TableCell>
+                    <TableCell align="right">
+                      {formatCurrency(transaction.fees)}
                     </TableCell>
                     <TableCell>
                       <Chip

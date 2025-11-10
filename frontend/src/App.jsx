@@ -10,7 +10,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Portfolio from './pages/Portfolio';
 import Dividends from './pages/Dividends';
-import Expenses from './pages/Expenses';
+import Cashflow from './pages/Cashflow';
 import Import from './pages/Import';
 import AccountManagement from './pages/AccountManagement';
 import Transactions from './pages/Transactions';
@@ -66,7 +66,8 @@ const AppShell = () => {
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/portfolio" element={<Portfolio />} />
                       <Route path="/dividends" element={<Dividends />} />
-                      <Route path="/expenses" element={<Expenses />} />
+                      <Route path="/cashflow" element={<Cashflow />} />
+                      <Route path="/expenses" element={<Navigate to="/cashflow" replace />} />
                       <Route path="/accounts" element={<AccountManagement />} />
                       <Route path="/transactions" element={<Transactions />} />
                       <Route path="/import" element={<Import />} />

@@ -715,10 +715,14 @@ def run_expense_conversion(
     account_ids = [acc["id"] for acc in accounts]
 
     notify("loading_transactions")
+    # Load all relevant transaction types:
+    # - WITHDRAWAL, FEE: Expenses
+    # - DEPOSIT, DIVIDEND, INTEREST: Income (excluding transfers)
+    # - TRANSFER, DEPOSIT, WITHDRAWAL: Investment movements (when involving investment accounts)
     transactions = []
     for acc_id in account_ids:
         txns = db.find("transactions", {"account_id": acc_id})
-        transactions.extend([t for t in txns if t.get("type") in ["WITHDRAWAL", "FEE"]])
+        transactions.extend([t for t in txns if t.get("type") in ["WITHDRAWAL", "FEE", "DEPOSIT", "DIVIDEND", "INTEREST"]])
 
     transaction_by_id = {
         txn.get("id"): txn
@@ -788,12 +792,93 @@ def run_expense_conversion(
     expenses_created = 0
     expenses_updated = 0
     transfers_skipped = 0
-    for txn in transactions:
-        if txn.get("id") in transfer_transaction_ids:
-            transfers_skipped += 1
-            continue
 
+    # Get all accounts for investment movement detection
+    all_user_accounts = db.find("accounts", {"user_id": user_id})
+    account_map = {acc["id"]: acc for acc in all_user_accounts}
+
+    # Helper function to determine default category based on transaction type
+    def get_default_category_for_transaction(txn, is_transfer: bool, paired_account_type: Optional[str] = None) -> str:
+        txn_type = txn.get("type")
+        current_account = account_map.get(txn.get("account_id"))
+        current_account_type = current_account.get("account_type", "").lower() if current_account else ""
+
+        if is_transfer and paired_account_type:
+            # Investment movement
+            investment_types = {"investment", "savings"}
+            checking_types = {"checking", "credit_card"}
+
+            # Determine if it's Investment In or Investment Out
+            # Investment IN: money moving FROM checking TO investment/savings
+            # Investment OUT: money moving FROM investment/savings TO checking
+            if current_account_type in investment_types and paired_account_type in checking_types:
+                # Money coming INTO this investment/savings account FROM checking
+                return "Investment In"
+            elif current_account_type in checking_types and paired_account_type in investment_types:
+                # Money leaving this checking account TO investment/savings
+                return "Investment In"  # From perspective of cashflow (money invested)
+            return "Transfer"
+        elif is_transfer:
+            return "Transfer"
+        elif txn_type in ["DEPOSIT", "DIVIDEND", "INTEREST"]:
+            # Income transactions (not transfers)
+            return "Income"
+        elif txn_type in ["WITHDRAWAL", "FEE"]:
+            # Expense transactions
+            return "Uncategorized"
+        return "Uncategorized"
+
+    for txn in transactions:
         txn_id = txn.get("id")
+        txn_type = txn.get("type")
+        is_transfer = txn_id in transfer_transaction_ids
+
+        # Determine if this is an investment movement
+        paired_account_type = None
+        if is_transfer:
+            # Find the paired transaction
+            paired_txn_id = None
+            for tid1, tid2 in transfers:
+                if tid1 == txn_id:
+                    paired_txn_id = tid2
+                    break
+                elif tid2 == txn_id:
+                    paired_txn_id = tid1
+                    break
+
+            # Get both accounts
+            current_account = account_map.get(txn.get("account_id"))
+            paired_txn = None
+            paired_account = None
+
+            if paired_txn_id:
+                # Find the paired transaction
+                for t in db.find("transactions", {}):
+                    if t.get("id") == paired_txn_id:
+                        paired_txn = t
+                        paired_account = account_map.get(t.get("account_id"))
+                        break
+
+            # Check if one account is investment/savings and the other is checking
+            is_investment_movement = False
+            if current_account and paired_account:
+                current_type = current_account.get("account_type", "").lower()
+                paired_type = paired_account.get("account_type", "").lower()
+                paired_account_type = paired_type
+
+                investment_types = {"investment", "savings"}
+                checking_types = {"checking", "credit_card"}
+
+                # Investment IN: money moving FROM checking TO investment/savings
+                # Investment OUT: money moving FROM investment/savings TO checking
+                if (current_type in investment_types and paired_type in checking_types) or \
+                   (current_type in checking_types and paired_type in investment_types):
+                    is_investment_movement = True
+
+            # If it's not an investment movement, skip it (regular internal transfer)
+            if not is_investment_movement:
+                transfers_skipped += 1
+                continue
 
         if txn_id and txn_id in existing_by_txn_id:
             existing_exp = existing_by_txn_id[txn_id]
@@ -828,16 +913,19 @@ def run_expense_conversion(
                 expenses_updated += 1
             continue
 
+        # Auto-categorize based on description, or use default based on transaction type
         category = auto_categorize_expense(txn.get("description", ""), user_id, db)
+        if not category:
+            category = get_default_category_for_transaction(txn, is_transfer, paired_account_type)
 
         expense_doc = {
             "date": txn.get("date"),
             "description": txn.get("description", ""),
             "amount": abs(txn.get("total", 0)),
-            "category": category or "Uncategorized",
+            "category": category,
             "account_id": txn.get("account_id"),
             "transaction_id": txn_id,
-            "notes": f"Imported from transaction (type: {txn.get('type')})"
+            "notes": f"Imported from transaction (type: {txn_type})"
         }
 
         db.insert("expenses", expense_doc)
