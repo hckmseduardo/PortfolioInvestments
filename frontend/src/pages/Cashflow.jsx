@@ -30,7 +30,9 @@ import {
   CircularProgress,
   Stack,
   TableSortLabel,
-  Checkbox
+  Checkbox,
+  useMediaQuery,
+  useTheme
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -45,6 +47,8 @@ import { expensesAPI, accountsAPI } from '../services/api';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, LineChart, Line } from 'recharts';
 import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
+import { useMobileClick } from '../utils/useMobileClick';
+import ExpenseCard from '../components/ExpenseCard';
 
 const CHART_COLORS = ['#4CAF50', '#FF9800', '#2196F3', '#9C27B0', '#E91E63', '#00BCD4', '#F44336', '#795548', '#607D8B', '#9E9E9E', '#FF5722', '#757575'];
 
@@ -92,6 +96,8 @@ const formatDateToInput = (date) => {
 };
 
 const Cashflow = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [tabValue, setTabValue] = useState(0);
   const [expenses, setExpenses] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -264,6 +270,21 @@ const Cashflow = () => {
         break;
     }
     setTableFilters(updates);
+  };
+
+  const hasActiveFilters = () => {
+    return selectedCategory ||
+           tableFilters.date ||
+           tableFilters.description ||
+           tableFilters.account ||
+           tableFilters.amountMin ||
+           tableFilters.amountMax ||
+           tableFilters.notes;
+  };
+
+  const clearAllFilters = () => {
+    setSelectedCategory('');
+    setTableFilters({ ...TABLE_FILTER_DEFAULTS });
   };
 
   const toggleExpenseSelection = (expenseId) => {
@@ -728,6 +749,17 @@ const Cashflow = () => {
   const totalExpenses = expenseData.reduce((sum, item) => sum + item.value, 0);
   const totalInvestments = investmentData.reduce((sum, item) => sum + item.value, 0);
 
+  // Mobile-aware click handler for expense pie chart (double-click on mobile, single-click on desktop)
+  const handleExpensePieClickBase = useCallback((_, index) => {
+    const selected = expenseData[index];
+    if (selected) {
+      setSelectedCategory(selected.name);
+      setTabValue(1);
+    }
+  }, [expenseData, setSelectedCategory, setTabValue]);
+
+  const handleExpensePieClick = useMobileClick(handleExpensePieClickBase);
+
   const monthlyTrendData = monthlyComparison?.months || [];
 
   // Prepare stacked bar chart data for monthly comparison by category
@@ -876,17 +908,30 @@ const Cashflow = () => {
       </Box>
 
       {/* Filter Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid container spacing={isMobile ? 2 : 3} sx={{ mb: 3 }}>
         <Grid item xs={12}>
-          <Paper sx={{ p: 3 }}>
-            <Typography color="textSecondary" gutterBottom>
+          <Paper sx={{ p: isMobile ? 2 : 3 }}>
+            <Typography
+              color="textSecondary"
+              gutterBottom
+              sx={{
+                fontWeight: 600,
+                fontSize: isMobile ? '0.875rem' : '0.875rem',
+                mb: 1
+              }}
+            >
               Account
             </Typography>
-            <FormControl fullWidth size="small">
+            <FormControl fullWidth size={isMobile ? 'medium' : 'small'}>
               <Select
                 value={selectedAccount}
                 onChange={(e) => setSelectedAccount(e.target.value)}
                 displayEmpty
+                sx={isMobile ? {
+                  '& .MuiInputBase-root': {
+                    minHeight: 48
+                  }
+                } : {}}
               >
                 <MenuItem value="">All Accounts</MenuItem>
                 {accounts.map(account => (
@@ -901,43 +946,99 @@ const Cashflow = () => {
       </Grid>
 
       {/* Filter by Period */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Stack spacing={2}>
+      <Paper sx={{ p: isMobile ? 2 : 3, mb: 3 }}>
+        <Stack spacing={isMobile ? 1.5 : 2}>
           <Box>
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>
+            <Typography variant={isMobile ? 'body1' : 'subtitle1'} sx={{ mb: isMobile ? 1 : 1, fontWeight: 600 }}>
               Filter by period
             </Typography>
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ gap: 0.5 }}>
-              {PRESET_OPTIONS.map((preset) => (
-                <Button
-                  key={preset.value}
-                  variant={selectedPreset === preset.value ? 'contained' : 'outlined'}
-                  size="small"
-                  onClick={() => applyPreset(preset.value)}
-                >
-                  {preset.label}
-                </Button>
-              ))}
-            </Stack>
+
+            {/* Mobile: Grid layout for better touch targets */}
+            {isMobile ? (
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: 1,
+                  mb: 1
+                }}
+              >
+                {PRESET_OPTIONS.map((preset) => (
+                  <Button
+                    key={preset.value}
+                    variant={selectedPreset === preset.value ? 'contained' : 'outlined'}
+                    size="medium"
+                    onClick={() => applyPreset(preset.value)}
+                    sx={{
+                      minHeight: 44,
+                      fontSize: '0.875rem',
+                      fontWeight: selectedPreset === preset.value ? 600 : 500,
+                      boxShadow: selectedPreset === preset.value ? 2 : 0,
+                      textTransform: 'none'
+                    }}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+              </Box>
+            ) : (
+              /* Desktop: Row layout */
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ gap: 0.5 }}>
+                {PRESET_OPTIONS.map((preset) => (
+                  <Button
+                    key={preset.value}
+                    variant={selectedPreset === preset.value ? 'contained' : 'outlined'}
+                    size="small"
+                    onClick={() => applyPreset(preset.value)}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+              </Stack>
+            )}
           </Box>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+
+          {/* Custom Date Range */}
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={isMobile ? 1.5 : 2} alignItems={{ xs: 'stretch', sm: 'center' }}>
             <TextField
               label="Start date"
               type="date"
-              size="small"
+              size={isMobile ? 'medium' : 'small'}
               value={startDate}
               onChange={handleStartDateChange}
               InputLabelProps={{ shrink: true }}
+              fullWidth={isMobile}
+              sx={isMobile ? {
+                '& .MuiInputBase-root': {
+                  minHeight: 48
+                }
+              } : {}}
             />
             <TextField
               label="End date"
               type="date"
-              size="small"
+              size={isMobile ? 'medium' : 'small'}
               value={endDate}
               onChange={handleEndDateChange}
               InputLabelProps={{ shrink: true }}
+              fullWidth={isMobile}
+              sx={isMobile ? {
+                '& .MuiInputBase-root': {
+                  minHeight: 48
+                }
+              } : {}}
             />
-            <Button variant="text" size="small" onClick={() => applyPreset('all')}>
+            <Button
+              variant={isMobile ? 'outlined' : 'text'}
+              size={isMobile ? 'medium' : 'small'}
+              onClick={() => applyPreset('all')}
+              fullWidth={isMobile}
+              sx={isMobile ? {
+                minHeight: 48,
+                textTransform: 'none',
+                fontWeight: 500
+              } : {}}
+            >
               Clear filters
             </Button>
           </Stack>
@@ -1064,13 +1165,7 @@ const Cashflow = () => {
                               outerRadius={70}
                               fill="#8884d8"
                               dataKey="value"
-                              onClick={(_, index) => {
-                                const selected = expenseData[index];
-                                if (selected) {
-                                  setSelectedCategory(selected.name);
-                                  setTabValue(1);
-                                }
-                              }}
+                              onClick={handleExpensePieClick}
                             >
                               {expenseData.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.color} />
@@ -1097,7 +1192,7 @@ const Cashflow = () => {
                 <Grid item xs={12} md={expenseData.length > 0 ? 8 : 12}>
                   <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
                     <Typography variant="h6" gutterBottom>
-                      Monthly Spending Trend
+                      Monthly Cashflow Trend
                     </Typography>
                     {monthlyTrendData.length > 0 ? (
                       <Box sx={{ flexGrow: 1, minHeight: 250 }}>
@@ -1121,13 +1216,15 @@ const Cashflow = () => {
                             <YAxis />
                             <Tooltip formatter={(value) => formatCurrency(value)} />
                             <Legend />
-                            <Bar dataKey="total" fill="#82ca9d" name="Total Expenses" />
+                            <Bar dataKey="income" fill="#4CAF50" name="Income" />
+                            <Bar dataKey="expenses" stackId="outflow" fill="#f44336" name="Expenses" />
+                            <Bar dataKey="investments" stackId="outflow" fill="#2196F3" name="Investments" />
                           </BarChart>
                         </ResponsiveContainer>
                       </Box>
                     ) : (
                       <Typography color="textSecondary" sx={{ mt: 2 }}>
-                        No expense data available
+                        No cashflow data available
                       </Typography>
                     )}
                   </Paper>
@@ -1193,8 +1290,19 @@ const Cashflow = () => {
 
       {/* Tab 1: Expense List */}
       {tabValue === 1 && (
-        <Paper sx={{ p: 2, pb: selectedExpenseIds.length > 0 ? 10 : 2 }}>
-          <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+        <Paper sx={{ p: isMobile ? 1 : 2, pb: selectedExpenseIds.length > 0 ? 10 : 2 }}>
+          {/* Export and Filter Controls */}
+          <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+            {isMobile && (
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<FilterAltIcon />}
+                onClick={() => setSelectedCategory('')}
+              >
+                {selectedCategory || 'All Categories'}
+              </Button>
+            )}
             <ExportButtons
               data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'expense').map(expense => ({
                 ...expense,
@@ -1206,7 +1314,140 @@ const Cashflow = () => {
               title="Expenses Report"
             />
           </Box>
-          <TableContainer>
+
+          {/* Mobile Card View */}
+          {isMobile ? (
+            <Box>
+              {/* Mobile Select All */}
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  mb: 2,
+                  p: 1.5,
+                  bgcolor: 'action.hover',
+                  borderRadius: 1
+                }}
+              >
+                <Checkbox
+                  color="primary"
+                  indeterminate={isIndeterminateSelection}
+                  checked={allDisplayedSelected && displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'expense').length > 0}
+                  onChange={(event) => handleSelectAllExpenses(event.target.checked, displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'expense'))}
+                  sx={{ mr: 1 }}
+                />
+                <Typography variant="body2">
+                  {selectedExpenseIds.length > 0
+                    ? `${selectedExpenseIds.length} selected`
+                    : 'Select all'}
+                </Typography>
+              </Box>
+
+              {/* Active Filters on Mobile - Sticky */}
+              {hasActiveFilters() && (
+                <Box
+                  sx={{
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 10,
+                    bgcolor: 'background.paper',
+                    pb: 2,
+                    mb: 2,
+                    borderBottom: '1px solid',
+                    borderColor: 'divider'
+                  }}
+                >
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    {selectedCategory && (
+                      <Chip
+                        label={`Category: ${selectedCategory}`}
+                        onDelete={() => setSelectedCategory('')}
+                        color="primary"
+                        size="small"
+                      />
+                    )}
+                    {tableFilters.date && (
+                      <Chip
+                        label={`Date: ${tableFilters.date}`}
+                        onDelete={() => clearColumnFilter('date')}
+                        color="primary"
+                        size="small"
+                      />
+                    )}
+                    {tableFilters.description && (
+                      <Chip
+                        label={`Description: ${tableFilters.description}`}
+                        onDelete={() => clearColumnFilter('description')}
+                        color="primary"
+                        size="small"
+                      />
+                    )}
+                    {tableFilters.account && (
+                      <Chip
+                        label={`Account: ${tableFilters.account}`}
+                        onDelete={() => clearColumnFilter('account')}
+                        color="primary"
+                        size="small"
+                      />
+                    )}
+                    {(tableFilters.amountMin || tableFilters.amountMax) && (
+                      <Chip
+                        label={`Amount: ${tableFilters.amountMin || '0'} - ${tableFilters.amountMax || '∞'}`}
+                        onDelete={() => clearColumnFilter('amount')}
+                        color="primary"
+                        size="small"
+                      />
+                    )}
+                    {tableFilters.notes && (
+                      <Chip
+                        label={`Notes: ${tableFilters.notes}`}
+                        onDelete={() => clearColumnFilter('notes')}
+                        color="primary"
+                        size="small"
+                      />
+                    )}
+                    <Chip
+                      label="Clear All"
+                      onClick={clearAllFilters}
+                      color="secondary"
+                      size="small"
+                      variant="outlined"
+                    />
+                  </Stack>
+                </Box>
+              )}
+
+              {/* Expense Cards */}
+              {displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'expense').length === 0 ? (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Typography color="textSecondary">
+                    No expenses match the selected filters. Try adjusting them or click "Import from Transactions".
+                  </Typography>
+                </Box>
+              ) : (
+                displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'expense').map((expense) => (
+                  <ExpenseCard
+                    key={expense.id}
+                    expense={expense}
+                    isSelected={selectedExpenseIds.includes(expense.id)}
+                    onToggleSelection={toggleExpenseSelection}
+                    onDelete={handleDeleteExpense}
+                    onCategoryChange={handleCategoryChange}
+                    onFilterByDescription={handleFilterByDescription}
+                    onFilterByAmount={handleFilterByAmount}
+                    formatDate={formatDate}
+                    formatCurrency={formatCurrency}
+                    getAccountLabel={getAccountLabel}
+                    getCategoryColor={getCategoryColor}
+                    renderCategoryLabel={renderCategoryLabel}
+                    categories={categories}
+                  />
+                ))
+              )}
+            </Box>
+          ) : (
+            /* Desktop Table View */
+            <TableContainer>
             <Table stickyHeader>
               <TableHead sx={stickyTableHeadSx}>
                 <TableRow>
@@ -1502,6 +1743,7 @@ const Cashflow = () => {
               </TableBody>
             </Table>
           </TableContainer>
+          )}
 
           {/* Fixed Bottom Bar for Bulk Category Selection */}
           {selectedExpenseIds.length > 0 && (
@@ -1513,20 +1755,20 @@ const Cashflow = () => {
                 right: 0,
                 bgcolor: 'primary.main',
                 color: 'white',
-                p: 2,
+                p: { xs: 1.5, md: 2 },
                 boxShadow: 3,
                 zIndex: 1000,
                 display: 'flex',
                 flexDirection: { xs: 'column', md: 'row' },
-                gap: 2,
+                gap: { xs: 1, md: 2 },
                 alignItems: { xs: 'stretch', md: 'center' },
                 justifyContent: 'center'
               }}
             >
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              <Typography variant={isMobile ? 'body1' : 'h6'} sx={{ fontWeight: 600 }}>
                 {selectedExpenseIds.length} expense{selectedExpenseIds.length !== 1 ? 's' : ''} selected
               </Typography>
-              <FormControl size="small" sx={{ minWidth: 250, bgcolor: 'white', borderRadius: 1 }}>
+              <FormControl size="small" sx={{ minWidth: { xs: '100%', md: 250 }, bgcolor: 'white', borderRadius: 1 }}>
                 <InputLabel id="bulk-category-bottom-bar-label">Category</InputLabel>
                 <Select
                   labelId="bulk-category-bottom-bar-label"
@@ -1548,23 +1790,23 @@ const Cashflow = () => {
               <Stack direction="row" spacing={1}>
                 <Button
                   variant="contained"
-                  size="large"
+                  size={isMobile ? 'medium' : 'large'}
                   onClick={handleBulkCategoryApply}
                   disabled={!bulkCategory || isBulkUpdating}
-                  sx={{ bgcolor: 'success.main', '&:hover': { bgcolor: 'success.dark' } }}
+                  sx={{ bgcolor: 'success.main', '&:hover': { bgcolor: 'success.dark' }, flex: 1 }}
                 >
-                  {isBulkUpdating ? 'Applying...' : 'Apply Category'}
+                  {isBulkUpdating ? 'Applying...' : isMobile ? 'Apply' : 'Apply Category'}
                 </Button>
                 <Button
                   variant="outlined"
-                  size="large"
+                  size={isMobile ? 'medium' : 'large'}
                   onClick={() => {
                     setSelectedExpenseIds([]);
                     setBulkCategory('');
                   }}
-                  sx={{ borderColor: 'white', color: 'white', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' } }}
+                  sx={{ borderColor: 'white', color: 'white', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' }, flex: 1 }}
                 >
-                  Clear Selection
+                  {isMobile ? 'Clear' : 'Clear Selection'}
                 </Button>
               </Stack>
             </Box>

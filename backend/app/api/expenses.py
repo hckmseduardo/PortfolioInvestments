@@ -607,19 +607,38 @@ async def get_monthly_expense_comparison(
         for acc_id in account_ids:
             expenses.extend(db.find("expenses", {"account_id": acc_id}))
 
-    # Organize expenses by month and category
-    monthly_data = defaultdict(lambda: {"total": 0, "by_category": defaultdict(float)})
+    # Get user categories to determine types
+    user_categories = db.find("categories", {"user_id": current_user.id})
+    category_types = {cat["name"]: cat.get("type", "expense") for cat in user_categories}
+
+    # Organize expenses by month, separating by type
+    monthly_data = defaultdict(lambda: {
+        "income": 0,
+        "expenses": 0,
+        "investments": 0,
+        "by_category": defaultdict(float)
+    })
 
     for exp in expenses:
+        category = exp.get("category", "Uncategorized")
+        category_type = category_types.get(category, "expense")
+
         date_str = exp.get("date", "")
         if date_str:
             try:
                 date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
                 month_key = date.strftime("%Y-%m")
-                category = exp.get("category", "Uncategorized")
                 amount = abs(exp.get("amount", 0))
 
-                monthly_data[month_key]["total"] += amount
+                # Add to appropriate type total
+                if category_type == "income":
+                    monthly_data[month_key]["income"] += amount
+                elif category_type == "investment":
+                    monthly_data[month_key]["investments"] += amount
+                elif category_type == "expense":
+                    monthly_data[month_key]["expenses"] += amount
+
+                # Also track by category for detailed breakdown
                 monthly_data[month_key]["by_category"][category] += amount
             except:
                 pass
@@ -632,7 +651,9 @@ async def get_monthly_expense_comparison(
     for month in sorted_months:
         result.append({
             "month": month,
-            "total": monthly_data[month]["total"],
+            "income": monthly_data[month]["income"],
+            "expenses": monthly_data[month]["expenses"],
+            "investments": monthly_data[month]["investments"],
             "by_category": dict(monthly_data[month]["by_category"])
         })
 
