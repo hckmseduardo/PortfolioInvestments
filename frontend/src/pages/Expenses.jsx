@@ -37,7 +37,8 @@ import {
   Delete as DeleteIcon,
   Add as AddIcon,
   Refresh as RefreshIcon,
-  Category as CategoryIcon
+  Category as CategoryIcon,
+  FilterAlt as FilterAltIcon
 } from '@mui/icons-material';
 import { expensesAPI, accountsAPI } from '../services/api';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, LineChart, Line } from 'recharts';
@@ -1383,7 +1384,19 @@ const Expenses = () => {
                           />
                         </TableCell>
                         <TableCell>{formatDate(expense.date)}</TableCell>
-                        <TableCell>{expense.description}</TableCell>
+                        <TableCell>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            {expense.description}
+                            <IconButton
+                              size="small"
+                              onClick={() => handleTableFilterChange('description', expense.description || '')}
+                              title="Filter by this description"
+                              sx={{ ml: 0.5 }}
+                            >
+                              <FilterAltIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
                         <TableCell>{accountLabel}</TableCell>
                         <TableCell>
                           <FormControl size="small" fullWidth>
