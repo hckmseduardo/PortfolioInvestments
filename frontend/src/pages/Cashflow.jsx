@@ -1195,7 +1195,11 @@ const Cashflow = () => {
         <Paper sx={{ p: 2, pb: selectedExpenseIds.length > 0 ? 10 : 2 }}>
           <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
             <ExportButtons
-              data={expenseExportData}
+              data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'expense').map(expense => ({
+                ...expense,
+                account_label: getAccountLabel(expense.account_id),
+                category: expense.category || 'Uncategorized'
+              }))}
               columns={expenseExportColumns}
               filename="expenses"
               title="Expenses Report"
@@ -1209,8 +1213,8 @@ const Cashflow = () => {
                     <Checkbox
                       color="primary"
                       indeterminate={isIndeterminateSelection}
-                      checked={allDisplayedSelected && displayedExpenses.length > 0}
-                      onChange={(event) => handleSelectAllExpenses(event.target.checked, displayedExpenses)}
+                      checked={allDisplayedSelected && displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'expense').length > 0}
+                      onChange={(event) => handleSelectAllExpenses(event.target.checked, displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'expense'))}
                       inputProps={{ 'aria-label': 'Select all expenses' }}
                     />
                   </TableCell>
@@ -1403,7 +1407,7 @@ const Cashflow = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {displayedExpenses.length === 0 ? (
+                {displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'expense').length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} align="center">
                       <Typography color="textSecondary" py={3}>
@@ -1412,7 +1416,7 @@ const Cashflow = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  displayedExpenses.map((expense) => {
+                  displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'expense').map((expense) => {
                     const accountLabel = getAccountLabel(expense.account_id);
                     const isSelected = selectedExpenseIds.includes(expense.id);
                     return (
