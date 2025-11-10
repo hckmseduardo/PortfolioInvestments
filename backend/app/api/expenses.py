@@ -681,10 +681,7 @@ def run_expense_conversion(
     Designed to be executed by a background worker.
     """
     if db is None:
-        from app.database.postgres_db import SessionLocal
-        from app.database.db_service import get_db_service
-        session = SessionLocal()
-        db = get_db_service(session)
+        raise ValueError("Database service is required")
 
     def notify(stage: str):
         if progress_callback:
