@@ -20,19 +20,19 @@ class PlaidTransactionMapper:
     # Plaid category to our transaction type mapping
     CATEGORY_TO_TYPE = {
         # Income
-        "INCOME": "deposit",
-        "TRANSFER_IN": "transfer",
+        "INCOME": "DEPOSIT",
+        "TRANSFER_IN": "TRANSFER",
 
         # Expenses
-        "TRANSFER_OUT": "transfer",
-        "PAYMENT": "withdrawal",
-        "BANK_FEES": "fee",
-        "INTEREST": "deposit",  # Interest earned
+        "TRANSFER_OUT": "TRANSFER",
+        "PAYMENT": "WITHDRAWAL",
+        "BANK_FEES": "FEE",
+        "INTEREST": "DEPOSIT",  # Interest earned
 
         # Investment-related (for investment accounts)
-        "SECURITIES_BUY": "buy",
-        "SECURITIES_SELL": "sell",
-        "DIVIDEND": "dividend",
+        "SECURITIES_BUY": "BUY",
+        "SECURITIES_SELL": "SELL",
+        "DIVIDEND": "DIVIDEND",
     }
 
     # Plaid payment channels
@@ -50,6 +50,24 @@ class PlaidTransactionMapper:
             db: Database session for duplicate checking
         """
         self.db = db
+
+    def _parse_plaid_date(self, date_value: Any) -> datetime:
+        """
+        Parse Plaid date which can be a string, datetime, or datetime.date object
+
+        Args:
+            date_value: Date from Plaid transaction (str, datetime, or datetime.date)
+
+        Returns:
+            datetime object
+        """
+        if isinstance(date_value, str):
+            return datetime.strptime(date_value, '%Y-%m-%d')
+        elif isinstance(date_value, datetime):
+            return date_value
+        else:
+            # datetime.date object
+            return datetime.combine(date_value, datetime.min.time())
 
     def map_transaction(
         self,
@@ -69,7 +87,7 @@ class PlaidTransactionMapper:
             Dictionary ready for Transaction model creation
         """
         # Parse date
-        date = datetime.strptime(plaid_txn['date'], '%Y-%m-%d')
+        date = self._parse_plaid_date(plaid_txn['date'])
 
         # Amount in Plaid is positive for debits, negative for credits
         # We store amounts as positive, type determines direction
@@ -128,7 +146,7 @@ class PlaidTransactionMapper:
             return None
 
         # Parse date
-        date = datetime.strptime(plaid_txn['date'], '%Y-%m-%d')
+        date = self._parse_plaid_date(plaid_txn['date'])
 
         # Build description
         description = self._build_description(plaid_txn)
@@ -175,7 +193,8 @@ class PlaidTransactionMapper:
             return True
 
         # Check by date, amount, and description (fuzzy match)
-        date = datetime.strptime(plaid_txn['date'], '%Y-%m-%d')
+        date = self._parse_plaid_date(plaid_txn['date'])
+
         amount = abs(plaid_txn['amount'])
         description = self._build_description(plaid_txn)
 
@@ -221,25 +240,25 @@ class PlaidTransactionMapper:
 
             # Map known categories
             if 'TRANSFER' in primary_category:
-                return 'transfer'
+                return 'TRANSFER'
             elif primary_category in ['INTEREST', 'INTEREST_EARNED']:
-                return 'deposit'
+                return 'DEPOSIT'
             elif primary_category in ['BANK_FEES', 'FEE']:
-                return 'fee'
+                return 'FEE'
             elif 'DIVIDEND' in primary_category:
-                return 'dividend'
+                return 'DIVIDEND'
 
         # For investment accounts, check for securities transactions
         if account_type == 'investment':
             payment_channel = plaid_txn.get('payment_channel', '').lower()
             if 'securities' in str(categories).lower():
-                return 'buy' if is_debit else 'sell'
+                return 'BUY' if is_debit else 'SELL'
 
         # Default based on debit/credit
         if is_debit:
-            return 'withdrawal'
+            return 'WITHDRAWAL'
         else:
-            return 'deposit'
+            return 'DEPOSIT'
 
     def _build_description(self, plaid_txn: Dict[str, Any]) -> str:
         """Build a description from Plaid transaction fields"""

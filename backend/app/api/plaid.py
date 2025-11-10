@@ -92,28 +92,45 @@ async def exchange_public_token(
     """
     Exchange public token from Plaid Link for access token and create accounts
     """
-    # Exchange public token for access token
-    exchange_result = plaid_client.exchange_public_token(request.public_token)
-    if not exchange_result:
+    logger.info(f"Starting Plaid token exchange for user {current_user.id}")
+
+    try:
+        # Exchange public token for access token
+        exchange_result = plaid_client.exchange_public_token(request.public_token)
+        if not exchange_result:
+            logger.error("Failed to exchange public token - no result returned")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to exchange public token"
+            )
+
+        access_token = exchange_result['access_token']
+        item_id = exchange_result['item_id']
+        logger.info(f"Successfully exchanged token, item_id: {item_id}")
+
+        # Get institution info from metadata
+        institution = request.metadata.get('institution', {})
+        institution_id = institution.get('institution_id', 'unknown')
+        institution_name = institution.get('name', 'Unknown Institution')
+        logger.info(f"Institution: {institution_name} ({institution_id})")
+
+        # Get accounts from Plaid
+        accounts_result = plaid_client.get_accounts(access_token)
+        if not accounts_result:
+            logger.error("Failed to retrieve accounts from Plaid - no result returned")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve accounts from Plaid"
+            )
+
+        logger.info(f"Retrieved {len(accounts_result['accounts'])} accounts from Plaid")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in Plaid token exchange: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to exchange public token"
-        )
-
-    access_token = exchange_result['access_token']
-    item_id = exchange_result['item_id']
-
-    # Get institution info from metadata
-    institution = request.metadata.get('institution', {})
-    institution_id = institution.get('institution_id', 'unknown')
-    institution_name = institution.get('name', 'Unknown Institution')
-
-    # Get accounts from Plaid
-    accounts_result = plaid_client.get_accounts(access_token)
-    if not accounts_result:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve accounts from Plaid"
+            detail=f"Error during Plaid token exchange: {str(e)}"
         )
 
     # Create PlaidItem record
@@ -133,53 +150,73 @@ async def exchange_public_token(
 
     # Create accounts and PlaidAccount mappings
     created_accounts = []
-    for plaid_acc in accounts_result['accounts']:
-        # Map Plaid account type to our AccountTypeEnum
-        acc_type = _map_plaid_account_type(
-            plaid_acc['type'],
-            plaid_acc.get('subtype')
+    try:
+        for idx, plaid_acc in enumerate(accounts_result['accounts']):
+            logger.info(f"Processing account {idx + 1}/{len(accounts_result['accounts'])}: {plaid_acc['name']}")
+            logger.info(f"  Account ID: {plaid_acc['account_id']}")
+            logger.info(f"  Type: {plaid_acc['type']} (Python type: {type(plaid_acc['type']).__name__})")
+            logger.info(f"  Subtype: {plaid_acc.get('subtype')} (Python type: {type(plaid_acc.get('subtype')).__name__ if plaid_acc.get('subtype') else 'None'})")
+
+            # Map Plaid account type to our AccountTypeEnum
+            acc_type = _map_plaid_account_type(
+                plaid_acc['type'],
+                plaid_acc.get('subtype')
+            )
+            logger.info(f"  Mapped to AccountTypeEnum: {acc_type}")
+
+            # Create Account record
+            account = Account(
+                id=str(uuid.uuid4()),
+                user_id=current_user.id,
+                account_type=acc_type,
+                account_number=plaid_acc.get('mask', 'XXXX'),
+                institution=institution_name,
+                balance=plaid_acc['balances'].get('current', 0.0) or 0.0,
+                label=plaid_acc['name'],
+                is_plaid_linked=1,
+                created_at=datetime.utcnow()
+            )
+            db.add(account)
+            logger.info(f"  Created Account record with ID: {account.id}")
+
+            # Create PlaidAccount mapping
+            # Note: type/subtype should already be converted to strings in plaid_client._format_account()
+            logger.info(f"  Creating PlaidAccount mapping with type={plaid_acc['type']}, subtype={plaid_acc.get('subtype')}")
+            plaid_account_mapping = PlaidAccount(
+                id=str(uuid.uuid4()),
+                plaid_item_id=plaid_item.id,
+                account_id=account.id,
+                plaid_account_id=plaid_acc['account_id'],
+                mask=plaid_acc.get('mask'),
+                name=plaid_acc['name'],
+                official_name=plaid_acc.get('official_name'),
+                type=plaid_acc['type'],
+                subtype=plaid_acc.get('subtype'),
+                created_at=datetime.utcnow()
+            )
+            db.add(plaid_account_mapping)
+            logger.info(f"  Created PlaidAccount mapping")
+
+            created_accounts.append({
+                "account_id": account.id,
+                "plaid_account_id": plaid_acc['account_id'],
+                "name": plaid_acc['name'],
+                "mask": plaid_acc.get('mask'),
+                "type": plaid_acc['type'],
+                "subtype": plaid_acc.get('subtype'),
+            })
+
+        # Commit all changes
+        logger.info(f"Committing {len(created_accounts)} accounts to database")
+        db.commit()
+        logger.info("Successfully committed all accounts")
+    except Exception as e:
+        logger.error(f"Error creating accounts: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create accounts: {str(e)}"
         )
-
-        # Create Account record
-        account = Account(
-            id=str(uuid.uuid4()),
-            user_id=current_user.id,
-            account_type=acc_type,
-            account_number=plaid_acc.get('mask', 'XXXX'),
-            institution=institution_name,
-            balance=plaid_acc['balances'].get('current', 0.0) or 0.0,
-            label=plaid_acc['name'],
-            is_plaid_linked=1,
-            created_at=datetime.utcnow()
-        )
-        db.add(account)
-
-        # Create PlaidAccount mapping
-        plaid_account_mapping = PlaidAccount(
-            id=str(uuid.uuid4()),
-            plaid_item_id=plaid_item.id,
-            account_id=account.id,
-            plaid_account_id=plaid_acc['account_id'],
-            mask=plaid_acc.get('mask'),
-            name=plaid_acc['name'],
-            official_name=plaid_acc.get('official_name'),
-            type=plaid_acc['type'],
-            subtype=plaid_acc.get('subtype'),
-            created_at=datetime.utcnow()
-        )
-        db.add(plaid_account_mapping)
-
-        created_accounts.append({
-            "account_id": account.id,
-            "plaid_account_id": plaid_acc['account_id'],
-            "name": plaid_acc['name'],
-            "mask": plaid_acc.get('mask'),
-            "type": plaid_acc['type'],
-            "subtype": plaid_acc.get('subtype'),
-        })
-
-    # Commit all changes
-    db.commit()
 
     logger.info(
         f"Created Plaid item {plaid_item.id} with {len(created_accounts)} accounts "

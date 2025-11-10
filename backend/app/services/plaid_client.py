@@ -269,13 +269,32 @@ class PlaidClient:
 
     def _format_account(self, account: Dict[str, Any]) -> Dict[str, Any]:
         """Format Plaid account object for our use"""
+        # Convert type/subtype to strings (Plaid SDK returns enum objects)
+        # Need to access the .value attribute for Plaid enums
+        acc_type = account['type']
+        acc_subtype = account.get('subtype')
+
+        # Try to extract string value from enum-like objects
+        if acc_type and hasattr(acc_type, 'value'):
+            acc_type = acc_type.value
+        elif acc_type:
+            acc_type = str(acc_type)
+
+        if acc_subtype and hasattr(acc_subtype, 'value'):
+            acc_subtype = acc_subtype.value
+        elif acc_subtype:
+            acc_subtype = str(acc_subtype)
+
+        logger.debug(f"Formatted account type: {acc_type} (type: {type(acc_type).__name__})")
+        logger.debug(f"Formatted account subtype: {acc_subtype} (type: {type(acc_subtype).__name__})")
+
         return {
             "account_id": account['account_id'],
             "name": account['name'],
             "official_name": account.get('official_name'),
             "mask": account.get('mask'),
-            "type": account['type'],
-            "subtype": account.get('subtype'),
+            "type": acc_type,
+            "subtype": acc_subtype,
             "balances": {
                 "available": account['balances'].get('available'),
                 "current": account['balances'].get('current'),
