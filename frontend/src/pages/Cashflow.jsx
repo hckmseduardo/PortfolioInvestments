@@ -949,6 +949,7 @@ const Cashflow = () => {
         <Tab label="Expense List" />
         <Tab label="Incomes List" />
         <Tab label="Investments List" />
+        <Tab label="Transfers List" />
         <Tab label="Monthly Comparison" />
       </Tabs>
 
@@ -1855,8 +1856,142 @@ const Cashflow = () => {
         </Paper>
       )}
 
-      {/* Tab 4: Monthly Comparison */}
+      {/* Tab 4: Transfers List */}
       {tabValue === 4 && (
+        <Paper sx={{ p: 2 }}>
+          <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+            <ExportButtons
+              data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer').map(expense => ({
+                ...expense,
+                account_label: getAccountLabel(expense.account_id),
+                category: expense.category || 'Uncategorized'
+              }))}
+              columns={expenseExportColumns}
+              filename="transfers"
+              title="Transfers Report"
+            />
+          </Box>
+          <TableContainer>
+            <Table stickyHeader>
+              <TableHead sx={stickyTableHeadSx}>
+                <TableRow>
+                  <TableCell sortDirection={tableSortConfig.field === 'date' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'date'}
+                      direction={tableSortConfig.field === 'date' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('date')}
+                    >
+                      Date
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={tableSortConfig.field === 'description' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'description'}
+                      direction={tableSortConfig.field === 'description' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('description')}
+                    >
+                      Description
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={tableSortConfig.field === 'account' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'account'}
+                      direction={tableSortConfig.field === 'account' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('account')}
+                    >
+                      Account
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={tableSortConfig.field === 'category' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'category'}
+                      direction={tableSortConfig.field === 'category' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('category')}
+                    >
+                      Category
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell align="right" sortDirection={tableSortConfig.field === 'amount' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'amount'}
+                      direction={tableSortConfig.field === 'amount' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('amount')}
+                    >
+                      Amount
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell>Notes</TableCell>
+                  <TableCell align="center">Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer').length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center">
+                      <Typography color="textSecondary" py={3}>
+                        No transfer transactions found. Import transactions to see transfer data.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer').map((expense) => {
+                    const accountLabel = getAccountLabel(expense.account_id);
+                    return (
+                      <TableRow key={expense.id}>
+                        <TableCell>{formatDate(expense.date)}</TableCell>
+                        <TableCell>{expense.description}</TableCell>
+                        <TableCell>{accountLabel}</TableCell>
+                        <TableCell>
+                          <FormControl size="small" fullWidth>
+                            <Select
+                              value={expense.category || 'Uncategorized'}
+                              onChange={(e) => handleCategoryChange(expense.id, e.target.value)}
+                              sx={{
+                                bgcolor: getCategoryColor(expense.category),
+                                color: 'white',
+                                '& .MuiOutlinedInput-notchedOutline': {
+                                  borderColor: 'transparent'
+                                },
+                                '&:hover .MuiOutlinedInput-notchedOutline': {
+                                  borderColor: 'rgba(255,255,255,0.5)'
+                                }
+                              }}
+                              renderValue={(value) => renderCategoryLabel(value, 'Uncategorized')}
+                            >
+                              <MenuItem key="uncategorized-category" value="Uncategorized">
+                                {renderCategoryLabel('Uncategorized', 'Uncategorized')}
+                              </MenuItem>
+                              {categories.filter(cat => cat.type === 'transfer').map(cat => (
+                                <MenuItem key={cat.id} value={cat.name}>
+                                  {renderCategoryLabel(cat.name, cat.name)}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </TableCell>
+                        <TableCell align="right">{formatCurrency(expense.amount)}</TableCell>
+                        <TableCell>{expense.notes || '-'}</TableCell>
+                        <TableCell align="center">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleDeleteExpense(expense.id)}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      )}
+
+      {/* Tab 5: Monthly Comparison */}
+      {tabValue === 5 && (
         <Grid container spacing={3}>
           <Grid item xs={12}>
             <Paper sx={{ p: 3 }}>
