@@ -791,7 +791,7 @@ def run_expense_conversion(
     notify("converting_transactions")
     expenses_created = 0
     expenses_updated = 0
-    transfers_skipped = 0
+    transfers_processed = 0
 
     # Ensure special categories exist (Income, Investment In, Investment Out)
     special_categories = [
@@ -885,26 +885,16 @@ def run_expense_conversion(
                         paired_account = account_map.get(t.get("account_id"))
                         break
 
-            # Check if one account is investment/savings and the other is checking
-            is_investment_movement = False
+            # Check account types for proper categorization
             if current_account and paired_account:
                 current_type = current_account.get("account_type", "").lower()
                 paired_type = paired_account.get("account_type", "").lower()
                 paired_account_type = paired_type
 
-                investment_types = {"investment", "savings"}
-                checking_types = {"checking", "credit_card"}
-
-                # Investment IN: money moving FROM checking TO investment/savings
-                # Investment OUT: money moving FROM investment/savings TO checking
-                if (current_type in investment_types and paired_type in checking_types) or \
-                   (current_type in checking_types and paired_type in investment_types):
-                    is_investment_movement = True
-
-            # If it's not an investment movement, skip it (regular internal transfer)
-            if not is_investment_movement:
-                transfers_skipped += 1
-                continue
+                # Note: We now create expense records for ALL transfers (including regular transfers)
+                # so they appear in the Transfers tab
+                # Investment movements will be categorized as "Investment In" or "Investment Out"
+                # Other transfers will be categorized as "Transfer"
 
         if txn_id and txn_id in existing_by_txn_id:
             existing_exp = existing_by_txn_id[txn_id]
@@ -944,6 +934,10 @@ def run_expense_conversion(
         if not category:
             category = get_default_category_for_transaction(txn, is_transfer, paired_account_type)
 
+        # Track transfers for reporting
+        if is_transfer:
+            transfers_processed += 1
+
         expense_doc = {
             "date": txn.get("date"),
             "description": txn.get("description", ""),
@@ -960,14 +954,14 @@ def run_expense_conversion(
     notify("completed")
     return {
         "message": (
-            f"Converted {expenses_created} new transactions to expenses, "
-            f"updated {expenses_updated} existing expenses "
-            f"({transfers_skipped} transfers excluded, "
-            f"{transfer_expenses_removed} transfer expenses removed)"
+            f"Converted {expenses_created} new transactions to cashflow, "
+            f"updated {expenses_updated} existing items, "
+            f"processed {transfers_processed} transfers "
+            f"({transfer_expenses_removed} old transfer records cleaned up)"
         ),
         "expenses_created": expenses_created,
         "expenses_updated": expenses_updated,
-        "transfers_excluded": transfers_skipped,
+        "transfers_processed": transfers_processed,
         "transfer_expenses_removed": transfer_expenses_removed,
         "transactions_processed": len(transactions),
         "user_id": user_id,
