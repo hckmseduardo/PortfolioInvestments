@@ -793,6 +793,26 @@ def run_expense_conversion(
     expenses_updated = 0
     transfers_skipped = 0
 
+    # Ensure special categories exist (Income, Investment In, Investment Out)
+    special_categories = [
+        {"name": "Income", "type": "income", "color": "#4CAF50"},
+        {"name": "Investment In", "type": "investment", "color": "#1976D2"},
+        {"name": "Investment Out", "type": "investment", "color": "#0D47A1"},
+        {"name": "Transfer", "type": "transfer", "color": "#607D8B"},
+    ]
+
+    for cat_data in special_categories:
+        existing_cat = db.find_one("categories", {"user_id": user_id, "name": cat_data["name"]})
+        if not existing_cat:
+            category_doc = {
+                "user_id": user_id,
+                "name": cat_data["name"],
+                "type": cat_data["type"],
+                "color": cat_data["color"],
+                "budget_limit": None
+            }
+            db.insert("categories", category_doc)
+
     # Get all accounts for investment movement detection
     all_user_accounts = db.find("accounts", {"user_id": user_id})
     account_map = {acc["id"]: acc for acc in all_user_accounts}
@@ -809,14 +829,20 @@ def run_expense_conversion(
             checking_types = {"checking", "credit_card"}
 
             # Determine if it's Investment In or Investment Out
-            # Investment IN: money moving FROM checking TO investment/savings
-            # Investment OUT: money moving FROM investment/savings TO checking
-            if current_account_type in investment_types and paired_account_type in checking_types:
-                # Money coming INTO this investment/savings account FROM checking
+            # Investment IN: money moving FROM checking TO investment/savings (positive cashflow impact)
+            # Investment OUT: money moving FROM investment/savings TO checking (negative cashflow impact)
+
+            # Get the transaction amount to determine direction
+            txn_amount = txn.get("total", 0)
+
+            if current_account_type in checking_types and paired_account_type in investment_types:
+                # Money leaving checking account TO investment/savings
+                # This is money being invested (Investment In from cashflow perspective)
                 return "Investment In"
-            elif current_account_type in checking_types and paired_account_type in investment_types:
-                # Money leaving this checking account TO investment/savings
-                return "Investment In"  # From perspective of cashflow (money invested)
+            elif current_account_type in investment_types and paired_account_type in checking_types:
+                # Money coming FROM investment/savings TO checking account
+                # This is money being withdrawn from investments (Investment Out)
+                return "Investment Out"
             return "Transfer"
         elif is_transfer:
             return "Transfer"
