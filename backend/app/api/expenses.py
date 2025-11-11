@@ -16,7 +16,36 @@ router = APIRouter(prefix="/expenses", tags=["expenses"])
 EXPENSE_ACCOUNT_TYPES = {"checking", "credit_card"}
 
 # Enhanced category keywords for intelligent auto-categorization
+# Based on Categorization Rules.md decision tree and keyword recognition
 CATEGORY_KEYWORDS = {
+    # === INCOME KEYWORDS (Amount > 0) ===
+    "Income": [
+        "payroll", "deposit", "salary", "bonus", "refund", "dividend", "interest",
+        "transfer from", "payment received", "reimbursement", "cashback", "rebate",
+        "credit interest", "tax refund", "income", "earnings", "wages", "commission"
+    ],
+
+    # === INVESTMENT KEYWORDS ===
+    "Investment": [
+        "etf", "stock", "crypto", "investment", "wealthsimple", "questrade",
+        "tfsa", "rrsp", "rrif", "resp", "fhsa", "buy", "sell", "trade",
+        "mutual fund", "bond", "security", "brokerage", "portfolio"
+    ],
+
+    # === TRANSFER KEYWORDS ===
+    "Transfer": [
+        "transfer to", "transfer from", "internal transfer", "interac", "e-transfer",
+        "to savings", "to chequing", "to checking", "to credit card", "self transfer",
+        "account transfer", "between accounts"
+    ],
+
+    # === CREDIT CARD PAYMENT (Higher priority than general Transfer) ===
+    "Credit Card Payment": [
+        "credit card payment", "card balance", "payment to credit", "cc payment",
+        "visa payment", "mastercard payment", "amex payment"
+    ],
+
+    # === EXPENSE CATEGORIES (Amount < 0) ===
     "Groceries": [
         "grocery", "supermarket", "food", "market", "produce", "epicerie",
         # Major chains
@@ -36,7 +65,7 @@ CATEGORY_KEYWORDS = {
         "uber eats", "doordash", "skip the dishes", "grubhub", "food delivery",
         "deliveroo", "seamless", "postmates",
         # Generic terms
-        "food", "meal", "takeout", "take-out", "dine"
+        "meal", "takeout", "take-out", "dine"
     ],
     "Transportation": [
         "gas", "fuel", "essence", "petro", "shell", "esso", "chevron", "mobil",
@@ -87,7 +116,7 @@ CATEGORY_KEYWORDS = {
     "Bills": [
         "bill payment", "payment for", "online bill payment", "paiement",
         "subscription", "membership fee", "annual fee", "monthly fee",
-        "service charge", "account fee"
+        "service charge", "account fee", "bill", "payment"
     ],
     "Housing": [
         "rent", "loyer", "lease", "mortgage", "property tax", "condo fee",
@@ -109,7 +138,6 @@ CATEGORY_KEYWORDS = {
         "gift", "cadeau", "present", "donation", "charity",
         "birthday", "anniversary", "wedding", "holiday"
     ],
-    "Transfer": ["transfer", "e-transfer", "interac", "virement"],
     "ATM": ["atm", "cash withdrawal", "retrait", "cash advance", "guichet"],
     "Fees": [
         "fee", "fees", "charge", "frais", "commission",
@@ -139,15 +167,25 @@ def _dates_within_tolerance(date_a: Optional[str], date_b: Optional[str], tolera
     return abs((parsed_a - parsed_b).days) <= tolerance_days
 
 
-def auto_categorize_expense(description: str, user_id: str, db, skip_special_categories: bool = False) -> Optional[str]:
+def auto_categorize_expense(
+    description: str,
+    user_id: str,
+    db,
+    skip_special_categories: bool = False,
+    transaction_amount: Optional[float] = None,
+    account_type: Optional[str] = None
+) -> Optional[str]:
     """
-    Intelligently auto-categorize an expense based on description and learning from existing expenses.
+    Intelligently auto-categorize a transaction based on description, amount direction,
+    and account type, following the Categorization Rules decision tree.
 
     Args:
         description: Transaction description
         user_id: User ID to get user-specific categorizations
         db: Database service instance
-        skip_special_categories: If True, skip Transfer/Income/Investment categories (for non-transfers only)
+        skip_special_categories: If True, skip Transfer/Income/Investment categories
+        transaction_amount: Transaction amount (for direction-based categorization)
+        account_type: Account type (checking, credit_card, investment, savings)
 
     Returns:
         Category name or None if no match found
@@ -174,7 +212,7 @@ def auto_categorize_expense(description: str, user_id: str, db, skip_special_cat
         exp_desc = expense.get("description", "").lower()
 
         # Skip special categories if requested
-        if skip_special_categories and exp_cat in ["Transfer", "Investment In", "Investment Out", "Income"]:
+        if skip_special_categories and exp_cat in ["Transfer", "Investment In", "Investment Out", "Income", "Investment", "Credit Card Payment"]:
             continue
 
         # Skip uncategorized
@@ -200,11 +238,20 @@ def auto_categorize_expense(description: str, user_id: str, db, skip_special_cat
                 return most_common_category
 
     # Intelligent keyword-based categorization with weighted scoring
+    # Priority order: Credit Card Payment > Transfer > Income/Investment > Expense categories
     category_scores = {}
+
+    # Define priority tiers (higher number = higher priority)
+    priority_categories = {
+        "Credit Card Payment": 100,  # Highest priority
+        "Transfer": 50,
+        "Income": 40,
+        "Investment": 40,
+    }
 
     for category, keywords in CATEGORY_KEYWORDS.items():
         # Skip special categories if requested
-        if skip_special_categories and category in ["Transfer", "Income"]:
+        if skip_special_categories and category in ["Transfer", "Income", "Investment", "Credit Card Payment"]:
             continue
 
         score = 0
@@ -221,8 +268,29 @@ def auto_categorize_expense(description: str, user_id: str, db, skip_special_cat
             elif any(keyword_lower in word for word in cleaned_words):
                 score += 2
 
+        # Apply priority boost for high-priority categories
+        if category in priority_categories and score > 0:
+            score += priority_categories[category]
+
         if score > 0:
             category_scores[category] = score
+
+    # Filter based on transaction amount direction (decision tree logic)
+    if transaction_amount is not None and category_scores:
+        if transaction_amount > 0:
+            # Positive amount: Income or Transfer In
+            # Keep only Income, Transfer, and Credit Card Payment categories
+            category_scores = {
+                cat: score for cat, score in category_scores.items()
+                if cat in ["Income", "Transfer", "Credit Card Payment", "Investment"]
+            }
+        else:
+            # Negative amount: Expense, Transfer Out, or Investment
+            # Exclude Income category
+            category_scores = {
+                cat: score for cat, score in category_scores.items()
+                if cat != "Income"
+            }
 
     # Return category with highest score if score is significant
     if category_scores:
@@ -254,37 +322,66 @@ def _looks_like_transfer_pair(
 ) -> bool:
     """
     Determine if two transactions are likely part of the same transfer.
-    Handles standard debit/credit transfers and credit-card payments where
-    institutions sometimes export both legs as withdrawals.
+    Implements account relationship rules from Categorization Rules.md:
+    - Checking <-> Credit Card: Credit card payment
+    - Checking <-> Savings: Savings transfer
+    - Checking <-> Investment: Investment movement
+    - Same amount on same date: Internal transfer
     """
     total_a = txn_a.get("total", 0) or 0
     total_b = txn_b.get("total", 0) or 0
     if total_a == 0 or total_b == 0:
         return False
 
+    # Get account types
+    account_a = account_lookup.get(txn_a.get("account_id"))
+    account_b = account_lookup.get(txn_b.get("account_id"))
+
+    if not account_a or not account_b:
+        return False
+
+    account_type_a = (account_a.get("account_type") or "").lower()
+    account_type_b = (account_b.get("account_type") or "").lower()
+    account_types = {account_type_a, account_type_b}
+
     # Opposite signs is the classic transfer pattern
     if total_a * total_b < 0:
-        return True
+        # Verify it matches expected account relationships
+        valid_transfer_pairs = [
+            {"checking", "credit_card"},     # Credit card payment
+            {"checking", "savings"},          # Savings transfer
+            {"checking", "investment"},       # Investment movement
+            {"credit_card", "investment"},    # Credit card to investment (rare but possible)
+            {"savings", "investment"},        # Savings to investment
+        ]
+        if account_types in valid_transfer_pairs:
+            return True
 
+    # Explicit TRANSFER transaction type
     type_a = (txn_a.get("type") or "").lower()
     type_b = (txn_b.get("type") or "").lower()
     if "transfer" in {type_a, type_b}:
         return True
 
-    account_a = account_lookup.get(txn_a.get("account_id"))
-    account_b = account_lookup.get(txn_b.get("account_id"))
-    account_types = {
-        account_a.get("account_type") if account_a else None,
-        account_b.get("account_type") if account_b else None,
-    }
-
-    # Checking <-> credit card payments often show up as two withdrawals
+    # Checking <-> credit card payments can show up as two withdrawals
+    # (some institutions export both sides as debits)
     if account_types == {"checking", "credit_card"}:
         return True
 
-    # Consider other bank-to-bank transfers when descriptions explicitly say so
+    # Checking <-> Savings or Investment transfers with same sign
+    # (some institutions may not use opposite signs)
+    if account_types in [{"checking", "savings"}, {"checking", "investment"}, {"savings", "investment"}]:
+        # Check if descriptions indicate a transfer
+        description_combo = f"{txn_a.get('description','').lower()} {txn_b.get('description','').lower()}"
+        transfer_keywords = ("transfer", "interac", "etransfer", "e-transfer", "to savings",
+                           "to chequing", "to checking", "to investment", "from savings",
+                           "from chequing", "from checking", "from investment")
+        if any(keyword in description_combo for keyword in transfer_keywords):
+            return True
+
+    # Consider other transfers when descriptions explicitly say so
     description_combo = f"{txn_a.get('description','').lower()} {txn_b.get('description','').lower()}"
-    transfer_keywords = ("transfer", "interac", "etransfer", "e-transfer")
+    transfer_keywords = ("transfer", "interac", "etransfer", "e-transfer", "internal transfer")
     if any(keyword in description_combo for keyword in transfer_keywords):
         return True
 
@@ -621,44 +718,61 @@ async def delete_category(
 
 @router.post("/categories/init-defaults")
 async def initialize_default_categories(
+    force_refresh: bool = False,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
-    """Initialize default expense categories for a user."""
+    """Initialize default expense categories for a user.
+
+    Args:
+        force_refresh: If True, deletes existing categories and recreates defaults.
+                      If False, only creates defaults if no categories exist.
+    """
     db = get_db_service(session)
 
     # Check if user already has categories
     existing_categories = db.find("categories", {"user_id": current_user.id})
     if existing_categories:
-        return {"message": "Categories already exist", "count": len(existing_categories)}
+        if not force_refresh:
+            return {"message": "Categories already exist", "count": len(existing_categories)}
+        else:
+            # Delete all existing categories for this user
+            for cat in existing_categories:
+                db.delete("categories", cat["id"])
+            session.commit()
 
     # Define default categories with colors - separated by type
+    # Aligned with Categorization Rules.md
     default_categories = [
-        # Income categories
-        {"name": "Salary", "type": "income", "color": "#4CAF50", "budget_limit": None},
-        {"name": "Bonus", "type": "income", "color": "#66BB6A", "budget_limit": None},
-        {"name": "Freelance", "type": "income", "color": "#81C784", "budget_limit": None},
-        {"name": "Dividends", "type": "income", "color": "#A5D6A7", "budget_limit": None},
-        {"name": "Interest", "type": "income", "color": "#C8E6C9", "budget_limit": None},
-        {"name": "Other Income", "type": "income", "color": "#8BC34A", "budget_limit": None},
+        # Income categories (Amount > 0)
+        {"name": "Income", "type": "income", "color": "#4CAF50", "budget_limit": None},
+        {"name": "Salary", "type": "income", "color": "#66BB6A", "budget_limit": None},
+        {"name": "Bonus", "type": "income", "color": "#81C784", "budget_limit": None},
+        {"name": "Freelance", "type": "income", "color": "#A5D6A7", "budget_limit": None},
+        {"name": "Dividends", "type": "income", "color": "#C8E6C9", "budget_limit": None},
+        {"name": "Interest", "type": "income", "color": "#8BC34A", "budget_limit": None},
+        {"name": "Other Income", "type": "income", "color": "#CDDC39", "budget_limit": None},
 
-        # Investment categories
-        {"name": "Stock Purchase", "type": "investment", "color": "#1976D2", "budget_limit": None},
-        {"name": "ETF Purchase", "type": "investment", "color": "#2196F3", "budget_limit": None},
-        {"name": "Crypto Purchase", "type": "investment", "color": "#42A5F5", "budget_limit": None},
-        {"name": "Retirement Fund", "type": "investment", "color": "#64B5F6", "budget_limit": None},
-        {"name": "Stock Sale", "type": "investment", "color": "#0D47A1", "budget_limit": None},
-        {"name": "ETF Sale", "type": "investment", "color": "#1565C0", "budget_limit": None},
-        {"name": "Crypto Sale", "type": "investment", "color": "#1976D2", "budget_limit": None},
+        # Investment categories (Investment movements)
+        {"name": "Investment", "type": "investment", "color": "#1976D2", "budget_limit": None},
+        {"name": "Investment In", "type": "investment", "color": "#2196F3", "budget_limit": None},
+        {"name": "Investment Out", "type": "investment", "color": "#0D47A1", "budget_limit": None},
+        {"name": "Stock Purchase", "type": "investment", "color": "#42A5F5", "budget_limit": None},
+        {"name": "ETF Purchase", "type": "investment", "color": "#64B5F6", "budget_limit": None},
+        {"name": "Crypto Purchase", "type": "investment", "color": "#1565C0", "budget_limit": None},
+        {"name": "Stock Sale", "type": "investment", "color": "#1E88E5", "budget_limit": None},
+        {"name": "ETF Sale", "type": "investment", "color": "#1976D2", "budget_limit": None},
+        {"name": "Crypto Sale", "type": "investment", "color": "#1565C0", "budget_limit": None},
         {"name": "Other Investment", "type": "investment", "color": "#90CAF9", "budget_limit": None},
 
-        # Transfer categories
-        {"name": "Bank Transfer", "type": "transfer", "color": "#607D8B", "budget_limit": None},
+        # Transfer categories (Internal transfers between accounts)
+        {"name": "Transfer", "type": "transfer", "color": "#607D8B", "budget_limit": None},
         {"name": "Credit Card Payment", "type": "transfer", "color": "#78909C", "budget_limit": None},
-        {"name": "Account Transfer", "type": "transfer", "color": "#90A4AE", "budget_limit": None},
-        {"name": "E-Transfer", "type": "transfer", "color": "#B0BEC5", "budget_limit": None},
+        {"name": "Bank Transfer", "type": "transfer", "color": "#90A4AE", "budget_limit": None},
+        {"name": "Account Transfer", "type": "transfer", "color": "#B0BEC5", "budget_limit": None},
+        {"name": "E-Transfer", "type": "transfer", "color": "#CFD8DC", "budget_limit": None},
 
-        # Expense categories
+        # Expense categories (Amount < 0, goods and services)
         {"name": "Groceries", "type": "expense", "color": "#8BC34A", "budget_limit": None},
         {"name": "Dining", "type": "expense", "color": "#FF9800", "budget_limit": None},
         {"name": "Transportation", "type": "expense", "color": "#2196F3", "budget_limit": None},
@@ -970,12 +1084,14 @@ def run_expense_conversion(
     expenses_updated = 0
     transfers_processed = 0
 
-    # Ensure special categories exist (Income, Investment In, Investment Out)
+    # Ensure special categories exist (aligned with Categorization Rules.md)
     special_categories = [
         {"name": "Income", "type": "income", "color": "#4CAF50"},
-        {"name": "Investment In", "type": "investment", "color": "#1976D2"},
+        {"name": "Investment", "type": "investment", "color": "#1976D2"},
+        {"name": "Investment In", "type": "investment", "color": "#2196F3"},
         {"name": "Investment Out", "type": "investment", "color": "#0D47A1"},
         {"name": "Transfer", "type": "transfer", "color": "#607D8B"},
+        {"name": "Credit Card Payment", "type": "transfer", "color": "#78909C"},
     ]
 
     for cat_data in special_categories:
@@ -998,39 +1114,51 @@ def run_expense_conversion(
     processed_transfer_txn_ids = set()
 
     # Helper function to determine default category based on transaction type
+    # Implements Categorization Rules.md account relationship rules
     def get_default_category_for_transaction(txn, is_transfer: bool, paired_account_type: Optional[str] = None) -> str:
         txn_type = txn.get("type")
         current_account = account_map.get(txn.get("account_id"))
         current_account_type = current_account.get("account_type", "").lower() if current_account else ""
 
         if is_transfer and paired_account_type:
-            # Investment movement
+            # Define account type groups
             investment_types = {"investment", "savings"}
-            checking_types = {"checking", "credit_card"}
+            checking_types = {"checking"}
 
-            # Determine if it's Investment In or Investment Out
-            # Investment IN: money moving FROM checking TO investment/savings (positive cashflow impact)
-            # Investment OUT: money moving FROM investment/savings TO checking (negative cashflow impact)
+            # Account Relationship Rules from Categorization Rules.md:
 
-            # Get the transaction amount to determine direction
-            txn_amount = txn.get("total", 0)
+            # 1. Checking <-> Credit Card: Credit Card Payment
+            if {current_account_type, paired_account_type} == {"checking", "credit_card"}:
+                return "Credit Card Payment"
 
-            if current_account_type in checking_types and paired_account_type in investment_types:
-                # Money leaving checking account TO investment/savings
-                # This is money being invested (Investment In from cashflow perspective)
+            # 2. Checking <-> Savings: Transfer
+            if {current_account_type, paired_account_type} == {"checking", "savings"}:
+                return "Transfer"
+
+            # 3. Checking <-> Investment: Investment movement
+            if current_account_type == "checking" and paired_account_type == "investment":
+                # Money leaving checking TO investment (Investment In)
                 return "Investment In"
-            elif current_account_type in investment_types and paired_account_type in checking_types:
-                # Money coming FROM investment/savings TO checking account
-                # This is money being withdrawn from investments (Investment Out)
+            elif current_account_type == "investment" and paired_account_type == "checking":
+                # Money coming FROM investment TO checking (Investment Out)
                 return "Investment Out"
+
+            # 4. Savings <-> Investment: Investment movement
+            if current_account_type == "savings" and paired_account_type == "investment":
+                return "Investment In"
+            elif current_account_type == "investment" and paired_account_type == "savings":
+                return "Investment Out"
+
+            # Default to generic Transfer for other combinations
             return "Transfer"
         elif is_transfer:
+            # Transfer without paired account info
             return "Transfer"
         elif txn_type in ["DEPOSIT", "DIVIDEND", "INTEREST"]:
             # Income transactions (not transfers)
             return "Income"
         elif txn_type in ["WITHDRAWAL", "FEE"]:
-            # Expense transactions
+            # Expense transactions - will be categorized by auto_categorize_expense
             return "Uncategorized"
         return "Uncategorized"
 
@@ -1111,14 +1239,26 @@ def run_expense_conversion(
         # Calculate category for both new and existing expenses
         # IMPORTANT: For transfers, always use the transfer categorization logic, not auto-categorization
         # This ensures credit card payments, investment movements, etc. are properly categorized
+        txn_amount = txn.get("total", 0)
+        current_account = account_map.get(txn.get("account_id"))
+        current_account_type = current_account.get("account_type", "").lower() if current_account else None
+
         if is_transfer:
             category = get_default_category_for_transaction(txn, is_transfer, paired_account_type)
             # Failsafe: if categorization somehow returns Uncategorized for a transfer, force it to Transfer
             if category == "Uncategorized":
                 category = "Transfer"
         else:
-            # For non-transfers, try auto-categorization first (skip Transfer/Income categories)
-            category = auto_categorize_expense(txn.get("description", ""), user_id, db, skip_special_categories=True)
+            # For non-transfers, try auto-categorization first with amount and account type info
+            # Skip Transfer/Income/Investment categories since we handle those separately
+            category = auto_categorize_expense(
+                txn.get("description", ""),
+                user_id,
+                db,
+                skip_special_categories=True,
+                transaction_amount=txn_amount,
+                account_type=current_account_type
+            )
             if not category:
                 category = get_default_category_for_transaction(txn, is_transfer, paired_account_type)
 
@@ -1291,9 +1431,22 @@ async def reclassify_uncategorized_expenses(
     for expense in uncategorized_expenses:
         description = expense.get("description", "")
         expense_id = expense.get("id")
+        expense_amount = expense.get("amount", 0)
+        account_id = expense.get("account_id")
+
+        # Get account type for better categorization
+        account = db.find_one("accounts", {"id": account_id})
+        account_type = account.get("account_type", "").lower() if account else None
 
         # Try to categorize using the intelligent algorithm
-        new_category = auto_categorize_expense(description, current_user.id, db, skip_special_categories=True)
+        new_category = auto_categorize_expense(
+            description,
+            current_user.id,
+            db,
+            skip_special_categories=True,
+            transaction_amount=expense_amount,
+            account_type=account_type
+        )
 
         if new_category and new_category != "Uncategorized":
             try:

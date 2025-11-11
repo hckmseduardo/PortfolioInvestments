@@ -112,6 +112,7 @@ const Cashflow = () => {
   const [loading, setLoading] = useState(true);
   const [editingExpense, setEditingExpense] = useState(null);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [categoryTabValue, setCategoryTabValue] = useState(0);
   const [editingCategory, setEditingCategory] = useState(null);
   const [newCategory, setNewCategory] = useState({ name: '', type: 'expense', color: '#4CAF50', budget_limit: '' });
   const [conversionJobId, setConversionJobId] = useState(null);
@@ -705,6 +706,50 @@ const Cashflow = () => {
     }
   };
 
+  const handleRefreshToDefaults = async () => {
+    if (window.confirm('This will reset all categories to defaults. Your current categories will be replaced. Are you sure?')) {
+      try {
+        await expensesAPI.initDefaultCategories(true);
+        showSuccess('Categories refreshed to defaults successfully');
+        setEditingCategory(null);
+        await fetchCategories();
+      } catch (error) {
+        console.error('Error refreshing categories:', error);
+        showError('Error refreshing categories');
+      }
+    }
+  };
+
+  // Category tab helpers
+  const getCategoryTypeFromTab = (tabIndex) => {
+    const types = ['expense', 'income', 'investment', 'transfer'];
+    return types[tabIndex] || 'expense';
+  };
+
+  const getTabFromCategoryType = (type) => {
+    const types = ['expense', 'income', 'investment', 'transfer'];
+    return types.indexOf(type);
+  };
+
+  const handleCategoryTabChange = (event, newValue) => {
+    setCategoryTabValue(newValue);
+    setEditingCategory(null);
+    const newType = getCategoryTypeFromTab(newValue);
+    setNewCategory({ name: '', type: newType, color: '#4CAF50', budget_limit: '' });
+  };
+
+  const getFilteredCategories = () => {
+    const currentType = getCategoryTypeFromTab(categoryTabValue);
+    return categories.filter(cat => cat.type === currentType);
+  };
+
+  const handleOpenCategoryDialog = () => {
+    setCategoryTabValue(0);
+    setEditingCategory(null);
+    setNewCategory({ name: '', type: 'expense', color: '#4CAF50', budget_limit: '' });
+    setCategoryDialogOpen(true);
+  };
+
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('en-CA', {
@@ -926,7 +971,7 @@ const Cashflow = () => {
           <Button
             variant="outlined"
             startIcon={<CategoryIcon />}
-            onClick={() => setCategoryDialogOpen(true)}
+            onClick={handleOpenCategoryDialog}
             sx={{ mr: 1 }}
           >
             Manage Categories
@@ -2361,39 +2406,55 @@ const Cashflow = () => {
       )}
 
       {/* Category Management Dialog */}
-      <Dialog open={categoryDialogOpen} onClose={() => setCategoryDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={categoryDialogOpen} onClose={() => setCategoryDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>Manage Categories</DialogTitle>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 3 }}>
+          <Tabs value={categoryTabValue} onChange={handleCategoryTabChange}>
+            <Tab label="Expense" />
+            <Tab label="Income" />
+            <Tab label="Investment" />
+            <Tab label="Transfer" />
+          </Tabs>
+        </Box>
         <DialogContent>
           <Box mb={3}>
-            <Typography variant="subtitle1" gutterBottom>Existing Categories</Typography>
-            <Box display="flex" flexWrap="wrap" gap={1}>
-              {categories.map(category => (
-                <Box key={category.id} display="flex" alignItems="center">
-                  <Chip
-                    label={category.name}
-                    sx={{
-                      bgcolor: category.color,
-                      color: 'white'
-                    }}
-                  />
-                  <IconButton
-                    size="small"
-                    onClick={() => handleEditCategory(category)}
-                    sx={{ ml: 0.5 }}
-                  >
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                  <IconButton
-                    size="small"
-                    onClick={() => handleDeleteCategory(category.id)}
-                    sx={{ ml: 0.5 }}
-                    color="error"
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </Box>
-              ))}
-            </Box>
+            <Typography variant="subtitle1" gutterBottom>
+              {getCategoryTypeFromTab(categoryTabValue).charAt(0).toUpperCase() + getCategoryTypeFromTab(categoryTabValue).slice(1)} Categories
+            </Typography>
+            {getFilteredCategories().length > 0 ? (
+              <Box display="flex" flexWrap="wrap" gap={1}>
+                {getFilteredCategories().map(category => (
+                  <Box key={category.id} display="flex" alignItems="center">
+                    <Chip
+                      label={category.name}
+                      sx={{
+                        bgcolor: category.color,
+                        color: 'white'
+                      }}
+                    />
+                    <IconButton
+                      size="small"
+                      onClick={() => handleEditCategory(category)}
+                      sx={{ ml: 0.5 }}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      onClick={() => handleDeleteCategory(category.id)}
+                      sx={{ ml: 0.5 }}
+                      color="error"
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                ))}
+              </Box>
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic', py: 2 }}>
+                No {getCategoryTypeFromTab(categoryTabValue)} categories yet. Add one below.
+              </Typography>
+            )}
           </Box>
 
           {editingCategory && (
@@ -2484,7 +2545,9 @@ const Cashflow = () => {
             </Box>
           )}
 
-          <Typography variant="subtitle1" gutterBottom>Add New Category</Typography>
+          <Typography variant="subtitle1" gutterBottom>
+            Add New {getCategoryTypeFromTab(categoryTabValue).charAt(0).toUpperCase() + getCategoryTypeFromTab(categoryTabValue).slice(1)} Category
+          </Typography>
           <TextField
             fullWidth
             label="Category Name"
@@ -2492,19 +2555,6 @@ const Cashflow = () => {
             onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
             margin="normal"
           />
-          <FormControl fullWidth margin="normal">
-            <InputLabel>Type</InputLabel>
-            <Select
-              value={newCategory.type}
-              onChange={(e) => setNewCategory({ ...newCategory, type: e.target.value })}
-              label="Type"
-            >
-              <MenuItem value="expense">Expense</MenuItem>
-              <MenuItem value="income">Income</MenuItem>
-              <MenuItem value="investment">Investment</MenuItem>
-              <MenuItem value="transfer">Transfer</MenuItem>
-            </Select>
-          </FormControl>
           <Box mt={2} mb={2}>
             <Typography variant="body2" color="text.secondary" gutterBottom>
               Select Color
@@ -2556,11 +2606,21 @@ const Cashflow = () => {
             margin="normal"
           />
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCategoryDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreateCategory} variant="contained" disabled={!newCategory.name}>
-            Create Category
+        <DialogActions sx={{ justifyContent: 'space-between', px: 3, pb: 2 }}>
+          <Button
+            onClick={handleRefreshToDefaults}
+            variant="outlined"
+            color="warning"
+            startIcon={<RefreshIcon />}
+          >
+            Refresh to Defaults
           </Button>
+          <Box display="flex" gap={1}>
+            <Button onClick={() => setCategoryDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleCreateCategory} variant="contained" disabled={!newCategory.name}>
+              Create Category
+            </Button>
+          </Box>
         </DialogActions>
       </Dialog>
     </Container>

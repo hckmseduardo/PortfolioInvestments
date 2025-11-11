@@ -222,7 +222,9 @@ export const expensesAPI = {
   createCategory: (data) => api.post('/expenses/categories', data),
   updateCategory: (id, data) => api.put(`/expenses/categories/${id}`, data),
   deleteCategory: (id) => api.delete(`/expenses/categories/${id}`),
-  initDefaultCategories: () => api.post('/expenses/categories/init-defaults'),
+  initDefaultCategories: (forceRefresh = false) => api.post('/expenses/categories/init-defaults', null, {
+    params: { force_refresh: forceRefresh }
+  }),
   convertTransactions: (accountId = null) =>
     api.post('/expenses/convert-transactions', null, {
       params: accountId ? { account_id: accountId } : {}

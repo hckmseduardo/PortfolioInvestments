@@ -64,6 +64,10 @@ A comprehensive investment portfolio management platform that allows users to im
 - **PostgreSQL**: Production-ready relational database (with automatic migration from JSON)
 - **SQLAlchemy**: ORM for database operations
 - **JSON Database**: Legacy file-based storage (for backward compatibility)
+- **LLM Integration** (Planned): Open-source language models for intelligent transaction categorization
+  - Ollama or llama.cpp for local LLM inference
+  - Mistral, Llama, or other quantized models for efficient categorization
+  - Privacy-first: All processing happens locally, no data sent to external APIs
 - **yfinance**: Real-time market data
 - **pdfplumber**: PDF parsing for statements
 - **pandas**: Data processing and analysis
@@ -390,10 +394,14 @@ npm run dev
 ### 6. Manage Expenses
 **NEW: Enhanced Expense Tracking System**
 - **Automatic Import**: Convert checking account withdrawal and fee transactions to expenses with one click
-- **Smart Categorization**: AI-powered auto-categorization based on transaction descriptions
-  - Learns from your existing categorizations
-  - Uses intelligent keyword matching for common categories
-  - Supports 12 default categories: Groceries, Dining, Transportation, Utilities, Entertainment, Shopping, Healthcare, Bills, Transfer, ATM, Fees, and Uncategorized
+- **Smart Categorization**: AI-powered auto-categorization with LLM enhancement
+  - **Open-source LLM Integration**: Uses local open-source language models to intelligently understand transaction descriptions and suggest appropriate categories
+  - **Continuous Learning**: The algorithm learns from your manual categorizations across all previous imported transactions, improving accuracy over time
+  - **User-Specific Patterns**: Recognizes your unique spending patterns and merchant preferences based on your categorization history
+  - **Intelligent Keyword Matching**: Combines traditional keyword matching with LLM-powered semantic understanding for superior categorization
+  - **Multi-dimensional Analysis**: Considers transaction amount, description, account type, and historical patterns for context-aware categorization
+  - Supports 12+ default categories: Groceries, Dining, Transportation, Utilities, Entertainment, Shopping, Healthcare, Bills, Transfer, ATM, Fees, and Uncategorized
+  - Create unlimited custom categories that the LLM will learn to recognize
 - **Interactive Category Management**:
   - Edit expense categories inline with color-coded dropdowns
   - Bulk category assignment: Select multiple expenses and categorize at once
@@ -411,7 +419,11 @@ npm run dev
   - Filter by account (all accounts or specific checking account)
   - Filter by category
   - Real-time updates on filter changes
-- **Re-categorization Support**: As you manually categorize expenses, the system learns and improves future auto-categorization
+- **Adaptive Learning System**:
+  - Every manual categorization you make trains the system to be smarter
+  - The LLM analyzes all your previous transactions to understand your categorization preferences
+  - Merchant-specific learning: Once you categorize a merchant, similar transactions are automatically categorized correctly
+  - Improves with every transaction you review, building a personalized categorization model
 - **Mobile Optimization**: Double-tap on pie charts to filter (allows viewing tooltips first)
 - **Export Options**: Download expense reports in PDF, CSV, or Excel format
 
@@ -758,6 +770,25 @@ PortfolioInvestments/
   - Portfolio rebalancing recommendations based on target allocations
   - What-if scenarios and portfolio modeling
   - Tax reporting and capital gains calculations
+
+- **LLM & AI Enhancements** (In Development):
+  - **Transaction Categorization LLM**:
+    - Integration with open-source LLMs (Llama, Mistral, Phi) for semantic understanding of transactions
+    - Context-aware categorization based on merchant name, transaction patterns, and historical data
+    - Fine-tuning on user's personal categorization history for personalized accuracy
+    - Multi-language support for international transaction descriptions
+    - Confidence scoring to flag uncertain categorizations for user review
+  - **Intelligent Insights**:
+    - Spending pattern analysis and anomaly detection
+    - Predictive cash flow forecasting based on historical patterns
+    - Automated budget recommendations based on spending habits
+    - Natural language queries: "How much did I spend on dining last month?"
+    - Smart suggestions for reducing expenses in specific categories
+  - **Privacy-Preserving Architecture**:
+    - All LLM processing happens locally using Ollama or llama.cpp
+    - No transaction data sent to external APIs
+    - Optional cloud LLM support for users who prefer it
+    - Transparent data handling with full user control
 
 - **Notifications & Alerts**:
   - Email notifications for dividends, price alerts, and portfolio milestones
