@@ -178,10 +178,11 @@ Response:"""
                     "stream": False,
                     "options": {
                         "temperature": 0.1,  # Low temperature for consistent results
-                        "top_p": 0.9
+                        "top_p": 0.9,
+                        "num_predict": 100  # Limit response tokens for faster inference
                     }
                 },
-                timeout=15
+                timeout=30  # Increased timeout for CPU inference
             )
 
             if response.status_code == 200:
@@ -268,14 +269,22 @@ Response:"""
                     logger.info(f"Using merchant memory for '{merchant}': {memory['category']}")
                     return memory["category"], confidence, "merchant_memory"
 
-        # Step 2: Use keyword matching result if available
-        if keyword_result and keyword_result[0] and keyword_result[1] >= 10:  # High keyword score
+        # Step 2: Use keyword matching result if available with high confidence
+        if keyword_result and keyword_result[0] and keyword_result[1] >= 15:  # High keyword score
             # Convert keyword score to confidence (normalize to 0.0-1.0)
             confidence = min(0.95, keyword_result[1] / 20.0)  # Max confidence 0.95
             logger.info(f"Using keyword match: {keyword_result[0]} (score: {keyword_result[1]})")
             return keyword_result[0], confidence, "keyword"
 
-        # Step 3: Try LLM categorization
+        # Step 3: Try LLM categorization only if no keyword match or very low score
+        # Skip LLM if we have any reasonable keyword match to avoid slow processing
+        if keyword_result and keyword_result[0] and keyword_result[1] >= 5:
+            # Use keyword match instead of waiting for LLM
+            confidence = max(0.4, min(0.75, keyword_result[1] / 20.0))
+            logger.info(f"Using keyword match (skip LLM): {keyword_result[0]} (score: {keyword_result[1]})")
+            return keyword_result[0], confidence, "keyword"
+
+        # Step 4: Try LLM only for completely unknown transactions
         if self.enabled and available_categories:
             user_history = self.get_user_category_history(user_id, db)
             llm_category, llm_confidence = self.categorize_with_llm(
@@ -289,7 +298,7 @@ Response:"""
             if llm_category and llm_confidence >= 0.5:  # LLM confidence threshold
                 return llm_category, llm_confidence, "llm"
 
-        # Step 4: Fall back to keyword result even with low score
+        # Step 5: Fall back to keyword result even with very low score
         if keyword_result and keyword_result[0]:
             confidence = max(0.3, min(0.6, keyword_result[1] / 20.0))  # Low to medium confidence
             return keyword_result[0], confidence, "keyword_low"
