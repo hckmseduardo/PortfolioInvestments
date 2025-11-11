@@ -1,7 +1,7 @@
 """
 SQLAlchemy ORM Models for PostgreSQL
 """
-from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Text, Enum as SQLEnum, Integer, Boolean
+from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Text, Enum as SQLEnum, Integer, Boolean, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -59,6 +59,7 @@ class User(Base):
     # Relationships
     accounts = relationship("Account", back_populates="user", cascade="all, delete-orphan")
     categories = relationship("Category", back_populates="user", cascade="all, delete-orphan")
+    merchant_memories = relationship("MerchantMemory", back_populates="user", cascade="all, delete-orphan")
     dashboard_layouts = relationship("DashboardLayout", back_populates="user", cascade="all, delete-orphan")
 
 
@@ -158,6 +159,10 @@ class Expense(Base):
     category = Column(String, nullable=True, index=True)
     notes = Column(Text, nullable=True)
 
+    # LLM-enhanced categorization fields
+    confidence = Column(Float, nullable=True)  # Categorization confidence (0.0 to 1.0)
+    suggested_category = Column(String, nullable=True)  # AI-suggested category if different from current
+
     # Transfer pair tracking fields
     paired_transaction_id = Column(String, nullable=True, index=True)  # ID of the paired transaction in a transfer
     paired_account_id = Column(String, nullable=True, index=True)  # Account ID of the paired side of the transfer
@@ -181,6 +186,28 @@ class Category(Base):
 
     # Relationships
     user = relationship("User", back_populates="categories")
+
+
+class MerchantMemory(Base):
+    """Stores learned categorization patterns for merchants based on user behavior."""
+    __tablename__ = "merchant_memory"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    merchant_name = Column(String, nullable=False, index=True)  # Normalized merchant name
+    category = Column(String, nullable=False)
+    confidence = Column(Float, default=1.0)  # 0.0 to 1.0
+    occurrence_count = Column(Integer, default=1)  # How many times user categorized this way
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="merchant_memories")
+
+    # Composite index for fast lookups
+    __table_args__ = (
+        Index('idx_user_merchant', 'user_id', 'merchant_name'),
+    )
 
 
 class Statement(Base):

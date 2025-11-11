@@ -185,6 +185,8 @@ class ExpenseBase(BaseModel):
     paired_transaction_id: Optional[str] = None  # ID of the paired transaction in a transfer
     paired_account_id: Optional[str] = None  # Account ID of the paired side of the transfer
     is_transfer_primary: Optional[bool] = True  # True if this is the primary expense record for a transfer pair
+    confidence: Optional[float] = None  # Categorization confidence (0.0 to 1.0)
+    suggested_category: Optional[str] = None  # AI-suggested category if different from current
 
 class ExpenseCreate(ExpenseBase):
     account_id: str
@@ -208,6 +210,21 @@ class CategoryCreate(CategoryBase):
 class Category(CategoryBase):
     id: str
     user_id: str
+
+    class Config:
+        from_attributes = True
+
+class MerchantMemoryBase(BaseModel):
+    merchant_name: str
+    category: str
+    confidence: float = 1.0
+    occurrence_count: int = 1
+
+class MerchantMemory(MerchantMemoryBase):
+    id: str
+    user_id: str
+    last_updated: datetime
+    created_at: datetime
 
     class Config:
         from_attributes = True

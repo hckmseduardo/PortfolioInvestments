@@ -8,6 +8,21 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: portfolio-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   postgres:
     image: postgres:16-alpine
     container_name: portfolio-postgres
@@ -46,10 +61,14 @@ services:
       - PLAID_CLIENT_ID=${PLAID_CLIENT_ID:-}
       - PLAID_SECRET=${PLAID_SECRET:-}
       - PLAID_ENVIRONMENT=${PLAID_ENVIRONMENT:-sandbox}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+      ollama:
         condition: service_started
     restart: unless-stopped
     healthcheck:
@@ -100,11 +119,15 @@ services:
       - UPLOAD_PATH=/app/uploads
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
       - QUEUE_LIST=expense_conversion
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+      ollama:
         condition: service_started
     restart: unless-stopped
     healthcheck:
@@ -278,5 +301,6 @@ volumes:
   uploads:
   pgadmin_data:
   redis_data:
+  ollama_data:
   prometheus_data:
   grafana_data:

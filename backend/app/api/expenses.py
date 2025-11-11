@@ -173,11 +173,14 @@ def auto_categorize_expense(
     db,
     skip_special_categories: bool = False,
     transaction_amount: Optional[float] = None,
-    account_type: Optional[str] = None
-) -> Optional[str]:
+    account_type: Optional[str] = None,
+    use_llm: bool = True
+) -> tuple[Optional[str], float, str]:
     """
-    Intelligently auto-categorize a transaction based on description, amount direction,
-    and account type, following the Categorization Rules decision tree.
+    Intelligently auto-categorize a transaction using hybrid approach:
+    1. Merchant memory (learned from user's past categorizations)
+    2. Keyword matching (fast, rule-based)
+    3. LLM semantic understanding (optional, for ambiguous cases)
 
     Args:
         description: Transaction description
@@ -186,56 +189,31 @@ def auto_categorize_expense(
         skip_special_categories: If True, skip Transfer/Income/Investment categories
         transaction_amount: Transaction amount (for direction-based categorization)
         account_type: Account type (checking, credit_card, investment, savings)
+        use_llm: If True, use LLM for semantic understanding
 
     Returns:
-        Category name or None if no match found
+        Tuple of (category, confidence, source)
+        - category: Categorized name or None
+        - confidence: Float between 0.0 and 1.0
+        - source: 'merchant_memory', 'keyword', 'llm', 'unknown'
     """
     if not description:
-        return None
+        return None, 0.0, "unknown"
 
     description_lower = description.lower()
 
-    # Remove common noise words and clean description
+    # Get available categories for this user
+    user_categories = db.find("categories", {"user_id": user_id})
+    available_categories = [cat["name"] for cat in user_categories if cat.get("name")]
+
+    # Filter out special categories if requested
+    if skip_special_categories:
+        special_cats = ["Transfer", "Investment In", "Investment Out", "Income", "Investment", "Credit Card Payment"]
+        available_categories = [cat for cat in available_categories if cat not in special_cats]
+
+    # Remove common noise words for keyword matching
     noise_words = {"from", "to", "at", "the", "a", "an", "in", "on", "for", "with", "and", "or"}
     cleaned_words = [w for w in description_lower.split() if w not in noise_words and len(w) > 2]
-
-    # Extract merchant name (usually first significant words)
-    merchant_name = " ".join(cleaned_words[:3]) if len(cleaned_words) >= 3 else " ".join(cleaned_words)
-
-    # First, try to learn from user's history with exact merchant match
-    existing_expenses = db.find("expenses", {})
-
-    # Build merchant -> category mapping from history
-    merchant_categories = {}
-    for expense in existing_expenses:
-        exp_cat = expense.get("category")
-        exp_desc = expense.get("description", "").lower()
-
-        # Skip special categories if requested
-        if skip_special_categories and exp_cat in ["Transfer", "Investment In", "Investment Out", "Income", "Investment", "Credit Card Payment"]:
-            continue
-
-        # Skip uncategorized
-        if not exp_cat or exp_cat == "Uncategorized":
-            continue
-
-        if exp_desc and len(exp_desc) > 5:
-            # Extract merchant from historical expense
-            exp_words = [w for w in exp_desc.split() if w not in noise_words and len(w) > 2]
-            exp_merchant = " ".join(exp_words[:3]) if len(exp_words) >= 3 else " ".join(exp_words)
-
-            # Exact merchant match
-            if exp_merchant and exp_merchant in description_lower:
-                if exp_merchant not in merchant_categories:
-                    merchant_categories[exp_merchant] = {}
-                merchant_categories[exp_merchant][exp_cat] = merchant_categories[exp_merchant].get(exp_cat, 0) + 1
-
-    # If we found matching merchants, use the most common category for that merchant
-    if merchant_categories:
-        for merchant, categories in merchant_categories.items():
-            if categories:
-                most_common_category = max(categories.items(), key=lambda x: x[1])[0]
-                return most_common_category
 
     # Intelligent keyword-based categorization with weighted scoring
     # Priority order: Credit Card Payment > Transfer > Income/Investment > Expense categories
@@ -292,15 +270,42 @@ def auto_categorize_expense(
                 if cat != "Income"
             }
 
-    # Return category with highest score if score is significant
+    # Get best keyword match
+    keyword_result = None
     if category_scores:
         best_category = max(category_scores.items(), key=lambda x: x[1])
-        # Only return if confidence score is reasonable (at least 5 points)
-        if best_category[1] >= 5:
-            return best_category[0]
+        keyword_result = (best_category[0], best_category[1])  # (category, score)
+
+    # Use LLM-enhanced categorization if enabled
+    if use_llm:
+        try:
+            from app.services.llm_categorizer import get_llm_service
+            llm_service = get_llm_service()
+
+            category, confidence, source = llm_service.enhanced_categorize(
+                description=description,
+                user_id=user_id,
+                db=db,
+                transaction_amount=transaction_amount,
+                account_type=account_type,
+                keyword_result=keyword_result,
+                available_categories=available_categories
+            )
+
+            if category:
+                return category, confidence, source
+        except Exception as e:
+            import logging
+            logging.error(f"LLM categorization failed: {e}")
+            # Fall through to keyword-only result
+
+    # Fall back to keyword matching only
+    if keyword_result and keyword_result[1] >= 5:
+        confidence = min(0.9, keyword_result[1] / 20.0)  # Convert score to confidence
+        return keyword_result[0], confidence, "keyword"
 
     # No confident match found
-    return None
+    return None, 0.0, "unknown"
 
 def _is_expense_account(account: Optional[dict]) -> bool:
     """Return True if the account type should appear in expenses."""
@@ -814,7 +819,11 @@ async def update_expense_category(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
-    """Update just the category of an expense."""
+    """
+    Update the category of an expense.
+
+    This also updates merchant memory to learn from user's categorization preferences.
+    """
     db = get_db_service(session)
 
     existing_expense = db.find_one("expenses", {"id": expense_id})
@@ -831,10 +840,36 @@ async def update_expense_category(
             detail="Not authorized to update this expense"
         )
 
+    # Update merchant memory to learn from user's manual categorization
+    try:
+        from app.services.llm_categorizer import get_llm_service
+        llm_service = get_llm_service()
+
+        description = existing_expense.get("description", "")
+        merchant = llm_service.normalize_merchant_name(description)
+
+        if merchant:
+            llm_service.update_merchant_memory(
+                merchant_name=merchant,
+                category=category,
+                user_id=current_user.id,
+                db=db,
+                confidence=1.0  # User manual categorization has highest confidence
+            )
+    except Exception as e:
+        import logging
+        logging.warning(f"Failed to update merchant memory: {e}")
+        # Continue with category update even if merchant memory fails
+
+    # Update expense category with high confidence (user-confirmed)
     db.update(
         "expenses",
         {"id": expense_id},
-        {"category": category}
+        {
+            "category": category,
+            "confidence": 1.0,  # User manual categorization has highest confidence
+            "suggested_category": None  # Clear any AI suggestion since user has confirmed
+        }
     )
 
     session.commit()
@@ -1243,15 +1278,20 @@ def run_expense_conversion(
         current_account = account_map.get(txn.get("account_id"))
         current_account_type = current_account.get("account_type", "").lower() if current_account else None
 
+        confidence = None
+        categorization_source = None
+
         if is_transfer:
             category = get_default_category_for_transaction(txn, is_transfer, paired_account_type)
             # Failsafe: if categorization somehow returns Uncategorized for a transfer, force it to Transfer
             if category == "Uncategorized":
                 category = "Transfer"
+            confidence = 1.0  # High confidence for transfers
+            categorization_source = "transfer_detection"
         else:
             # For non-transfers, try auto-categorization first with amount and account type info
             # Skip Transfer/Income/Investment categories since we handle those separately
-            category = auto_categorize_expense(
+            category, confidence, categorization_source = auto_categorize_expense(
                 txn.get("description", ""),
                 user_id,
                 db,
@@ -1261,6 +1301,8 @@ def run_expense_conversion(
             )
             if not category:
                 category = get_default_category_for_transaction(txn, is_transfer, paired_account_type)
+                confidence = 0.5  # Medium confidence for default categorization
+                categorization_source = "default"
 
         if txn_id and txn_id in existing_by_txn_id:
             existing_exp = existing_by_txn_id[txn_id]
@@ -1269,6 +1311,7 @@ def run_expense_conversion(
                 "description": txn.get("description", ""),
                 "amount": abs(txn.get("total", 0)),
                 "category": category,  # Use recalculated category, not old one
+                "confidence": confidence,
                 "transaction_id": txn_id,
                 "paired_transaction_id": paired_txn_id,
                 "paired_account_id": paired_account_id,
@@ -1299,7 +1342,8 @@ def run_expense_conversion(
                     "paired_transaction_id": paired_txn_id,
                     "paired_account_id": paired_account_id,
                     "is_transfer_primary": True,
-                    "category": category  # Update category as well
+                    "category": category,  # Update category as well
+                    "confidence": confidence
                 })
                 expenses_updated += 1
             continue
@@ -1313,6 +1357,7 @@ def run_expense_conversion(
             "description": txn.get("description", ""),
             "amount": abs(txn.get("total", 0)),
             "category": category,
+            "confidence": confidence,
             "account_id": txn.get("account_id"),
             "transaction_id": txn_id,
             "paired_transaction_id": paired_txn_id,
@@ -1439,7 +1484,7 @@ async def reclassify_uncategorized_expenses(
         account_type = account.get("account_type", "").lower() if account else None
 
         # Try to categorize using the intelligent algorithm
-        new_category = auto_categorize_expense(
+        new_category, confidence, source = auto_categorize_expense(
             description,
             current_user.id,
             db,
@@ -1450,7 +1495,10 @@ async def reclassify_uncategorized_expenses(
 
         if new_category and new_category != "Uncategorized":
             try:
-                db.update("expenses", {"id": expense_id}, {"category": new_category})
+                db.update("expenses", {"id": expense_id}, {
+                    "category": new_category,
+                    "confidence": confidence
+                })
                 reclassified_count += 1
             except Exception as e:
                 failed_count += 1
