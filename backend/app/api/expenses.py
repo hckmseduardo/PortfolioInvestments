@@ -1330,13 +1330,15 @@ def run_expense_conversion(
         else:
             # For non-transfers, try auto-categorization first with amount and account type info
             # Skip Transfer/Income/Investment categories since we handle those separately
+            # NOTE: LLM is disabled for bulk imports to improve performance (keyword matching only)
             category, confidence, categorization_source = auto_categorize_expense(
                 txn.get("description", ""),
                 user_id,
                 db,
                 skip_special_categories=True,
                 transaction_amount=txn_amount,
-                account_type=current_account_type
+                account_type=current_account_type,
+                use_llm=False  # Disable LLM for bulk imports - use fast keyword matching only
             )
             if not category:
                 category = get_default_category_for_transaction(txn, is_transfer, paired_account_type)
