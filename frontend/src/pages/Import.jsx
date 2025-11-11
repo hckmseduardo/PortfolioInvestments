@@ -29,7 +29,6 @@ import {
   CardActions,
   Divider,
   Stack,
-  Snackbar,
   Table,
   TableBody,
   TableCell,
@@ -54,6 +53,7 @@ import {
 } from '@mui/icons-material';
 import { importAPI, accountsAPI } from '../services/api';
 import { stickyTableHeadSx } from '../utils/tableStyles';
+import { useNotification } from '../context/NotificationContext';
 
 const STATEMENT_COLUMNS = [
   { id: 'filename', label: 'File', numeric: false },
@@ -90,30 +90,10 @@ const Import = () => {
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
   const jobPollers = useRef({});
-  const [toasts, setToasts] = useState([]);
+  const jobNotifications = useRef({});
   const previousStatusesRef = useRef({});
   const hasLoadedOnceRef = useRef(false);
-
-  const enqueueToast = useCallback((message, severity = 'success') => {
-    if (!message) return;
-    setToasts((prev) => {
-      const toast = {
-        key: `${Date.now()}-${Math.random()}`,
-        message,
-        severity
-      };
-      const next = [...prev, toast];
-      // Avoid unbounded growth; keep the most recent 10 notifications queued.
-      if (next.length > 10) {
-        next.splice(0, next.length - 10);
-      }
-      return next;
-    });
-  }, []);
-
-  const handleToastClose = useCallback((key) => {
-    setToasts((prev) => prev.filter((toast) => toast.key !== key));
-  }, []);
+  const { showSuccess, showError, showJobProgress, updateJobStatus, isJobRunning } = useNotification();
 
   const clearProcessingFlag = useCallback((statementId) => {
     setProcessingStatements((prev) => {
@@ -149,13 +129,13 @@ const Import = () => {
       }
 
       if (prevStatus !== 'completed' && stmt.status === 'completed') {
-        enqueueToast(`${stmt.filename} processed successfully.`, 'success');
+        showSuccess(`${stmt.filename} processed successfully.`);
         clearProcessingFlag(stmt.id);
       } else if (prevStatus !== 'failed' && stmt.status === 'failed') {
         const message = stmt.error_message
           ? `${stmt.filename} failed: ${stmt.error_message}`
           : `${stmt.filename} failed to process.`;
-        enqueueToast(message, 'error');
+        showError(message);
         clearProcessingFlag(stmt.id);
       }
     });
@@ -164,7 +144,7 @@ const Import = () => {
       acc[stmt.id] = stmt.status;
       return acc;
     }, {});
-  }, [enqueueToast, clearProcessingFlag]);
+  }, [showSuccess, showError, clearProcessingFlag]);
 
   const loadStatements = useCallback(async () => {
     try {
@@ -211,6 +191,7 @@ const Import = () => {
     return () => {
       Object.values(jobPollers.current).forEach((timer) => clearInterval(timer));
       jobPollers.current = {};
+      jobNotifications.current = {};
     };
   }, []);
 
@@ -220,11 +201,22 @@ const Import = () => {
       clearInterval(timer);
       delete jobPollers.current[jobId];
     }
+    delete jobNotifications.current[jobId];
   }, []);
 
   const startJobPolling = useCallback(
-    (jobId, { statementIds = [], onComplete } = {}) => {
+    (jobId, { statementIds = [], onComplete, jobDescription = 'Processing statement', jobType } = {}) => {
       if (!jobId) return;
+
+      // Check if this job type is already running (for batch operations)
+      if (jobType && isJobRunning(jobType)) {
+        showError(`A ${jobDescription} job is already running. Please wait for it to complete.`);
+        return;
+      }
+
+      // Show initial notification for background job
+      const notificationId = showJobProgress(`${jobDescription}...`, jobId, jobType);
+      jobNotifications.current[jobId] = notificationId;
 
       const poll = async () => {
         try {
@@ -239,6 +231,13 @@ const Import = () => {
               return next;
             });
             setReprocessingAll(false);
+
+            // Update notification to success
+            const notifId = jobNotifications.current[jobId];
+            if (notifId !== undefined) {
+              updateJobStatus(notifId, `${jobDescription} completed successfully`, 'success', jobType);
+            }
+
             onComplete?.(response.data.result);
             await loadStatements();
           } else if (status === 'failed') {
@@ -249,6 +248,13 @@ const Import = () => {
               return next;
             });
             setReprocessingAll(false);
+
+            // Update notification to error
+            const notifId = jobNotifications.current[jobId];
+            if (notifId !== undefined) {
+              updateJobStatus(notifId, `${jobDescription} failed`, 'error', jobType);
+            }
+
             setError('Statement job failed. Check statement status for details.');
             await loadStatements();
           }
@@ -260,7 +266,7 @@ const Import = () => {
       poll();
       jobPollers.current[jobId] = setInterval(poll, 4000);
     },
-    [clearJobPoller, loadStatements]
+    [clearJobPoller, loadStatements, showJobProgress, updateJobStatus, isJobRunning, showError]
   );
 
   const accountMap = useMemo(() => {
@@ -509,6 +515,16 @@ const Import = () => {
   };
 
   const handleProcess = async (statementId) => {
+    const statement = statements.find(s => s.id === statementId);
+    const filename = statement?.filename || 'statement';
+    const jobType = `statement-process-${statementId}`;
+
+    // Check if already processing
+    if (isJobRunning(jobType)) {
+      showError(`${filename} is already being processed`);
+      return;
+    }
+
     setProcessingStatements(prev => new Set(prev).add(statementId));
     setError('');
     setResult(null);
@@ -518,7 +534,9 @@ const Import = () => {
       if (jobId) {
         startJobPolling(jobId, {
           statementIds: [statementId],
-          onComplete: () => setResult({ message: 'Statement processed successfully!' })
+          onComplete: () => setResult({ message: 'Statement processed successfully!' }),
+          jobDescription: `Processing ${filename}`,
+          jobType
         });
       }
     } catch (err) {
@@ -532,6 +550,16 @@ const Import = () => {
   };
 
   const handleReprocess = async (statementId) => {
+    const statement = statements.find(s => s.id === statementId);
+    const filename = statement?.filename || 'statement';
+    const jobType = `statement-reprocess-${statementId}`;
+
+    // Check if already processing
+    if (isJobRunning(jobType)) {
+      showError(`${filename} is already being reprocessed`);
+      return;
+    }
+
     setProcessingStatements(prev => new Set(prev).add(statementId));
     setError('');
     setResult(null);
@@ -541,7 +569,9 @@ const Import = () => {
       if (jobId) {
         startJobPolling(jobId, {
           statementIds: [statementId],
-          onComplete: () => setResult({ message: 'Statement reprocessed successfully!' })
+          onComplete: () => setResult({ message: 'Statement reprocessed successfully!' }),
+          jobDescription: `Reprocessing ${filename}`,
+          jobType
         });
       }
     } catch (err) {
@@ -578,9 +608,24 @@ const Import = () => {
       return next;
     });
 
+    const jobType = 'reprocess-all';
+
+    // Check if reprocess all is already running
+    if (isJobRunning(jobType)) {
+      showError('A reprocess all job is already running. Please wait for it to complete.');
+      setReprocessingAll(false);
+      setProcessingStatements((prev) => {
+        const next = new Set(prev);
+        scopedIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      return;
+    }
+
     try {
       const response = await importAPI.reprocessAllStatements(selectedAccountId || null);
       const jobId = response.data?.job_id;
+      const accountText = selectedAccountId ? 'account statements' : 'all statements';
       if (jobId) {
         startJobPolling(jobId, {
           statementIds: scopedIds,
@@ -593,7 +638,9 @@ const Import = () => {
             } else {
               setResult({ message: response.data.message });
             }
-          }
+          },
+          jobDescription: `Reprocessing ${accountText}`,
+          jobType
         });
       } else {
         setReprocessingAll(false);
@@ -643,6 +690,16 @@ const Import = () => {
   const handleAccountChange = async (statementId, newAccountId) => {
     if (!newAccountId) return;
 
+    const statement = statements.find(s => s.id === statementId);
+    const filename = statement?.filename || 'statement';
+    const jobType = `statement-account-change-${statementId}`;
+
+    // Check if already processing
+    if (isJobRunning(jobType)) {
+      showError(`Account change for ${filename} is already in progress`);
+      return;
+    }
+
     setProcessingStatements(prev => new Set(prev).add(statementId));
     setError('');
     setResult(null);
@@ -653,7 +710,9 @@ const Import = () => {
       if (jobId) {
         startJobPolling(jobId, {
           statementIds: [statementId],
-          onComplete: () => setResult({ message: 'Account updated and statement queued for reprocessing.' })
+          onComplete: () => setResult({ message: 'Account updated and statement queued for reprocessing.' }),
+          jobDescription: `Updating account for ${filename}`,
+          jobType
         });
       }
     } catch (err) {
@@ -1341,29 +1400,6 @@ const Import = () => {
         </DialogActions>
       </Dialog>
 
-      {toasts.slice(0, 2).map((toast, index) => (
-        <Snackbar
-          key={toast.key}
-          open
-          autoHideDuration={5000}
-          onClose={(event, reason) => {
-            if (reason === 'clickaway') return;
-            handleToastClose(toast.key);
-          }}
-          anchorOrigin={{
-            vertical: 'bottom',
-            horizontal: index % 2 === 0 ? 'left' : 'right'
-          }}
-        >
-          <Alert
-            onClose={() => handleToastClose(toast.key)}
-            severity={toast.severity}
-            sx={{ width: '100%' }}
-          >
-            {toast.message}
-          </Alert>
-        </Snackbar>
-      ))}
     </Container>
   );
 };

@@ -4,8 +4,10 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { Box } from '@mui/material';
 import { AuthProvider } from './context/AuthContext';
+import { NotificationProvider } from './context/NotificationContext';
 import PrivateRoute from './components/PrivateRoute';
 import Navbar from './components/Navbar';
+import NotificationContainer from './components/NotificationContainer';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Portfolio from './pages/Portfolio';
@@ -53,33 +55,36 @@ const AppShell = () => {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AuthProvider>
-        <Router>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route
-              path="/*"
-              element={
-                <PrivateRoute>
-                  <Box>
-                    <Navbar />
-                    <Routes>
-                      <Route path="/" element={<Dashboard />} />
-                      <Route path="/portfolio" element={<Portfolio />} />
-                      <Route path="/dividends" element={<Dividends />} />
-                      <Route path="/cashflow" element={<Cashflow />} />
-                      <Route path="/expenses" element={<Navigate to="/cashflow" replace />} />
-                      <Route path="/accounts" element={<AccountManagement />} />
-                      <Route path="/transactions" element={<Transactions />} />
-                      <Route path="/import" element={<Import />} />
-                      <Route path="/settings" element={<Settings />} />
-                      <Route path="*" element={<Navigate to="/" />} />
-                    </Routes>
-                  </Box>
-                </PrivateRoute>
-              }
-            />
-          </Routes>
-        </Router>
+        <NotificationProvider>
+          <Router>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route
+                path="/*"
+                element={
+                  <PrivateRoute>
+                    <Box>
+                      <Navbar />
+                      <Routes>
+                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/portfolio" element={<Portfolio />} />
+                        <Route path="/dividends" element={<Dividends />} />
+                        <Route path="/cashflow" element={<Cashflow />} />
+                        <Route path="/expenses" element={<Navigate to="/cashflow" replace />} />
+                        <Route path="/accounts" element={<AccountManagement />} />
+                        <Route path="/transactions" element={<Transactions />} />
+                        <Route path="/import" element={<Import />} />
+                        <Route path="/settings" element={<Settings />} />
+                        <Route path="*" element={<Navigate to="/" />} />
+                      </Routes>
+                      <NotificationContainer />
+                    </Box>
+                  </PrivateRoute>
+                }
+              />
+            </Routes>
+          </Router>
+        </NotificationProvider>
       </AuthProvider>
     </ThemeProvider>
   );

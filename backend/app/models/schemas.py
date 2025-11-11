@@ -182,6 +182,9 @@ class ExpenseBase(BaseModel):
     category: Optional[str] = None
     notes: Optional[str] = None
     transaction_id: Optional[str] = None  # Link to source transaction
+    paired_transaction_id: Optional[str] = None  # ID of the paired transaction in a transfer
+    paired_account_id: Optional[str] = None  # Account ID of the paired side of the transfer
+    is_transfer_primary: Optional[bool] = True  # True if this is the primary expense record for a transfer pair
 
 class ExpenseCreate(ExpenseBase):
     account_id: str

@@ -1431,6 +1431,8 @@ const Portfolio = () => {
                     formatPercentage={formatPercentage}
                     getAccountLabel={getAccountLabel}
                     formatDate={(date) => new Date(date).toLocaleDateString()}
+                    typeColor={position.instrument_type_id ? typeLookup[position.instrument_type_id]?.color : null}
+                    industryColor={position.instrument_industry_id ? industryLookup[position.instrument_industry_id]?.color : null}
                   />
                 ))
               )}

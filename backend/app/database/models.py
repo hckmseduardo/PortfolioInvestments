@@ -158,6 +158,11 @@ class Expense(Base):
     category = Column(String, nullable=True, index=True)
     notes = Column(Text, nullable=True)
 
+    # Transfer pair tracking fields
+    paired_transaction_id = Column(String, nullable=True, index=True)  # ID of the paired transaction in a transfer
+    paired_account_id = Column(String, nullable=True, index=True)  # Account ID of the paired side of the transfer
+    is_transfer_primary = Column(Boolean, default=True)  # True if this is the primary expense record for a transfer pair
+
     # Relationships
     account = relationship("Account", back_populates="expenses")
     statement = relationship("Statement", back_populates="expenses")

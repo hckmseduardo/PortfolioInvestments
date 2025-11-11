@@ -36,6 +36,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '@mui/material/styles';
 import { useThemeMode } from '../context/ThemeContext';
+import JobStatusIndicator from './JobStatusIndicator';
 
 const Navbar = () => {
   const navigate = useNavigate();
@@ -122,6 +123,8 @@ const Navbar = () => {
           )}
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <JobStatusIndicator />
+
             <Tooltip title={`Switch to ${mode === 'dark' ? 'light' : 'dark'} mode`}>
               <IconButton color="inherit" onClick={toggleMode}>
                 {theme.palette.mode === 'dark' ? <Brightness7 /> : <Brightness4 />}

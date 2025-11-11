@@ -15,19 +15,107 @@ router = APIRouter(prefix="/expenses", tags=["expenses"])
 
 EXPENSE_ACCOUNT_TYPES = {"checking", "credit_card"}
 
-# Default category keywords for auto-categorization
+# Enhanced category keywords for intelligent auto-categorization
 CATEGORY_KEYWORDS = {
-    "Groceries": ["grocery", "supermarket", "food", "market", "produce", "walmart", "costco", "loblaws", "metro", "sobeys"],
-    "Dining": ["restaurant", "cafe", "coffee", "starbucks", "tim hortons", "mcdonald", "pizza", "burger", "food delivery", "uber eats", "doordash", "skip the dishes"],
-    "Transportation": ["gas", "fuel", "transit", "uber", "lyft", "taxi", "parking", "car wash", "vehicle", "auto"],
-    "Utilities": ["electric", "hydro", "water", "gas bill", "internet", "phone", "mobile", "bell", "rogers", "telus"],
-    "Entertainment": ["movie", "cinema", "netflix", "spotify", "game", "entertainment", "concert", "theatre"],
-    "Shopping": ["amazon", "shop", "store", "clothing", "apparel", "electronics"],
-    "Healthcare": ["pharmacy", "medical", "doctor", "dental", "health", "prescription", "clinic"],
-    "Bills": ["bill payment", "payment for", "insurance", "subscription"],
-    "Transfer": ["transfer", "e-transfer", "interac"],
-    "ATM": ["atm", "cash withdrawal", "retrait"],
-    "Fees": ["fee", "charge", "frais"],
+    "Groceries": [
+        "grocery", "supermarket", "food", "market", "produce", "epicerie",
+        # Major chains
+        "walmart", "costco", "loblaws", "metro", "sobeys", "safeway", "foodland",
+        "no frills", "freshco", "real canadian", "giant tiger", "dollarama food",
+        "farm boy", "whole foods", "trader joe", "iga", "maxi", "provigo", "super c",
+        # Generic terms
+        "groceries", "food market", "foods", "mart"
+    ],
+    "Dining": [
+        "restaurant", "cafe", "coffee", "dining", "eatery", "bistro", "pub", "bar",
+        # Major chains
+        "starbucks", "tim hortons", "tims", "mcdonald", "mcdo", "burger king",
+        "wendy", "a&w", "kfc", "pizza", "domino", "pizza hut", "subway",
+        "taco bell", "chipotle", "panera", "dunkin",
+        # Food delivery
+        "uber eats", "doordash", "skip the dishes", "grubhub", "food delivery",
+        "deliveroo", "seamless", "postmates",
+        # Generic terms
+        "food", "meal", "takeout", "take-out", "dine"
+    ],
+    "Transportation": [
+        "gas", "fuel", "essence", "petro", "shell", "esso", "chevron", "mobil",
+        "transit", "ttc", "stm", "ctrain", "skytrain", "metro", "subway fare",
+        "uber", "lyft", "taxi", "cab", "parking", "stationnement",
+        "car wash", "vehicle", "auto", "garage", "mechanic", "oil change",
+        "registration", "license", "toll", "highway", "autoroute"
+    ],
+    "Utilities": [
+        "electric", "electricity", "hydro", "enbridge", "hydro one", "bc hydro",
+        "water", "eaux", "gas bill", "natural gas",
+        "internet", "wifi", "broadband", "fibre",
+        "phone", "mobile", "cell", "telephone", "wireless",
+        "bell", "rogers", "telus", "fido", "virgin", "koodo", "shaw", "videotron",
+        "utility", "utilities", "public utilities"
+    ],
+    "Entertainment": [
+        "movie", "cinema", "cineplex", "theatre", "theater", "imax",
+        "netflix", "spotify", "apple music", "youtube", "prime video", "disney",
+        "hbo", "crave", "paramount", "hulu",
+        "game", "gaming", "playstation", "xbox", "nintendo", "steam",
+        "entertainment", "concert", "show", "event", "ticket", "ticketmaster",
+        "sports", "gym", "fitness", "membership"
+    ],
+    "Shopping": [
+        "amazon", "ebay", "etsy", "aliexpress", "wish",
+        "shop", "store", "boutique", "magasin", "retail",
+        "clothing", "apparel", "fashion", "shoes", "clothes",
+        "electronics", "best buy", "apple store", "microsoft store",
+        "home depot", "lowes", "canadian tire", "rona",
+        "winners", "marshalls", "tj maxx", "hudson bay", "sears"
+    ],
+    "Healthcare": [
+        "pharmacy", "pharmacie", "shoppers", "rexall", "jean coutu", "uniprix",
+        "medical", "doctor", "dr ", "clinic", "hospital", "health",
+        "dental", "dentist", "orthodont", "hygienist",
+        "prescription", "rx", "medicine", "medication",
+        "physiotherapy", "massage", "chiropractor", "optometrist",
+        "lab", "test", "xray", "x-ray", "scan"
+    ],
+    "Insurance": [
+        "insurance", "assurance", "policy", "premium",
+        "life insurance", "car insurance", "auto insurance", "home insurance",
+        "health insurance", "dental insurance", "travel insurance",
+        "manulife", "sunlife", "desjardins insurance", "td insurance",
+        "allstate", "state farm", "geico", "progressive"
+    ],
+    "Bills": [
+        "bill payment", "payment for", "online bill payment", "paiement",
+        "subscription", "membership fee", "annual fee", "monthly fee",
+        "service charge", "account fee"
+    ],
+    "Housing": [
+        "rent", "loyer", "lease", "mortgage", "property tax", "condo fee",
+        "maintenance fee", "hoa", "home insurance", "tenant insurance",
+        "furnishing", "furniture", "ikea", "wayfair", "article",
+        "home improvement", "renovation", "repair"
+    ],
+    "Education": [
+        "tuition", "school", "ecole", "university", "college", "course",
+        "textbook", "book", "educational", "student", "learning",
+        "training", "certification", "udemy", "coursera", "skillshare"
+    ],
+    "Personal Care": [
+        "salon", "spa", "barber", "haircut", "hair", "beauty",
+        "cosmetic", "makeup", "sephora", "ulta",
+        "personal care", "hygiene", "toiletries"
+    ],
+    "Gifts": [
+        "gift", "cadeau", "present", "donation", "charity",
+        "birthday", "anniversary", "wedding", "holiday"
+    ],
+    "Transfer": ["transfer", "e-transfer", "interac", "virement"],
+    "ATM": ["atm", "cash withdrawal", "retrait", "cash advance", "guichet"],
+    "Fees": [
+        "fee", "fees", "charge", "frais", "commission",
+        "service fee", "transaction fee", "banking fee", "overdraft",
+        "nsf", "insufficient funds", "late fee", "penalty"
+    ],
 }
 
 def _parse_transaction_date(date_value: Optional[str]) -> Optional[datetime]:
@@ -51,14 +139,15 @@ def _dates_within_tolerance(date_a: Optional[str], date_b: Optional[str], tolera
     return abs((parsed_a - parsed_b).days) <= tolerance_days
 
 
-def auto_categorize_expense(description: str, user_id: str, db) -> Optional[str]:
+def auto_categorize_expense(description: str, user_id: str, db, skip_special_categories: bool = False) -> Optional[str]:
     """
-    Auto-categorize an expense based on description and learning from existing expenses.
+    Intelligently auto-categorize an expense based on description and learning from existing expenses.
 
     Args:
         description: Transaction description
         user_id: User ID to get user-specific categorizations
         db: Database service instance
+        skip_special_categories: If True, skip Transfer/Income/Investment categories (for non-transfers only)
 
     Returns:
         Category name or None if no match found
@@ -68,36 +157,82 @@ def auto_categorize_expense(description: str, user_id: str, db) -> Optional[str]
 
     description_lower = description.lower()
 
-    # First, try to learn from existing expenses
+    # Remove common noise words and clean description
+    noise_words = {"from", "to", "at", "the", "a", "an", "in", "on", "for", "with", "and", "or"}
+    cleaned_words = [w for w in description_lower.split() if w not in noise_words and len(w) > 2]
+
+    # Extract merchant name (usually first significant words)
+    merchant_name = " ".join(cleaned_words[:3]) if len(cleaned_words) >= 3 else " ".join(cleaned_words)
+
+    # First, try to learn from user's history with exact merchant match
     existing_expenses = db.find("expenses", {})
 
-    # Build a map of description patterns to categories from user's history
+    # Build merchant -> category mapping from history
+    merchant_categories = {}
     for expense in existing_expenses:
-        if expense.get("category") and expense.get("description"):
-            exp_desc = expense.get("description", "").lower()
-            exp_category = expense.get("category")
+        exp_cat = expense.get("category")
+        exp_desc = expense.get("description", "").lower()
 
-            # If we find a very similar description, use that category
-            if exp_desc and len(exp_desc) > 5:
-                # Extract key words from the existing description
-                key_words = [w for w in exp_desc.split() if len(w) > 3]
-                match_count = sum(1 for word in key_words if word in description_lower)
+        # Skip special categories if requested
+        if skip_special_categories and exp_cat in ["Transfer", "Investment In", "Investment Out", "Income"]:
+            continue
 
-                # If 50% or more words match, use this category
-                if key_words and (match_count / len(key_words)) >= 0.5:
-                    return exp_category
+        # Skip uncategorized
+        if not exp_cat or exp_cat == "Uncategorized":
+            continue
 
-    # Fall back to keyword-based categorization
-    best_match = None
-    best_match_count = 0
+        if exp_desc and len(exp_desc) > 5:
+            # Extract merchant from historical expense
+            exp_words = [w for w in exp_desc.split() if w not in noise_words and len(w) > 2]
+            exp_merchant = " ".join(exp_words[:3]) if len(exp_words) >= 3 else " ".join(exp_words)
+
+            # Exact merchant match
+            if exp_merchant and exp_merchant in description_lower:
+                if exp_merchant not in merchant_categories:
+                    merchant_categories[exp_merchant] = {}
+                merchant_categories[exp_merchant][exp_cat] = merchant_categories[exp_merchant].get(exp_cat, 0) + 1
+
+    # If we found matching merchants, use the most common category for that merchant
+    if merchant_categories:
+        for merchant, categories in merchant_categories.items():
+            if categories:
+                most_common_category = max(categories.items(), key=lambda x: x[1])[0]
+                return most_common_category
+
+    # Intelligent keyword-based categorization with weighted scoring
+    category_scores = {}
 
     for category, keywords in CATEGORY_KEYWORDS.items():
-        match_count = sum(1 for keyword in keywords if keyword in description_lower)
-        if match_count > best_match_count:
-            best_match_count = match_count
-            best_match = category
+        # Skip special categories if requested
+        if skip_special_categories and category in ["Transfer", "Income"]:
+            continue
 
-    return best_match
+        score = 0
+        for keyword in keywords:
+            keyword_lower = keyword.lower()
+
+            # Exact word match (highest weight)
+            if f" {keyword_lower} " in f" {description_lower} ":
+                score += 10
+            # Exact substring match
+            elif keyword_lower in description_lower:
+                score += 5
+            # Partial match (any word contains keyword)
+            elif any(keyword_lower in word for word in cleaned_words):
+                score += 2
+
+        if score > 0:
+            category_scores[category] = score
+
+    # Return category with highest score if score is significant
+    if category_scores:
+        best_category = max(category_scores.items(), key=lambda x: x[1])
+        # Only return if confidence score is reasonable (at least 5 points)
+        if best_category[1] >= 5:
+            return best_category[0]
+
+    # No confident match found
+    return None
 
 def _is_expense_account(account: Optional[dict]) -> bool:
     """Return True if the account type should appear in expenses."""
@@ -760,11 +895,11 @@ def run_expense_conversion(
     # Load all relevant transaction types:
     # - WITHDRAWAL, FEE: Expenses
     # - DEPOSIT, DIVIDEND, INTEREST: Income (excluding transfers)
-    # - TRANSFER, DEPOSIT, WITHDRAWAL: Investment movements (when involving investment accounts)
+    # - TRANSFER: Transfers between accounts (credit card payments, bank transfers, investment movements)
     transactions = []
     for acc_id in account_ids:
         txns = db.find("transactions", {"account_id": acc_id})
-        transactions.extend([t for t in txns if t.get("type") in ["WITHDRAWAL", "FEE", "DEPOSIT", "DIVIDEND", "INTEREST"]])
+        transactions.extend([t for t in txns if t.get("type") in ["WITHDRAWAL", "FEE", "DEPOSIT", "DIVIDEND", "INTEREST", "TRANSFER"]])
 
     transaction_by_id = {
         txn.get("id"): txn
@@ -859,6 +994,9 @@ def run_expense_conversion(
     all_user_accounts = db.find("accounts", {"user_id": user_id})
     account_map = {acc["id"]: acc for acc in all_user_accounts}
 
+    # Create a set to track which transaction IDs have already been processed as part of a transfer pair
+    processed_transfer_txn_ids = set()
+
     # Helper function to determine default category based on transaction type
     def get_default_category_for_transaction(txn, is_transfer: bool, paired_account_type: Optional[str] = None) -> str:
         txn_type = txn.get("type")
@@ -901,11 +1039,18 @@ def run_expense_conversion(
         txn_type = txn.get("type")
         is_transfer = txn_id in transfer_transaction_ids
 
+        # Skip if this transaction was already processed as part of a transfer pair
+        if txn_id in processed_transfer_txn_ids:
+            continue
+
         # Determine if this is an investment movement
+        paired_txn_id = None
         paired_account_type = None
+        paired_account_id = None
+        paired_txn = None
+
         if is_transfer:
             # Find the paired transaction
-            paired_txn_id = None
             for tid1, tid2 in transfers:
                 if tid1 == txn_id:
                     paired_txn_id = tid2
@@ -916,7 +1061,6 @@ def run_expense_conversion(
 
             # Get both accounts
             current_account = account_map.get(txn.get("account_id"))
-            paired_txn = None
             paired_account = None
 
             if paired_txn_id:
@@ -925,6 +1069,7 @@ def run_expense_conversion(
                     if t.get("id") == paired_txn_id:
                         paired_txn = t
                         paired_account = account_map.get(t.get("account_id"))
+                        paired_account_id = t.get("account_id")
                         break
 
             # Check account types for proper categorization
@@ -933,10 +1078,49 @@ def run_expense_conversion(
                 paired_type = paired_account.get("account_type", "").lower()
                 paired_account_type = paired_type
 
-                # Note: We now create expense records for ALL transfers (including regular transfers)
-                # so they appear in the Transfers tab
-                # Investment movements will be categorized as "Investment In" or "Investment Out"
-                # Other transfers will be categorized as "Transfer"
+                # Mark both transaction IDs as processed so we only create ONE expense record
+                processed_transfer_txn_ids.add(txn_id)
+                if paired_txn_id:
+                    processed_transfer_txn_ids.add(paired_txn_id)
+
+                # For transfers, we create only ONE expense record representing the transfer
+                # The "primary" transaction is chosen based on account type priority:
+                # 1. For investment movements: use the checking account side as primary
+                # 2. For regular transfers: use the source (debit/withdrawal) side as primary
+
+                investment_types = {"investment", "savings"}
+                checking_types = {"checking", "credit_card"}
+
+                # Determine which side should be the primary expense record
+                use_current_as_primary = True
+                if current_type in investment_types and paired_type in checking_types:
+                    # Investment account side - use the checking account as primary instead
+                    use_current_as_primary = False
+                elif txn.get("total", 0) > 0 and paired_txn and paired_txn.get("total", 0) < 0:
+                    # Current is credit (destination), paired is debit (source) - use paired as primary
+                    use_current_as_primary = False
+
+                # If the paired side should be primary, swap the transactions
+                if not use_current_as_primary and paired_txn:
+                    # Swap so the primary transaction is processed
+                    txn, paired_txn = paired_txn, txn
+                    txn_id, paired_txn_id = paired_txn_id, txn_id
+                    current_account, paired_account = paired_account, current_account
+                    paired_account_id = paired_txn.get("account_id")
+
+        # Calculate category for both new and existing expenses
+        # IMPORTANT: For transfers, always use the transfer categorization logic, not auto-categorization
+        # This ensures credit card payments, investment movements, etc. are properly categorized
+        if is_transfer:
+            category = get_default_category_for_transaction(txn, is_transfer, paired_account_type)
+            # Failsafe: if categorization somehow returns Uncategorized for a transfer, force it to Transfer
+            if category == "Uncategorized":
+                category = "Transfer"
+        else:
+            # For non-transfers, try auto-categorization first (skip Transfer/Income categories)
+            category = auto_categorize_expense(txn.get("description", ""), user_id, db, skip_special_categories=True)
+            if not category:
+                category = get_default_category_for_transaction(txn, is_transfer, paired_account_type)
 
         if txn_id and txn_id in existing_by_txn_id:
             existing_exp = existing_by_txn_id[txn_id]
@@ -944,8 +1128,11 @@ def run_expense_conversion(
                 "date": txn.get("date"),
                 "description": txn.get("description", ""),
                 "amount": abs(txn.get("total", 0)),
-                "category": existing_exp.get("category", "Uncategorized"),
-                "transaction_id": txn_id
+                "category": category,  # Use recalculated category, not old one
+                "transaction_id": txn_id,
+                "paired_transaction_id": paired_txn_id,
+                "paired_account_id": paired_account_id,
+                "is_transfer_primary": True
             }
 
             db.update("expenses", {"id": existing_exp["id"]}, update_data)
@@ -967,14 +1154,15 @@ def run_expense_conversion(
                                and e.get("description") == txn.get("description")), None)
 
             if matching_exp and txn_id:
-                db.update("expenses", {"id": matching_exp["id"]}, {"transaction_id": txn_id})
+                db.update("expenses", {"id": matching_exp["id"]}, {
+                    "transaction_id": txn_id,
+                    "paired_transaction_id": paired_txn_id,
+                    "paired_account_id": paired_account_id,
+                    "is_transfer_primary": True,
+                    "category": category  # Update category as well
+                })
                 expenses_updated += 1
             continue
-
-        # Auto-categorize based on description, or use default based on transaction type
-        category = auto_categorize_expense(txn.get("description", ""), user_id, db)
-        if not category:
-            category = get_default_category_for_transaction(txn, is_transfer, paired_account_type)
 
         # Track transfers for reporting
         if is_transfer:
@@ -987,6 +1175,9 @@ def run_expense_conversion(
             "category": category,
             "account_id": txn.get("account_id"),
             "transaction_id": txn_id,
+            "paired_transaction_id": paired_txn_id,
+            "paired_account_id": paired_account_id,
+            "is_transfer_primary": True,
             "notes": f"Imported from transaction (type: {txn_type})"
         }
 
@@ -1069,3 +1260,51 @@ async def get_conversion_job_status(
         job_info["result"] = sanitized_result
 
     return job_info
+
+
+@router.post("/reclassify-uncategorized")
+async def reclassify_uncategorized_expenses(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """
+    Reclassify all Uncategorized expenses using the intelligent categorization algorithm.
+    This uses learning from user's manual categorizations to improve accuracy over time.
+    """
+    db = get_db_service(session)
+
+    # Get all uncategorized expenses for the user's accounts
+    user_accounts = db.find("accounts", {"user_id": current_user.id})
+    account_ids = [acc["id"] for acc in user_accounts if _is_expense_account(acc)]
+
+    uncategorized_expenses = []
+    for account_id in account_ids:
+        expenses = db.find("expenses", {
+            "account_id": account_id,
+            "category": "Uncategorized"
+        })
+        uncategorized_expenses.extend(expenses)
+
+    reclassified_count = 0
+    failed_count = 0
+
+    for expense in uncategorized_expenses:
+        description = expense.get("description", "")
+        expense_id = expense.get("id")
+
+        # Try to categorize using the intelligent algorithm
+        new_category = auto_categorize_expense(description, current_user.id, db, skip_special_categories=True)
+
+        if new_category and new_category != "Uncategorized":
+            try:
+                db.update("expenses", {"id": expense_id}, {"category": new_category})
+                reclassified_count += 1
+            except Exception as e:
+                failed_count += 1
+
+    return {
+        "message": f"Reclassified {reclassified_count} expenses, {failed_count} failed",
+        "reclassified": reclassified_count,
+        "failed": failed_count,
+        "total_uncategorized": len(uncategorized_expenses)
+    }
