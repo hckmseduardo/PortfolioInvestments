@@ -53,6 +53,7 @@ import { alpha } from '@mui/material/styles';
 import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
 import { useMobileClick } from '../utils/useMobileClick';
+import PositionCard from '../components/PositionCard';
 
 const DATE_PRESETS = {
   CURRENT: 'current',
@@ -324,6 +325,18 @@ const Portfolio = () => {
       minimumFractionDigits: 0,
       maximumFractionDigits: fractionDigits
     }).format(value);
+  };
+
+  const formatPercentage = (value) => {
+    if (value == null || isNaN(value)) return '0.00%';
+    return `${value >= 0 ? '+' : ''}${Number(value).toFixed(2)}%`;
+  };
+
+  const getAccountLabel = (accountId) => {
+    if (!accountId) return 'Unknown';
+    const account = accounts.find(acc => acc.id === accountId);
+    if (!account) return 'Unknown';
+    return account.label || `${account.institution || ''} ${account.account_number || ''}`.trim() || 'Unknown';
   };
 
   const formatPercent = (value = 0) => {
@@ -1399,9 +1412,34 @@ const Portfolio = () => {
               />
             </Box>
           </Box>
-          <TableContainer component={Paper}>
-            {fetching && <LinearProgress />}
-            <Table stickyHeader>
+          {isMobile ? (
+            // Mobile Card View
+            <Box>
+              {fetching && <LinearProgress sx={{ mb: 2 }} />}
+              {sortedPositions.length === 0 ? (
+                <Paper sx={{ p: 3, textAlign: 'center' }}>
+                  <Typography color="text.secondary">
+                    No positions found
+                  </Typography>
+                </Paper>
+              ) : (
+                sortedPositions.map((position) => (
+                  <PositionCard
+                    key={`${position.ticker}-${position.account_id}`}
+                    position={position}
+                    formatCurrency={formatCurrency}
+                    formatPercentage={formatPercentage}
+                    getAccountLabel={getAccountLabel}
+                    formatDate={(date) => new Date(date).toLocaleDateString()}
+                  />
+                ))
+              )}
+            </Box>
+          ) : (
+            // Desktop Table View
+            <TableContainer component={Paper}>
+              {fetching && <LinearProgress />}
+              <Table stickyHeader>
               <TableHead sx={stickyTableHeadSx}>
                 <TableRow>
                   <TableCell sortDirection={orderBy === 'ticker' ? order : false}>
@@ -1633,6 +1671,7 @@ const Portfolio = () => {
             </TableBody>
           </Table>
         </TableContainer>
+          )}
         </>
       )}
 

@@ -24,7 +24,6 @@ import {
   TextField,
   IconButton,
   Alert,
-  Snackbar,
   Tabs,
   Tab,
   CircularProgress,
@@ -44,6 +43,7 @@ import {
   Clear as ClearIcon
 } from '@mui/icons-material';
 import { expensesAPI, accountsAPI } from '../services/api';
+import { useNotification } from '../context/NotificationContext';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, LineChart, Line } from 'recharts';
 import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
@@ -114,7 +114,6 @@ const Cashflow = () => {
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
   const [newCategory, setNewCategory] = useState({ name: '', type: 'expense', color: '#4CAF50', budget_limit: '' });
-  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [conversionJobId, setConversionJobId] = useState(null);
   const [conversionJobStatus, setConversionJobStatus] = useState(null);
   const [conversionStage, setConversionStage] = useState(null);
@@ -126,6 +125,10 @@ const Cashflow = () => {
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
   const conversionPollRef = useRef(null);
   const conversionJobIdRef = useRef(null);
+  const conversionNotificationIdRef = useRef(null);
+  const { showSuccess, showError, showWarning, showInfo, showJobProgress, updateJobStatus, isJobRunning, getActiveJob } = useNotification();
+
+  const JOB_TYPE_CONVERSION = 'transaction-conversion';
 
   const applyPreset = useCallback((presetValue) => {
     const today = new Date();
@@ -309,7 +312,7 @@ const Cashflow = () => {
     setIsBulkUpdating(true);
     try {
       await Promise.all(selectedExpenseIds.map((expenseId) => expensesAPI.updateExpenseCategory(expenseId, bulkCategory)));
-      showSnackbar(`Updated ${selectedExpenseIds.length} expenses`, 'success');
+      showSuccess(`Updated ${selectedExpenseIds.length} expenses`);
       setSelectedExpenseIds([]);
       setBulkCategory('');
       await fetchExpenses();
@@ -317,7 +320,7 @@ const Cashflow = () => {
       await fetchMonthlyComparison();
     } catch (error) {
       console.error('Error applying bulk category:', error);
-      showSnackbar('Error applying bulk category', 'error');
+      showError('Error applying bulk category');
     } finally {
       setIsBulkUpdating(false);
     }
@@ -325,6 +328,15 @@ const Cashflow = () => {
 
   useEffect(() => {
     fetchInitialData();
+
+    // Check if there's an active conversion job on mount
+    const activeJob = getActiveJob(JOB_TYPE_CONVERSION);
+    if (activeJob && activeJob.jobId) {
+      // Resume the job polling
+      setConversionJobId(activeJob.jobId);
+      conversionNotificationIdRef.current = activeJob.notificationId;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -350,7 +362,7 @@ const Cashflow = () => {
       ]);
     } catch (error) {
       console.error('Error fetching initial data:', error);
-      showSnackbar('Error loading data', 'error');
+      showError('Error loading data');
     } finally {
       setLoading(false);
     }
@@ -365,7 +377,7 @@ const Cashflow = () => {
       if (response.data.length === 0) {
         const initResponse = await expensesAPI.initDefaultCategories();
         setCategories(initResponse.data.categories);
-        showSnackbar('Default categories initialized', 'success');
+        showSuccess('Default categories initialized');
       }
     } catch (error) {
       console.error('Error fetching categories:', error);
@@ -497,6 +509,7 @@ const Cashflow = () => {
       setConversionStage(null);
       setIsConversionRunning(false);
       clearConversionPolling();
+      conversionNotificationIdRef.current = null;
       return;
     }
 
@@ -515,14 +528,27 @@ const Cashflow = () => {
           clearConversionPolling();
           setConversionJobId(null);
           setIsConversionRunning(false);
-          showSnackbar(data.result?.message || 'Transactions converted successfully', 'success');
+
+          // Update notification to success
+          const notifId = conversionNotificationIdRef.current;
+          if (notifId !== undefined) {
+            updateJobStatus(notifId, data.result?.message || 'Transactions converted successfully', 'success', JOB_TYPE_CONVERSION);
+          }
+          conversionNotificationIdRef.current = null;
+
           await fetchInitialData();
         } else if (data.status === 'failed') {
           clearConversionPolling();
           setConversionJobId(null);
           setIsConversionRunning(false);
+
+          // Update notification to error
+          const notifId = conversionNotificationIdRef.current;
           const errorMessage = data.error?.split('\n').slice(-2, -1)[0] || 'Conversion job failed';
-          showSnackbar(errorMessage, 'error');
+          if (notifId !== undefined) {
+            updateJobStatus(notifId, errorMessage, 'error', JOB_TYPE_CONVERSION);
+          }
+          conversionNotificationIdRef.current = null;
         }
       } catch (error) {
         if (conversionJobIdRef.current !== jobId) {
@@ -534,7 +560,13 @@ const Cashflow = () => {
           clearConversionPolling();
           setConversionJobId(null);
           setIsConversionRunning(false);
-          showSnackbar('Conversion job expired or was removed. Please try again.', 'warning');
+
+          // Update notification to warning
+          const notifId = conversionNotificationIdRef.current;
+          if (notifId !== undefined) {
+            updateJobStatus(notifId, 'Conversion job expired or was removed. Please try again.', 'warning', JOB_TYPE_CONVERSION);
+          }
+          conversionNotificationIdRef.current = null;
           return;
         }
 
@@ -542,7 +574,13 @@ const Cashflow = () => {
         clearConversionPolling();
         setConversionJobId(null);
         setIsConversionRunning(false);
-        showSnackbar('Error monitoring conversion job', 'error');
+
+        // Update notification to error
+        const notifId = conversionNotificationIdRef.current;
+        if (notifId !== undefined) {
+          updateJobStatus(notifId, 'Error monitoring conversion job', 'error', JOB_TYPE_CONVERSION);
+        }
+        conversionNotificationIdRef.current = null;
       }
     };
 
@@ -550,10 +588,12 @@ const Cashflow = () => {
     conversionPollRef.current = setInterval(() => pollJob(conversionJobIdRef.current), 4000);
 
     return () => clearConversionPolling();
-  }, [conversionJobId]);
+  }, [conversionJobId, updateJobStatus, fetchInitialData]);
 
   const handleConvertTransactions = async () => {
-    if (isConversionRunning) {
+    // Check if a conversion job is already running
+    if (isConversionRunning || isJobRunning(JOB_TYPE_CONVERSION)) {
+      showWarning('A conversion job is already running. Please wait for it to complete.');
       return;
     }
 
@@ -562,30 +602,33 @@ const Cashflow = () => {
       const { job_id: jobId, status, meta } = response.data || {};
 
       if (!jobId) {
-        showSnackbar('Unable to start conversion job', 'error');
+        showError('Unable to start conversion job');
         return;
       }
 
       setConversionJobId(jobId);
       setConversionJobStatus(status);
       setConversionStage(meta?.stage || 'queued');
-      showSnackbar('Import queued. We will refresh data when it finishes.', 'info');
+
+      // Show persistent notification for background job with jobType
+      const notificationId = showJobProgress('Converting transactions to expenses', jobId, JOB_TYPE_CONVERSION);
+      conversionNotificationIdRef.current = notificationId;
     } catch (error) {
       console.error('Error converting transactions:', error);
-      showSnackbar('Error starting conversion job', 'error');
+      showError('Error starting conversion job');
     }
   };
 
   const handleCategoryChange = async (expenseId, newCategory) => {
     try {
       await expensesAPI.updateExpenseCategory(expenseId, newCategory);
-      showSnackbar('Category updated successfully', 'success');
+      showSuccess('Category updated successfully');
       await fetchExpenses();
       await fetchSummary();
       await fetchMonthlyComparison();
     } catch (error) {
       console.error('Error updating category:', error);
-      showSnackbar('Error updating category', 'error');
+      showError('Error updating category');
     }
   };
 
@@ -593,13 +636,13 @@ const Cashflow = () => {
     if (window.confirm('Are you sure you want to delete this expense?')) {
       try {
         await expensesAPI.delete(expenseId);
-        showSnackbar('Expense deleted successfully', 'success');
+        showSuccess('Expense deleted successfully');
         await fetchExpenses();
         await fetchSummary();
         await fetchMonthlyComparison();
       } catch (error) {
         console.error('Error deleting expense:', error);
-        showSnackbar('Error deleting expense', 'error');
+        showError('Error deleting expense');
       }
     }
   };
@@ -611,13 +654,13 @@ const Cashflow = () => {
         budget_limit: newCategory.budget_limit ? parseFloat(newCategory.budget_limit) : null
       };
       await expensesAPI.createCategory(categoryData);
-      showSnackbar('Category created successfully', 'success');
+      showSuccess('Category created successfully');
       setCategoryDialogOpen(false);
       setNewCategory({ name: '', type: 'expense', color: '#4CAF50', budget_limit: '' });
       await fetchCategories();
     } catch (error) {
       console.error('Error creating category:', error);
-      showSnackbar('Error creating category', 'error');
+      showError('Error creating category');
     }
   };
 
@@ -640,12 +683,12 @@ const Cashflow = () => {
         budget_limit: editingCategory.budget_limit ? parseFloat(editingCategory.budget_limit) : null
       };
       await expensesAPI.updateCategory(editingCategory.id, categoryData);
-      showSnackbar('Category updated successfully', 'success');
+      showSuccess('Category updated successfully');
       setEditingCategory(null);
       await fetchCategories();
     } catch (error) {
       console.error('Error updating category:', error);
-      showSnackbar('Error updating category', 'error');
+      showError('Error updating category');
     }
   };
 
@@ -653,18 +696,15 @@ const Cashflow = () => {
     if (window.confirm('Are you sure you want to delete this category?')) {
       try {
         await expensesAPI.deleteCategory(categoryId);
-        showSnackbar('Category deleted successfully', 'success');
+        showSuccess('Category deleted successfully');
         await fetchCategories();
       } catch (error) {
         console.error('Error deleting category:', error);
-        showSnackbar('Error deleting category', 'error');
+        showError('Error deleting category');
       }
     }
   };
 
-  const showSnackbar = (message, severity = 'success') => {
-    setSnackbar({ open: true, message, severity });
-  };
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('en-CA', {
@@ -1961,11 +2001,16 @@ const Cashflow = () => {
         <Paper sx={{ p: 2 }}>
           <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
             <ExportButtons
-              data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'investment').map(expense => ({
-                ...expense,
-                account_label: getAccountLabel(expense.account_id),
-                category: expense.category || 'Uncategorized'
-              }))}
+              data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'investment').map(expense => {
+                const sourceAccount = getAccountLabel(expense.account_id);
+                const targetAccount = expense.paired_account_id ? getAccountLabel(expense.paired_account_id) : null;
+                const transferRoute = targetAccount ? `${sourceAccount} → ${targetAccount}` : sourceAccount;
+                return {
+                  ...expense,
+                  account_label: transferRoute,
+                  category: expense.category || 'Uncategorized'
+                };
+              })}
               columns={expenseExportColumns}
               filename="investments"
               title="Investments Report"
@@ -2043,12 +2088,14 @@ const Cashflow = () => {
                   </TableRow>
                 ) : (
                   displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'investment').map((expense) => {
-                    const accountLabel = getAccountLabel(expense.account_id);
+                    const sourceAccount = getAccountLabel(expense.account_id);
+                    const targetAccount = expense.paired_account_id ? getAccountLabel(expense.paired_account_id) : null;
+                    const transferRoute = targetAccount ? `${sourceAccount} → ${targetAccount}` : sourceAccount;
                     return (
                       <TableRow key={expense.id}>
                         <TableCell>{formatDate(expense.date)}</TableCell>
                         <TableCell>{expense.description}</TableCell>
-                        <TableCell>{accountLabel}</TableCell>
+                        <TableCell>{transferRoute}</TableCell>
                         <TableCell>
                           <FormControl size="small" fullWidth>
                             <Select
@@ -2103,11 +2150,16 @@ const Cashflow = () => {
         <Paper sx={{ p: 2 }}>
           <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
             <ExportButtons
-              data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer').map(expense => ({
-                ...expense,
-                account_label: getAccountLabel(expense.account_id),
-                category: expense.category || 'Uncategorized'
-              }))}
+              data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer').map(expense => {
+                const sourceAccount = getAccountLabel(expense.account_id);
+                const targetAccount = expense.paired_account_id ? getAccountLabel(expense.paired_account_id) : null;
+                const transferRoute = targetAccount ? `${sourceAccount} → ${targetAccount}` : sourceAccount;
+                return {
+                  ...expense,
+                  account_label: transferRoute,
+                  category: expense.category || 'Uncategorized'
+                };
+              })}
               columns={expenseExportColumns}
               filename="transfers"
               title="Transfers Report"
@@ -2141,7 +2193,7 @@ const Cashflow = () => {
                       direction={tableSortConfig.field === 'account' ? tableSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('account')}
                     >
-                      Account
+                      Transfer Route
                     </TableSortLabel>
                   </TableCell>
                   <TableCell sortDirection={tableSortConfig.field === 'category' ? tableSortConfig.direction : false}>
@@ -2177,12 +2229,14 @@ const Cashflow = () => {
                   </TableRow>
                 ) : (
                   displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer').map((expense) => {
-                    const accountLabel = getAccountLabel(expense.account_id);
+                    const sourceAccount = getAccountLabel(expense.account_id);
+                    const targetAccount = expense.paired_account_id ? getAccountLabel(expense.paired_account_id) : null;
+                    const transferRoute = targetAccount ? `${sourceAccount} → ${targetAccount}` : sourceAccount;
                     return (
                       <TableRow key={expense.id}>
                         <TableCell>{formatDate(expense.date)}</TableCell>
                         <TableCell>{expense.description}</TableCell>
-                        <TableCell>{accountLabel}</TableCell>
+                        <TableCell>{transferRoute}</TableCell>
                         <TableCell>
                           <FormControl size="small" fullWidth>
                             <Select
@@ -2509,17 +2563,6 @@ const Cashflow = () => {
           </Button>
         </DialogActions>
       </Dialog>
-
-      {/* Snackbar for notifications */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-      >
-        <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity}>
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
     </Container>
   );
 };
