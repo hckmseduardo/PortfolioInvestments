@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Container,
   Paper,
@@ -28,8 +28,10 @@ import { accountsAPI, transactionsAPI, plaidAPI } from '../services/api';
 import { stickyTableHeadSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
 import PlaidLinkButton from '../components/PlaidLink';
+import { useNotification } from '../context/NotificationContext';
 
 const AccountManagement = () => {
+  const { showJobProgress, updateJobStatus } = useNotification();
   const [accounts, setAccounts] = useState([]);
   const [accountBalances, setAccountBalances] = useState({});
   const [loading, setLoading] = useState(false);
@@ -52,9 +54,25 @@ const AccountManagement = () => {
   const [plaidLoading, setPlaidLoading] = useState(false);
   const [syncingItems, setSyncingItems] = useState({});
 
+  // Job tracking state
+  const [syncJobIds, setSyncJobIds] = useState({});
+  const [syncJobStatuses, setSyncJobStatuses] = useState({});
+  const syncPollRefs = useRef({});
+  const syncNotificationIds = useRef({});
+  const JOB_TYPE_PLAID_SYNC = 'plaid-sync';
+
   useEffect(() => {
     loadAccounts();
     loadPlaidItems();
+  }, []);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(syncPollRefs.current).forEach(intervalId => {
+        if (intervalId) clearInterval(intervalId);
+      });
+    };
   }, []);
 
   const loadAccounts = async () => {
@@ -231,7 +249,67 @@ const AccountManagement = () => {
     setError(errorMessage);
   };
 
-  const handleSync = async (itemId) => {
+  // Helper function to clear polling for a specific item
+  const clearSyncPolling = (itemId) => {
+    if (syncPollRefs.current[itemId]) {
+      clearInterval(syncPollRefs.current[itemId]);
+      syncPollRefs.current[itemId] = null;
+    }
+  };
+
+  // Poll job status for a specific sync job
+  const pollSyncJob = async (itemId, jobId, institutionName) => {
+    try {
+      const response = await plaidAPI.getSyncStatus(jobId);
+      const data = response.data;
+
+      setSyncJobStatuses(prev => ({ ...prev, [itemId]: data.status }));
+
+      if (data.status === 'finished') {
+        clearSyncPolling(itemId);
+        const result = data.result || {};
+        const message = `Synced ${institutionName}: ${result.added || 0} added, ${result.modified || 0} modified, ${result.removed || 0} removed`;
+
+        const notifId = syncNotificationIds.current[itemId];
+        if (notifId) {
+          updateJobStatus(notifId, message, 'success', JOB_TYPE_PLAID_SYNC);
+        }
+
+        setSyncingItems(prev => ({ ...prev, [itemId]: false }));
+        setSyncJobIds(prev => {
+          const updated = { ...prev };
+          delete updated[itemId];
+          return updated;
+        });
+
+        await loadPlaidItems();
+        await loadAccounts();
+      } else if (data.status === 'failed') {
+        clearSyncPolling(itemId);
+        const errorMsg = data.error || 'Sync failed';
+        const message = `Failed to sync ${institutionName}: ${errorMsg}`;
+
+        const notifId = syncNotificationIds.current[itemId];
+        if (notifId) {
+          updateJobStatus(notifId, message, 'error', JOB_TYPE_PLAID_SYNC);
+        }
+
+        setSyncingItems(prev => ({ ...prev, [itemId]: false }));
+        setSyncJobIds(prev => {
+          const updated = { ...prev };
+          delete updated[itemId];
+          return updated;
+        });
+      }
+      // If still queued or started, the polling will continue
+    } catch (error) {
+      console.error('Error polling sync job:', error);
+      clearSyncPolling(itemId);
+      setSyncingItems(prev => ({ ...prev, [itemId]: false }));
+    }
+  };
+
+  const handleSync = async (itemId, institutionName) => {
     setSyncingItems(prev => ({ ...prev, [itemId]: true }));
     setError('');
 
@@ -239,31 +317,25 @@ const AccountManagement = () => {
       const response = await plaidAPI.syncTransactions(itemId);
       const jobId = response.data.job_id;
 
-      // Poll for job status
-      const checkStatus = async () => {
-        try {
-          const statusResponse = await plaidAPI.getSyncStatus(jobId);
-          const status = statusResponse.data.status;
+      setSyncJobIds(prev => ({ ...prev, [itemId]: jobId }));
+      setSyncJobStatuses(prev => ({ ...prev, [itemId]: 'queued' }));
 
-          if (status === 'finished') {
-            setSuccess('Transactions synced successfully!');
-            setSyncingItems(prev => ({ ...prev, [itemId]: false }));
-            loadPlaidItems();
-            loadAccounts();
-          } else if (status === 'failed') {
-            setError('Failed to sync transactions. Please try again.');
-            setSyncingItems(prev => ({ ...prev, [itemId]: false }));
-          } else {
-            // Still in progress, check again in 2 seconds
-            setTimeout(checkStatus, 2000);
-          }
-        } catch (err) {
-          setError('Error checking sync status');
-          setSyncingItems(prev => ({ ...prev, [itemId]: false }));
-        }
-      };
+      // Show notification with job progress - appears in notification center
+      const notifId = showJobProgress(
+        `Syncing transactions from ${institutionName}...`,
+        jobId,
+        JOB_TYPE_PLAID_SYNC
+      );
+      syncNotificationIds.current[itemId] = notifId;
 
-      setTimeout(checkStatus, 2000);
+      // Start polling for job status every 4 seconds
+      const pollInterval = setInterval(() => {
+        pollSyncJob(itemId, jobId, institutionName);
+      }, 4000);
+      syncPollRefs.current[itemId] = pollInterval;
+
+      // Do initial poll after 2 seconds
+      setTimeout(() => pollSyncJob(itemId, jobId, institutionName), 2000);
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to start sync');
       setSyncingItems(prev => ({ ...prev, [itemId]: false }));
@@ -379,7 +451,7 @@ const AccountManagement = () => {
                   <Button
                     size="small"
                     startIcon={syncingItems[item.id] ? <CircularProgress size={16} /> : <Sync />}
-                    onClick={() => handleSync(item.id)}
+                    onClick={() => handleSync(item.id, item.institution_name)}
                     disabled={syncingItems[item.id]}
                     sx={{ mr: 1 }}
                   >

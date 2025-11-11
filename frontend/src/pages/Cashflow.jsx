@@ -1990,7 +1990,19 @@ const Cashflow = () => {
                     return (
                       <TableRow key={expense.id}>
                         <TableCell>{formatDate(expense.date)}</TableCell>
-                        <TableCell>{expense.description}</TableCell>
+                        <TableCell>
+                          <Box display="flex" alignItems="center" gap={0.5}>
+                            {expense.description}
+                            <IconButton
+                              size="small"
+                              onClick={() => handleFilterByDescription(expense.description)}
+                              title="Filter and select all with this description"
+                              sx={{ ml: 0.5 }}
+                            >
+                              <FilterAltIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
                         <TableCell>{accountLabel}</TableCell>
                         <TableCell>
                           <FormControl size="small" fullWidth>
@@ -2020,7 +2032,19 @@ const Cashflow = () => {
                             </Select>
                           </FormControl>
                         </TableCell>
-                        <TableCell align="right">{formatCurrency(expense.amount)}</TableCell>
+                        <TableCell align="right">
+                          <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                            {formatCurrency(expense.amount)}
+                            <IconButton
+                              size="small"
+                              onClick={() => handleFilterByAmount(expense.amount)}
+                              title="Filter and select similar amounts (±10%)"
+                              sx={{ ml: 0.5 }}
+                            >
+                              <FilterAltIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
                         <TableCell>{expense.notes || '-'}</TableCell>
                         <TableCell align="center">
                           <IconButton
@@ -2139,7 +2163,19 @@ const Cashflow = () => {
                     return (
                       <TableRow key={expense.id}>
                         <TableCell>{formatDate(expense.date)}</TableCell>
-                        <TableCell>{expense.description}</TableCell>
+                        <TableCell>
+                          <Box display="flex" alignItems="center" gap={0.5}>
+                            {expense.description}
+                            <IconButton
+                              size="small"
+                              onClick={() => handleFilterByDescription(expense.description)}
+                              title="Filter and select all with this description"
+                              sx={{ ml: 0.5 }}
+                            >
+                              <FilterAltIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
                         <TableCell>{transferRoute}</TableCell>
                         <TableCell>
                           <FormControl size="small" fullWidth>
@@ -2169,7 +2205,19 @@ const Cashflow = () => {
                             </Select>
                           </FormControl>
                         </TableCell>
-                        <TableCell align="right">{formatCurrency(expense.amount)}</TableCell>
+                        <TableCell align="right">
+                          <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                            {formatCurrency(expense.amount)}
+                            <IconButton
+                              size="small"
+                              onClick={() => handleFilterByAmount(expense.amount)}
+                              title="Filter and select similar amounts (±10%)"
+                              sx={{ ml: 0.5 }}
+                            >
+                              <FilterAltIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
                         <TableCell>{expense.notes || '-'}</TableCell>
                         <TableCell align="center">
                           <IconButton
@@ -2280,7 +2328,19 @@ const Cashflow = () => {
                     return (
                       <TableRow key={expense.id}>
                         <TableCell>{formatDate(expense.date)}</TableCell>
-                        <TableCell>{expense.description}</TableCell>
+                        <TableCell>
+                          <Box display="flex" alignItems="center" gap={0.5}>
+                            {expense.description}
+                            <IconButton
+                              size="small"
+                              onClick={() => handleFilterByDescription(expense.description)}
+                              title="Filter and select all with this description"
+                              sx={{ ml: 0.5 }}
+                            >
+                              <FilterAltIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
                         <TableCell>{transferRoute}</TableCell>
                         <TableCell>
                           <FormControl size="small" fullWidth>
@@ -2310,7 +2370,19 @@ const Cashflow = () => {
                             </Select>
                           </FormControl>
                         </TableCell>
-                        <TableCell align="right">{formatCurrency(expense.amount)}</TableCell>
+                        <TableCell align="right">
+                          <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                            {formatCurrency(expense.amount)}
+                            <IconButton
+                              size="small"
+                              onClick={() => handleFilterByAmount(expense.amount)}
+                              title="Filter and select similar amounts (±10%)"
+                              sx={{ ml: 0.5 }}
+                            >
+                              <FilterAltIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
                         <TableCell>{expense.notes || '-'}</TableCell>
                         <TableCell align="center">
                           <IconButton

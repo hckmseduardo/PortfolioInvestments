@@ -44,6 +44,9 @@ const JobStatusIndicator = () => {
     if (jobType === 'transaction-conversion') {
       return 'Transaction Conversion';
     }
+    if (jobType === 'plaid-sync') {
+      return 'Plaid Transaction Sync';
+    }
     if (jobType === 'reprocess-all') {
       return 'Reprocess All Statements';
     }

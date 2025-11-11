@@ -31,16 +31,17 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str):
     """
     job = get_current_job()
 
-    def update_stage(stage: str, details: Optional[str] = None):
+    def update_stage(stage: str, progress: dict = None):
         if job:
             job.meta["stage"] = stage
-            if details:
-                job.meta["details"] = details
+            if progress:
+                job.meta["progress"] = progress
+            job.meta["user_id"] = user_id  # For access control
             job.save_meta()
-            logger.info(f"Plaid sync job {job.id} stage: {stage}")
+            logger.info(f"Plaid sync job {job.id} stage: {stage} progress: {progress}")
 
     try:
-        update_stage("starting", "Initializing sync")
+        update_stage("starting", {"message": "Initializing Plaid sync...", "current": 0, "total": 0})
 
         with get_db_context() as db:
             # Get Plaid item
@@ -60,7 +61,12 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str):
             ).first()
             cursor = cursor_record.cursor if cursor_record else None
 
-            update_stage("syncing", f"Fetching transactions (cursor: {cursor is not None})")
+            sync_type = "incremental" if cursor else "initial"
+            update_stage("fetching", {
+                "message": f"Fetching transactions from {plaid_item.institution_name} ({sync_type} sync)...",
+                "current": 0,
+                "total": 0
+            })
 
             # Sync transactions from Plaid
             sync_result = plaid_client.sync_transactions(
@@ -92,10 +98,20 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str):
             duplicate_count = 0
             expense_count = 0
 
-            update_stage("processing", f"Processing {len(sync_result['added'])} added transactions")
+            total_transactions = len(sync_result['added']) + len(sync_result['modified']) + len(sync_result['removed'])
+
+            update_stage("processing", {
+                "message": f"Processing {total_transactions} transactions...",
+                "current": 0,
+                "total": total_transactions,
+                "added": 0,
+                "modified": 0,
+                "removed": 0,
+                "duplicates": 0
+            })
 
             # Process added transactions
-            for plaid_txn in sync_result['added']:
+            for idx, plaid_txn in enumerate(sync_result['added'], 1):
                 plaid_account_id = plaid_txn['account_id']
                 account_id = plaid_account_map.get(plaid_account_id)
 
@@ -159,10 +175,20 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str):
                         db.add(expense)
                         expense_count += 1
 
-            # Process modified transactions
-            update_stage("processing", f"Processing {len(sync_result['modified'])} modified transactions")
+                # Update progress every 10 transactions or at milestones
+                if idx % 10 == 0 or idx == len(sync_result['added']):
+                    update_stage("processing", {
+                        "message": f"Processing transactions ({idx + modified_count}/{total_transactions})...",
+                        "current": idx + modified_count,
+                        "total": total_transactions,
+                        "added": added_count,
+                        "modified": modified_count,
+                        "removed": removed_count,
+                        "duplicates": duplicate_count
+                    })
 
-            for plaid_txn in sync_result['modified']:
+            # Process modified transactions
+            for idx, plaid_txn in enumerate(sync_result['modified'], 1):
                 # Find existing transaction by Plaid ID
                 existing_txn = db.query(Transaction).filter(
                     Transaction.plaid_transaction_id == plaid_txn['transaction_id']
@@ -194,10 +220,21 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str):
 
                     modified_count += 1
 
-            # Process removed transactions
-            update_stage("processing", f"Processing {len(sync_result['removed'])} removed transactions")
+                # Update progress every 10 transactions
+                if idx % 10 == 0 or idx == len(sync_result['modified']):
+                    current = len(sync_result['added']) + idx
+                    update_stage("processing", {
+                        "message": f"Processing transactions ({current}/{total_transactions})...",
+                        "current": current,
+                        "total": total_transactions,
+                        "added": added_count,
+                        "modified": modified_count,
+                        "removed": removed_count,
+                        "duplicates": duplicate_count
+                    })
 
-            for removed in sync_result['removed']:
+            # Process removed transactions
+            for idx, removed in enumerate(sync_result['removed'], 1):
                 plaid_txn_id = removed['transaction_id']
 
                 # Find and delete transaction
@@ -215,8 +252,25 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str):
                     db.delete(existing_txn)
                     removed_count += 1
 
+                # Update progress every 10 transactions
+                if idx % 10 == 0 or idx == len(sync_result['removed']):
+                    current = len(sync_result['added']) + len(sync_result['modified']) + idx
+                    update_stage("processing", {
+                        "message": f"Processing transactions ({current}/{total_transactions})...",
+                        "current": current,
+                        "total": total_transactions,
+                        "added": added_count,
+                        "modified": modified_count,
+                        "removed": removed_count,
+                        "duplicates": duplicate_count
+                    })
+
             # Update or create cursor
-            update_stage("finalizing", "Updating sync cursor")
+            update_stage("finalizing", {
+                "message": "Saving sync state...",
+                "current": total_transactions,
+                "total": total_transactions
+            })
 
             next_cursor = sync_result['next_cursor']
             if cursor_record:
@@ -242,13 +296,24 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str):
             # Check if there are more transactions to fetch
             has_more = sync_result.get('has_more', False)
             if has_more:
-                update_stage("syncing", "Fetching additional transactions")
+                update_stage("fetching", {
+                    "message": "Fetching additional transactions...",
+                    "current": total_transactions,
+                    "total": total_transactions
+                })
                 logger.info(f"More transactions available for item {plaid_item_id}, continuing sync...")
                 # Recursively call to get more transactions
                 # In production, you might want to limit recursion depth
                 return run_plaid_sync_job(user_id, plaid_item_id)
 
-            update_stage("completed", "Sync completed successfully")
+            update_stage("completed", {
+                "message": "Sync completed successfully!",
+                "added": added_count,
+                "modified": modified_count,
+                "removed": removed_count,
+                "duplicates_skipped": duplicate_count,
+                "expenses_created": expense_count
+            })
 
             result = {
                 "status": "success",
@@ -270,7 +335,7 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str):
             return result
 
     except Exception as exc:
-        update_stage("failed", str(exc))
+        update_stage("failed", {"message": f"Sync failed: {str(exc)}"})
         logger.exception(f"Plaid sync job failed for item {plaid_item_id}")
 
         # Update PlaidItem status
