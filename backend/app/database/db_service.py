@@ -17,6 +17,7 @@ from app.database.models import (
     InstrumentType as InstrumentTypeModel,
     InstrumentIndustry as InstrumentIndustryModel,
     InstrumentMetadata as InstrumentMetadataModel,
+    MerchantMemory as MerchantMemoryModel,
     AccountTypeEnum, TransactionTypeEnum
 )
 
@@ -36,7 +37,8 @@ COLLECTION_MODEL_MAP = {
     "price_cache": StockPriceModel,
     "instrument_types": InstrumentTypeModel,
     "instrument_industries": InstrumentIndustryModel,
-    "instrument_metadata": InstrumentMetadataModel
+    "instrument_metadata": InstrumentMetadataModel,
+    "merchant_memory": MerchantMemoryModel
 }
 
 
