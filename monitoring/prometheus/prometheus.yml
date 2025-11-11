@@ -47,18 +47,6 @@ scrape_configs:
       - targets: ['cadvisor:8080']
     metrics_path: '/metrics'
 
-  # Workers (using FastAPI metrics endpoint if available)
-  - job_name: 'expense-worker'
-    static_configs:
-      - targets: ['expense-worker:8001']
-    metrics_path: '/metrics'
-
-  - job_name: 'statement-worker'
-    static_configs:
-      - targets: ['statement-worker:8002']
-    metrics_path: '/metrics'
-
-  - job_name: 'plaid-worker'
-    static_configs:
-      - targets: ['plaid-worker:8003']
-    metrics_path: '/metrics'
+  # Note: Workers don't expose metrics endpoints directly
+  # Worker health and resource usage monitored via cAdvisor container metrics
+  # RQ job queue metrics monitored via Redis exporter
