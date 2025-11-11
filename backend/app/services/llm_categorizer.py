@@ -220,13 +220,21 @@ Response:"""
 
     def get_user_category_history(self, user_id: str, db) -> Dict[str, int]:
         """Get user's categorization history (category -> count)."""
-        expenses = db.find("expenses", {"account_id": {"$regex": f"^{user_id}"}})
+        # Get all user's accounts first
+        accounts = db.find("accounts", {"user_id": user_id})
 
         category_counts = {}
-        for expense in expenses:
-            category = expense.get("category")
-            if category:
-                category_counts[category] = category_counts.get(category, 0) + 1
+
+        # Get expenses for each account
+        for account in accounts:
+            account_id = account.get("id")
+            if account_id:
+                expenses = db.find("expenses", {"account_id": account_id})
+
+                for expense in expenses:
+                    category = expense.get("category")
+                    if category:
+                        category_counts[category] = category_counts.get(category, 0) + 1
 
         return category_counts
 
