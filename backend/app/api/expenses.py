@@ -999,7 +999,7 @@ async def detect_and_mark_transfers(
 def run_expense_conversion(
     user_id: str,
     account_id: Optional[str] = None,
-    progress_callback: Optional[Callable[[str], None]] = None,
+    progress_callback: Optional[Callable[[str, Optional[dict]], None]] = None,
     db = None
 ) -> Dict[str, Any]:
     """
@@ -1009,16 +1009,22 @@ def run_expense_conversion(
     if db is None:
         raise ValueError("Database service is required")
 
-    def notify(stage: str):
+    def notify(stage: str, progress: dict = None):
         if progress_callback:
-            progress_callback(stage)
+            progress_callback(stage, progress)
 
-    notify("detecting_transfers")
+    notify("detecting_transfers", {"message": "Detecting transfer transactions...", "current": 0, "total": 0})
     transfers = detect_transfers(user_id, db, days_tolerance=5)
     transfer_transaction_ids = set()
     for txn_id1, txn_id2 in transfers:
         transfer_transaction_ids.add(txn_id1)
         transfer_transaction_ids.add(txn_id2)
+
+    notify("detecting_transfers", {
+        "message": f"Found {len(transfers)} transfers between accounts",
+        "current": len(transfers),
+        "total": len(transfers)
+    })
 
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": user_id})
@@ -1040,15 +1046,20 @@ def run_expense_conversion(
 
     account_ids = [acc["id"] for acc in accounts]
 
-    notify("loading_transactions")
+    notify("loading_transactions", {"message": "Loading transactions from accounts...", "current": 0, "total": len(account_ids)})
     # Load all relevant transaction types:
     # - WITHDRAWAL, FEE: Expenses
     # - DEPOSIT, DIVIDEND, INTEREST: Income (excluding transfers)
     # - TRANSFER: Transfers between accounts (credit card payments, bank transfers, investment movements)
     transactions = []
-    for acc_id in account_ids:
+    for idx, acc_id in enumerate(account_ids, 1):
         txns = db.find("transactions", {"account_id": acc_id})
         transactions.extend([t for t in txns if t.get("type") in ["WITHDRAWAL", "FEE", "DEPOSIT", "DIVIDEND", "INTEREST", "TRANSFER"]])
+        notify("loading_transactions", {
+            "message": f"Loading transactions ({idx}/{len(account_ids)} accounts processed)",
+            "current": idx,
+            "total": len(account_ids)
+        })
 
     transaction_by_id = {
         txn.get("id"): txn
@@ -1068,10 +1079,19 @@ def run_expense_conversion(
             txn.get("description")
         ))
 
-    notify("loading_expenses")
+    notify("loading_expenses", {
+        "message": f"Loading existing expenses from {len(account_ids)} accounts...",
+        "current": 0,
+        "total": len(account_ids)
+    })
     existing_expenses = []
-    for acc_id in account_ids:
+    for idx, acc_id in enumerate(account_ids, 1):
         existing_expenses.extend(db.find("expenses", {"account_id": acc_id}))
+        notify("loading_expenses", {
+            "message": f"Loading expenses ({idx}/{len(account_ids)} accounts processed)",
+            "current": idx,
+            "total": len(account_ids)
+        })
 
     existing_by_txn_id = {}
     existing_expense_keys = set()
@@ -1087,7 +1107,11 @@ def run_expense_conversion(
         )
         existing_expense_keys.add(key)
 
-    notify("cleaning_transfer_expenses")
+    notify("cleaning_transfer_expenses", {
+        "message": "Cleaning up transfer expenses...",
+        "current": 0,
+        "total": len(existing_expenses) if transfer_transaction_ids else 0
+    })
     transfer_expenses_removed = 0
     if transfer_transaction_ids:
         for exp in list(existing_expenses):
@@ -1114,10 +1138,15 @@ def run_expense_conversion(
                     existing_expense_keys.remove(key)
                 existing_expenses.remove(exp)
 
-    notify("converting_transactions")
+    notify("converting_transactions", {
+        "message": f"Processing {len(transactions)} transactions...",
+        "current": 0,
+        "total": len(transactions)
+    })
     expenses_created = 0
     expenses_updated = 0
     transfers_processed = 0
+    transactions_processed_count = 0
 
     # Ensure special categories exist (aligned with Categorization Rules.md)
     special_categories = [
@@ -1197,10 +1226,20 @@ def run_expense_conversion(
             return "Uncategorized"
         return "Uncategorized"
 
-    for txn in transactions:
+    for idx, txn in enumerate(transactions, 1):
         txn_id = txn.get("id")
         txn_type = txn.get("type")
         is_transfer = txn_id in transfer_transaction_ids
+
+        # Update progress every 10 transactions or at the end
+        if idx % 10 == 0 or idx == len(transactions):
+            notify("converting_transactions", {
+                "message": f"Processing transactions ({idx}/{len(transactions)})...",
+                "current": idx,
+                "total": len(transactions),
+                "created": expenses_created,
+                "updated": expenses_updated
+            })
 
         # Skip if this transaction was already processed as part of a transfer pair
         if txn_id in processed_transfer_txn_ids:
