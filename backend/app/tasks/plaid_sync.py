@@ -123,6 +123,35 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                     sync_result["has_more"] = total_fetched < total_available
 
                 logger.info(f"[FULL RESYNC] Fetched {len(sync_result['added'])} historical transactions")
+
+                # Delete existing transactions and expenses for this Plaid item's accounts
+                plaid_accounts = db.query(PlaidAccount).filter(
+                    PlaidAccount.plaid_item_id == plaid_item_id
+                ).all()
+                account_ids = [pa.account_id for pa in plaid_accounts]
+
+                if account_ids:
+                    update_stage("cleaning", {
+                        "message": f"Removing old transactions for {len(account_ids)} accounts...",
+                        "current": 0,
+                        "total": len(account_ids)
+                    })
+
+                    # Delete expenses first (they reference transactions)
+                    deleted_expenses = db.query(Expense).filter(
+                        Expense.account_id.in_(account_ids)
+                    ).delete(synchronize_session=False)
+
+                    # Delete transactions
+                    deleted_transactions = db.query(Transaction).filter(
+                        Transaction.account_id.in_(account_ids)
+                    ).delete(synchronize_session=False)
+
+                    db.commit()
+                    logger.info(
+                        f"[FULL RESYNC] Deleted {deleted_transactions} transactions and "
+                        f"{deleted_expenses} expenses for {len(account_ids)} accounts"
+                    )
             else:
                 # Regular incremental sync using cursor
                 cursor_record = db.query(PlaidSyncCursor).filter(
@@ -220,7 +249,8 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                     plaid_transaction_id=txn_data['plaid_transaction_id'],
                     pfc_primary=txn_data.get('pfc_primary'),
                     pfc_detailed=txn_data.get('pfc_detailed'),
-                    pfc_confidence=txn_data.get('pfc_confidence')
+                    pfc_confidence=txn_data.get('pfc_confidence'),
+                    import_sequence=idx  # Preserve order from Plaid API
                 )
                 db.add(transaction)
                 added_count += 1
@@ -453,6 +483,15 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 plaid_account_map=plaid_account_map
             )
 
+            # Validate transaction balances and flag inconsistencies
+            _validate_transaction_balances(
+                db=db,
+                plaid_item=plaid_item,
+                plaid_accounts=plaid_accounts,
+                plaid_account_map=plaid_account_map,
+                update_stage=update_stage
+            )
+
             db.commit()
 
             update_stage("completed", {
@@ -607,7 +646,8 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
             total=inv_txn.get('amount', 0),
             description=inv_txn.get('name'),
             source='plaid',
-            plaid_transaction_id=inv_txn['transaction_id']
+            plaid_transaction_id=inv_txn['transaction_id'],
+            import_sequence=idx  # Preserve order from Plaid API
         )
         db.add(transaction)
         added_count += 1
@@ -648,6 +688,125 @@ def _map_investment_type(plaid_type: str) -> str:
     return type_mapping.get(plaid_type.lower(), 'other')
 
 
+def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account_map, update_stage):
+    """
+    Validate transaction balances after import by calculating expected balances
+    and comparing with Plaid current balance.
+
+    This function:
+    1. Calculates expected balance for each transaction chronologically
+    2. Stores expected_balance in each transaction record
+    3. Compares final calculated balance with Plaid current balance
+    4. Flags inconsistencies if discrepancy > $1.00
+
+    Args:
+        db: Database session
+        plaid_item: PlaidItem record
+        plaid_accounts: List of PlaidAccount records
+        plaid_account_map: Mapping of plaid_account_id to account_id
+        update_stage: Function to update job stage
+    """
+    try:
+        update_stage("validating_balances", {
+            "message": "Validating transaction balances...",
+            "current": 0,
+            "total": len(plaid_accounts)
+        })
+
+        # Get fresh account data from Plaid
+        accounts_data = plaid_client.get_accounts(plaid_item.access_token)
+        if not accounts_data:
+            logger.warning("Could not fetch account data for balance validation")
+            return
+
+        # Create mapping of plaid_account_id to current balance
+        plaid_balances = {
+            acc['account_id']: acc['balances'].get('current', 0.0) or 0.0
+            for acc in accounts_data['accounts']
+        }
+
+        TOLERANCE = 1.00  # $1.00 tolerance for balance inconsistencies
+
+        # Validate each account
+        for idx, plaid_account in enumerate(plaid_accounts, 1):
+            account_id = plaid_account_map.get(plaid_account.plaid_account_id)
+            if not account_id:
+                continue
+
+            # Get our Account record
+            account = db.query(Account).filter(Account.id == account_id).first()
+            if not account:
+                continue
+
+            # Get all transactions for this account, ordered chronologically
+            # Use import_sequence to preserve intra-day order, fallback to ID for manual entries
+            transactions = db.query(Transaction).filter(
+                Transaction.account_id == account_id
+            ).order_by(
+                Transaction.date.asc(),
+                Transaction.import_sequence.asc().nullslast(),
+                Transaction.id.asc()
+            ).all()
+
+            if not transactions:
+                logger.info(f"Account {account.label} has no transactions, skipping validation")
+                continue
+
+            # Get opening balance
+            opening_balance = account.opening_balance or 0.0
+
+            # Calculate expected balance for each transaction
+            running_balance = opening_balance
+            for txn in transactions:
+                running_balance += txn.total
+                txn.expected_balance = round(running_balance, 2)
+                # Note: actual_balance will be None for Plaid imports (Plaid doesn't provide it)
+                # It will only be populated for statement imports if available
+                txn.has_balance_inconsistency = False
+                txn.balance_discrepancy = None
+
+            # Get current balance from Plaid
+            current_plaid_balance = plaid_balances.get(plaid_account.plaid_account_id, 0.0)
+
+            # Compare final calculated balance with Plaid current balance
+            final_expected_balance = running_balance
+            discrepancy = abs(final_expected_balance - current_plaid_balance)
+
+            if discrepancy > TOLERANCE:
+                logger.warning(
+                    f"Balance inconsistency detected for {account.label}: "
+                    f"Expected: ${final_expected_balance:.2f}, "
+                    f"Plaid current: ${current_plaid_balance:.2f}, "
+                    f"Discrepancy: ${discrepancy:.2f}"
+                )
+                # Flag the last transaction as inconsistent since we can't pinpoint which one
+                if transactions:
+                    last_txn = transactions[-1]
+                    last_txn.has_balance_inconsistency = True
+                    last_txn.balance_discrepancy = round(final_expected_balance - current_plaid_balance, 2)
+                    logger.info(
+                        f"Flagged transaction {last_txn.id} as inconsistent "
+                        f"(expected: ${last_txn.expected_balance:.2f}, discrepancy: ${last_txn.balance_discrepancy:.2f})"
+                    )
+            else:
+                logger.info(
+                    f"Balance validation passed for {account.label}: "
+                    f"Expected: ${final_expected_balance:.2f}, "
+                    f"Plaid: ${current_plaid_balance:.2f}, "
+                    f"Discrepancy: ${discrepancy:.2f} (within tolerance)"
+                )
+
+            update_stage("validating_balances", {
+                "message": f"Validating balances ({idx}/{len(plaid_accounts)})...",
+                "current": idx,
+                "total": len(plaid_accounts)
+            })
+
+    except Exception as e:
+        logger.error(f"Error validating transaction balances: {e}", exc_info=True)
+        # Don't raise - this is not critical enough to fail the entire sync
+
+
 def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
     """
     Update opening balances for accounts after first sync
@@ -686,9 +845,14 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
                 continue
 
             # Get all transactions for this account
+            # Use import_sequence to preserve intra-day order, fallback to ID for manual entries
             transactions = db.query(Transaction).filter(
                 Transaction.account_id == account_id
-            ).order_by(Transaction.date.asc()).all()
+            ).order_by(
+                Transaction.date.asc(),
+                Transaction.import_sequence.asc().nullslast(),
+                Transaction.id.asc()
+            ).all()
 
             if not transactions:
                 # No transactions yet, keep current opening balance

@@ -272,12 +272,13 @@ export const instrumentsAPI = {
 };
 
 export const transactionsAPI = {
-  getAll: (accountId, startDate, endDate) =>
+  getAll: (accountId, startDate, endDate, includeBalance = false) =>
     api.get('/transactions', {
       params: {
         account_id: accountId,
         start_date: startDate,
-        end_date: endDate
+        end_date: endDate,
+        include_balance: includeBalance
       }
     }),
   getBalance: (accountId, asOfDate) =>
@@ -289,6 +290,7 @@ export const transactionsAPI = {
     }),
   create: (data) => api.post('/transactions', data),
   delete: (id) => api.delete(`/transactions/${id}`),
+  fixBalance: (id, data) => api.patch(`/transactions/${id}/fix-balance`, data),
 };
 
 export const plaidAPI = {

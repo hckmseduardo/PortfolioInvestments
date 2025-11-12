@@ -60,7 +60,7 @@ services:
       - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
       - PLAID_CLIENT_ID=${PLAID_CLIENT_ID:-}
       - PLAID_SECRET=${PLAID_SECRET:-}
-      - PLAID_ENVIRONMENT=${PLAID_ENVIRONMENT:-sandbox}
+      - PLAID_ENVIRONMENT=${PLAID_ENVIRONMENT:-production}
       - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
     depends_on:
@@ -197,12 +197,39 @@ services:
       - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
       - PLAID_CLIENT_ID=${PLAID_CLIENT_ID:-}
       - PLAID_SECRET=${PLAID_SECRET:-}
-      - PLAID_ENVIRONMENT=${PLAID_ENVIRONMENT:-sandbox}
+      - PLAID_ENVIRONMENT=${PLAID_ENVIRONMENT:-production}
       - QUEUE_LIST=plaid_sync
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+    restart: unless-stopped
+
+  ticker-mapping-worker:
+    build: ./backend
+    container_name: portfolio-ticker-mapping-worker
+    command: ["python", "worker.py"]
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/uploads:/app/uploads
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-portfolio_user}:${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}@postgres:5432/${POSTGRES_DB:-portfolio}
+      - LEGACY_DATA_PATH=/app/data
+      - UPLOAD_PATH=/app/uploads
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - LLM_MODEL=${LLM_MODEL:-mistral:7b}
+      - QUEUE_LIST=ticker_mapping
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      ollama:
         condition: service_started
     restart: unless-stopped
 

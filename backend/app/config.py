@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 from pydantic import Field, field_validator
 from typing import List, Optional
 
+
 class Settings(BaseSettings):
     SECRET_KEY: str = "your-secret-key-change-this-in-production"
     ALGORITHM: str = "HS256"
@@ -59,9 +60,13 @@ class Settings(BaseSettings):
     # Plaid configuration
     PLAID_CLIENT_ID: Optional[str] = None
     PLAID_SECRET: Optional[str] = None
-    PLAID_ENVIRONMENT: str = "sandbox"  # sandbox, development, or production
+    PLAID_ENVIRONMENT: str = "production"  # sandbox, development, or production
     PLAID_QUEUE_NAME: str = "plaid_sync"
     PLAID_JOB_TIMEOUT: int = 1800  # 30 minutes
+
+    # Ticker mapping configuration
+    TICKER_MAPPING_QUEUE_NAME: str = "ticker_mapping"
+    TICKER_MAPPING_JOB_TIMEOUT: int = 3600  # 60 minutes (can be slow with Ollama)
 
     @field_validator("PRICE_SOURCE_PRIORITY", mode="before")
     @classmethod

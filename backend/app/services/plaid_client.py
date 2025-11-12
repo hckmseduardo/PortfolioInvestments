@@ -15,9 +15,12 @@ from plaid.model.products import Products
 from plaid.model.country_code import CountryCode
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
+from plaid.model.transactions_get_request import TransactionsGetRequest
+from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
 from plaid.model.accounts_get_request import AccountsGetRequest
 from plaid.model.item_get_request import ItemGetRequest
 from plaid.model.item_remove_request import ItemRemoveRequest
+from plaid.model.investments_transactions_get_request import InvestmentsTransactionsGetRequest
 from plaid.exceptions import ApiException
 
 from app.config import settings
@@ -87,7 +90,7 @@ class PlaidClient:
             request = LinkTokenCreateRequest(
                 user=LinkTokenCreateRequestUser(client_user_id=str(user_id)),
                 client_name=client_name,
-                products=[Products("transactions"), Products("auth")],
+                products=[Products("transactions")],  # Removed investments - not authorized in production
                 country_codes=[CountryCode("US"), CountryCode("CA")],
                 language="en",
             )
@@ -224,8 +227,25 @@ class PlaidClient:
             if cursor:
                 request_args["cursor"] = cursor
 
+            logger.info(f"[PLAID DEBUG] Syncing regular transactions:")
+            logger.info(f"  Access token: {access_token[:20]}...")
+            logger.info(f"  Cursor: {cursor[:50] if cursor else 'None (initial sync)'}...")
+            logger.info(f"  Count: {min(count, 500)}")
+
             request = TransactionsSyncRequest(**request_args)
             response = self.client.transactions_sync(request)
+
+            logger.info(f"[PLAID DEBUG] Transaction sync response:")
+            logger.info(f"  Added: {len(response.get('added', []))}")
+            logger.info(f"  Modified: {len(response.get('modified', []))}")
+            logger.info(f"  Removed: {len(response.get('removed', []))}")
+            logger.info(f"  Has more: {response['has_more']}")
+
+            # Log date range of transactions if any
+            if response.get('added'):
+                dates = [txn.get('date') for txn in response.get('added', []) if txn.get('date')]
+                if dates:
+                    logger.info(f"  Date range: {min(dates)} to {max(dates)}")
 
             return {
                 "added": [self._format_transaction(txn) for txn in response.get('added', [])],
@@ -239,6 +259,149 @@ class PlaidClient:
             return None
         except Exception as e:
             logger.error(f"Unexpected error syncing transactions: {e}")
+            return None
+
+    def get_historical_transactions(
+        self,
+        access_token: str,
+        start_date: str,
+        end_date: str,
+        count: int = 500,
+        offset: int = 0
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get historical transactions for a date range using /transactions/get
+        This is used for full resync to fetch all available transaction history
+
+        Args:
+            access_token: Plaid access token
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            count: Number of transactions to fetch per request (max 500)
+            offset: Offset for pagination
+
+        Returns:
+            Dictionary with transactions and pagination info
+        """
+        if not self._is_enabled():
+            logger.error("Plaid is not configured")
+            return None
+
+        try:
+            # Convert string dates to date objects for Plaid SDK
+            from datetime import datetime as dt
+            start_date_obj = dt.strptime(start_date, '%Y-%m-%d').date()
+            end_date_obj = dt.strptime(end_date, '%Y-%m-%d').date()
+
+            logger.info(f"[PLAID DEBUG - HISTORICAL] Fetching historical transactions:")
+            logger.info(f"  Access token: {access_token[:20]}...")
+            logger.info(f"  Start date: {start_date_obj}")
+            logger.info(f"  End date: {end_date_obj}")
+            logger.info(f"  Count: {count}, Offset: {offset}")
+
+            options = TransactionsGetRequestOptions(
+                count=min(count, 500),
+                offset=offset
+            )
+
+            request = TransactionsGetRequest(
+                access_token=access_token,
+                start_date=start_date_obj,
+                end_date=end_date_obj,
+                options=options
+            )
+
+            response = self.client.transactions_get(request)
+
+            transactions = response.get('transactions', [])
+            total_transactions = response.get('total_transactions', 0)
+
+            logger.info(f"[PLAID DEBUG - HISTORICAL] Response:")
+            logger.info(f"  Fetched: {len(transactions)} transactions")
+            logger.info(f"  Total available: {total_transactions}")
+
+            # Log date range of transactions if any
+            if transactions:
+                dates = [txn.get('date') for txn in transactions if txn.get('date')]
+                if dates:
+                    logger.info(f"  Date range: {min(dates)} to {max(dates)}")
+
+            return {
+                "transactions": [self._format_transaction(txn) for txn in transactions],
+                "total_transactions": total_transactions,
+                "accounts": response.get('accounts', []),
+            }
+        except ApiException as e:
+            logger.error(f"[PLAID DEBUG - HISTORICAL] API exception: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[PLAID DEBUG - HISTORICAL] Unexpected error: {e}")
+            logger.exception("Full traceback:")
+            return None
+
+    def get_investment_transactions(
+        self,
+        access_token: str,
+        start_date: str,
+        end_date: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get investment transactions for a date range
+
+        Args:
+            access_token: Plaid access token
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+
+        Returns:
+            Dictionary with investment transactions
+        """
+        if not self._is_enabled():
+            logger.error("Plaid is not configured")
+            return None
+
+        try:
+            # Convert string dates to date objects for Plaid SDK
+            from datetime import datetime as dt
+            start_date_obj = dt.strptime(start_date, '%Y-%m-%d').date()
+            end_date_obj = dt.strptime(end_date, '%Y-%m-%d').date()
+
+            logger.info(f"[PLAID DEBUG] Fetching investment transactions:")
+            logger.info(f"  Access token: {access_token[:20]}...")
+            logger.info(f"  Start date: {start_date_obj} (type: {type(start_date_obj).__name__})")
+            logger.info(f"  End date: {end_date_obj} (type: {type(end_date_obj).__name__})")
+
+            request = InvestmentsTransactionsGetRequest(
+                access_token=access_token,
+                start_date=start_date_obj,
+                end_date=end_date_obj
+            )
+
+            logger.info(f"[PLAID DEBUG] Request object created, calling Plaid API...")
+
+            response = self.client.investments_transactions_get(request)
+
+            logger.info(f"[PLAID DEBUG] Investment transactions response:")
+            logger.info(f"  Total transactions: {len(response.get('investment_transactions', []))}")
+            logger.info(f"  Total securities: {len(response.get('securities', []))}")
+            logger.info(f"  Total accounts: {len(response.get('accounts', []))}")
+
+            return {
+                "transactions": [self._format_investment_transaction(txn)
+                                for txn in response.get('investment_transactions', [])],
+                "accounts": response.get('accounts', []),
+                "securities": response.get('securities', []),
+                "total_transactions": response.get('total_investment_transactions', 0)
+            }
+        except ApiException as e:
+            logger.error(f"[PLAID DEBUG] Plaid API exception getting investment transactions:")
+            logger.error(f"  Status: {e.status if hasattr(e, 'status') else 'N/A'}")
+            logger.error(f"  Message: {e}")
+            logger.error(f"  Body: {e.body if hasattr(e, 'body') else 'N/A'}")
+            return None
+        except Exception as e:
+            logger.error(f"[PLAID DEBUG] Unexpected error getting investment transactions: {e}")
+            logger.exception("Full traceback:")
             return None
 
     def remove_item(self, access_token: str) -> bool:
@@ -324,6 +487,24 @@ class PlaidClient:
         """Format removed transaction object"""
         return {
             "transaction_id": removed['transaction_id']
+        }
+
+    def _format_investment_transaction(self, transaction: Dict[str, Any]) -> Dict[str, Any]:
+        """Format Plaid investment transaction object for our use"""
+        return {
+            "transaction_id": transaction['investment_transaction_id'],
+            "account_id": transaction['account_id'],
+            "security_id": transaction.get('security_id'),
+            "date": transaction['date'],
+            "name": transaction.get('name'),
+            "type": transaction['type'],  # buy, sell, cash, etc.
+            "subtype": transaction.get('subtype'),
+            "quantity": transaction.get('quantity', 0),
+            "amount": transaction.get('amount', 0),
+            "price": transaction.get('price', 0),
+            "fees": transaction.get('fees', 0),
+            "iso_currency_code": transaction.get('iso_currency_code', 'USD'),
+            "unofficial_currency_code": transaction.get('unofficial_currency_code'),
         }
 
 

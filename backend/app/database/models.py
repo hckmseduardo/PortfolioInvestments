@@ -181,6 +181,15 @@ class Transaction(Base):
     pfc_detailed = Column(String(100), nullable=True, index=True)  # e.g., FOOD_AND_DRINK_GROCERIES
     pfc_confidence = Column(String(20), nullable=True)  # VERY_HIGH, HIGH, MEDIUM, LOW, UNKNOWN
 
+    # Balance validation fields
+    actual_balance = Column(Float, nullable=True)  # Balance from source (Plaid, statement, etc.)
+    expected_balance = Column(Float, nullable=True)  # Calculated balance
+    has_balance_inconsistency = Column(Boolean, default=False, nullable=False)  # Flag for inconsistency
+    balance_discrepancy = Column(Float, nullable=True)  # Difference between expected and actual
+
+    # Transaction ordering field
+    import_sequence = Column(Integer, nullable=True)  # Preserves order from import source (Plaid, statement)
+
     # Relationships
     account = relationship("Account", back_populates="transactions")
     statement = relationship("Statement", back_populates="transactions")

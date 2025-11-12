@@ -21,7 +21,11 @@ import {
   useMediaQuery,
   Tooltip,
   Tabs,
-  Tab
+  Tab,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import {
   TrendingUp,
@@ -31,7 +35,10 @@ import {
   Refresh,
   Lock,
   LockOpen,
-  Menu as MenuIcon
+  Menu as MenuIcon,
+  Fullscreen,
+  FullscreenExit,
+  Close
 } from '@mui/icons-material';
 import { accountsAPI, positionsAPI, dividendsAPI, dashboardAPI, transactionsAPI } from '../services/api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -45,9 +52,9 @@ const ROW_HEIGHT = 120;
 const GRID_MARGIN = [16, 16];
 const DRAG_START_DELAY = 300;
 const INSIGHT_TABS = [
-  { id: 'performance', label: 'Performance' },
-  { id: 'types', label: 'Breakdown by Asset Types' },
-  { id: 'industries', label: 'Breakdown by Industries' }
+  { id: 'performance', label: 'Performance', shortLabel: 'Performance' },
+  { id: 'types', label: 'Breakdown by Asset Types', shortLabel: 'Asset Types' },
+  { id: 'industries', label: 'Breakdown by Industries', shortLabel: 'Industries' }
 ];
 const INSIGHT_AUTO_INTERVAL = 10000;
 const INSIGHT_INTERACTION_TIMEOUT = 20000;
@@ -485,8 +492,10 @@ const Dashboard = () => {
   const [performanceLoading, setPerformanceLoading] = useState(false);
   const [insightActiveTab, setInsightActiveTab] = useState(INSIGHT_TABS[0].id);
   const [isInsightInteracting, setIsInsightInteracting] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const theme = useTheme();
   const isCompactToolbar = useMediaQuery(theme.breakpoints.down('sm'));
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [toolbarMenuAnchor, setToolbarMenuAnchor] = useState(null);
   const isToolbarMenuOpen = Boolean(toolbarMenuAnchor);
   const [isLayoutLocked, setIsLayoutLocked] = useState(true);
@@ -1108,37 +1117,88 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
         let insightBody;
         if (insightActiveTab === 'performance') {
           insightBody = performanceLoading ? (
-            <Typography color="textSecondary">Loading performance…</Typography>
+            <Box display="flex" alignItems="center" justifyContent="center" height="100%" minHeight={200}>
+              <Typography color="textSecondary">Loading performance…</Typography>
+            </Box>
           ) : performanceData.length === 0 ? (
-            <Typography color="textSecondary">No performance data for the selected range.</Typography>
+            <Box display="flex" alignItems="center" justifyContent="center" height="100%" minHeight={200}>
+              <Typography color="textSecondary">No performance data for the selected range.</Typography>
+            </Box>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={performanceData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="label" />
-                <YAxis />
-                <RechartsTooltip formatter={(value) => formatCurrency(value)} />
-                <Legend />
-                <Line type="monotone" dataKey="market_value" stroke="#1976d2" name="Market Value" dot={false} />
-                <Line type="monotone" dataKey="book_value" stroke="#9c27b0" name="Book Value" dot={false} />
+              <LineChart
+                data={performanceData}
+                margin={{
+                  top: isMobile ? 5 : 10,
+                  right: isMobile ? 5 : 20,
+                  left: isMobile ? -20 : 0,
+                  bottom: isMobile ? 5 : 10
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: isMobile ? 10 : 12 }}
+                  tickMargin={isMobile ? 5 : 10}
+                />
+                <YAxis
+                  tick={{ fontSize: isMobile ? 10 : 12 }}
+                  tickFormatter={(value) => {
+                    if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+                    if (value >= 1000) return `$${(value / 1000).toFixed(0)}K`;
+                    return `$${value}`;
+                  }}
+                />
+                <RechartsTooltip
+                  formatter={(value) => formatCurrency(value)}
+                  contentStyle={{
+                    fontSize: isMobile ? 12 : 14,
+                    borderRadius: 8,
+                    border: '1px solid #e0e0e0'
+                  }}
+                />
+                <Legend
+                  wrapperStyle={{ fontSize: isMobile ? 12 : 14 }}
+                  iconSize={isMobile ? 10 : 14}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="market_value"
+                  stroke="#1976d2"
+                  strokeWidth={isMobile ? 2 : 3}
+                  name="Market Value"
+                  dot={false}
+                  activeDot={{ r: isMobile ? 4 : 6 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="book_value"
+                  stroke="#9c27b0"
+                  strokeWidth={isMobile ? 2 : 3}
+                  name="Book Value"
+                  dot={false}
+                  activeDot={{ r: isMobile ? 4 : 6 }}
+                />
               </LineChart>
             </ResponsiveContainer>
           );
         } else if (insightActiveTab === 'types') {
           insightBody = typeBreakdown.length === 0 ? (
-            <Typography color="textSecondary">Assign instrument types to view this breakdown.</Typography>
+            <Box display="flex" alignItems="center" justifyContent="center" height="100%" minHeight={200}>
+              <Typography color="textSecondary">Assign instrument types to view this breakdown.</Typography>
+            </Box>
           ) : (
-            <Grid container spacing={3} sx={{ height: '100%' }}>
-              <Grid item xs={12} md={6} sx={{ height: { xs: 300, md: '100%' }, minWidth: 0 }}>
-                <Box sx={{ height: '100%', minHeight: 250 }}>
+            <Grid container spacing={{ xs: 2, sm: 3 }} sx={{ height: '100%' }}>
+              <Grid item xs={12} md={6} sx={{ height: { xs: 280, sm: 320, md: '100%' }, minWidth: 0 }}>
+                <Box sx={{ height: '100%', minHeight: { xs: 250, sm: 280 } }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
                         data={typeBreakdown}
                         dataKey="market_value"
                         nameKey="type_name"
-                        innerRadius="25%"
-                        outerRadius="90%"
+                        innerRadius={isMobile ? "35%" : "25%"}
+                        outerRadius={isMobile ? "75%" : "90%"}
                         paddingAngle={1}
                         cx="50%"
                         cy="50%"
@@ -1155,6 +1215,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                           `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
                           payload?.payload?.type_name || name
                         ]}
+                        contentStyle={{
+                          fontSize: isMobile ? 12 : 14,
+                          borderRadius: 8,
+                          border: '1px solid #e0e0e0'
+                        }}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -1166,12 +1231,17 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                   maxHeight: { xs: 400, md: '100%' },
                   display: 'flex',
                   flexDirection: 'column',
-                  minHeight: 0
+                  minHeight: 0,
+                  p: { xs: 1.5, sm: 2 },
+                  bgcolor: 'background.default',
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: 'divider'
                 }}>
-                  <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600, flexShrink: 0 }}>
-                    Asset Types (Details)
+                  <Typography variant="subtitle2" sx={{ mb: { xs: 1.5, sm: 2 }, fontWeight: 600, flexShrink: 0, fontSize: { xs: '0.875rem', sm: '1rem' } }}>
+                    Asset Types Breakdown
                   </Typography>
-                  <Stack spacing={0.5} sx={{
+                  <Stack spacing={{ xs: 1, sm: 1.5 }} sx={{
                     flexGrow: 1,
                     overflowY: 'auto',
                     overflowX: 'hidden',
@@ -1182,20 +1252,40 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     {typeBreakdown.map((slice) => (
                       <Box
                         key={slice.type_id || 'unclassified'}
-                        sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexShrink: 0,
+                          p: { xs: 1, sm: 1.5 },
+                          bgcolor: 'background.paper',
+                          borderRadius: 1,
+                          '&:hover': {
+                            bgcolor: 'action.hover'
+                          }
+                        }}
                       >
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flexShrink: 1 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 1.5 }, minWidth: 0, flexShrink: 1 }}>
                           {renderColorSwatch(slice.color)}
-                          <Typography variant="body2" noWrap sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          <Typography
+                            variant="body2"
+                            noWrap
+                            sx={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+                              fontWeight: 500
+                            }}
+                          >
                             {slice.type_name}
                           </Typography>
                         </Box>
                         <Box textAlign="right" sx={{ flexShrink: 0, ml: 2 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
-                            {formatCurrency(slice.market_value)}{' '}
-                            <Typography component="span" variant="caption" color="textSecondary">
-                              {formatPercent(slice.percentage)}
-                            </Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap', fontSize: { xs: '0.8125rem', sm: '0.875rem' } }}>
+                            {formatCurrency(slice.market_value)}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary" sx={{ fontSize: { xs: '0.6875rem', sm: '0.75rem' } }}>
+                            {formatPercent(slice.percentage)}
                           </Typography>
                         </Box>
                       </Box>
@@ -1207,19 +1297,21 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
           );
         } else {
           insightBody = industryBreakdown.length === 0 ? (
-            <Typography color="textSecondary">Classify positions to view this breakdown.</Typography>
+            <Box display="flex" alignItems="center" justifyContent="center" height="100%" minHeight={200}>
+              <Typography color="textSecondary">Classify positions to view this breakdown.</Typography>
+            </Box>
           ) : (
-            <Grid container spacing={3} sx={{ height: '100%' }}>
-              <Grid item xs={12} md={6} sx={{ height: { xs: 300, md: '100%' }, minWidth: 0 }}>
-                <Box sx={{ height: '100%', minHeight: 250 }}>
+            <Grid container spacing={{ xs: 2, sm: 3 }} sx={{ height: '100%' }}>
+              <Grid item xs={12} md={6} sx={{ height: { xs: 280, sm: 320, md: '100%' }, minWidth: 0 }}>
+                <Box sx={{ height: '100%', minHeight: { xs: 250, sm: 280 } }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
                         data={industryBreakdown}
                         dataKey="market_value"
                         nameKey="industry_name"
-                        innerRadius="25%"
-                        outerRadius="90%"
+                        innerRadius={isMobile ? "35%" : "25%"}
+                        outerRadius={isMobile ? "75%" : "90%"}
                         paddingAngle={1}
                         cx="50%"
                         cy="50%"
@@ -1236,6 +1328,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                           `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
                           payload?.payload?.industry_name || name
                         ]}
+                        contentStyle={{
+                          fontSize: isMobile ? 12 : 14,
+                          borderRadius: 8,
+                          border: '1px solid #e0e0e0'
+                        }}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -1247,12 +1344,17 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                   maxHeight: { xs: 400, md: '100%' },
                   display: 'flex',
                   flexDirection: 'column',
-                  minHeight: 0
+                  minHeight: 0,
+                  p: { xs: 1.5, sm: 2 },
+                  bgcolor: 'background.default',
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: 'divider'
                 }}>
-                  <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600, flexShrink: 0 }}>
-                    Industry Breakdown (Details)
+                  <Typography variant="subtitle2" sx={{ mb: { xs: 1.5, sm: 2 }, fontWeight: 600, flexShrink: 0, fontSize: { xs: '0.875rem', sm: '1rem' } }}>
+                    Industry Breakdown
                   </Typography>
-                  <Stack spacing={0.5} sx={{
+                  <Stack spacing={{ xs: 1, sm: 1.5 }} sx={{
                     flexGrow: 1,
                     overflowY: 'auto',
                     overflowX: 'hidden',
@@ -1263,20 +1365,40 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                     {industryBreakdown.map((slice) => (
                       <Box
                         key={slice.industry_id || 'unclassified'}
-                        sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexShrink: 0,
+                          p: { xs: 1, sm: 1.5 },
+                          bgcolor: 'background.paper',
+                          borderRadius: 1,
+                          '&:hover': {
+                            bgcolor: 'action.hover'
+                          }
+                        }}
                       >
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flexShrink: 1 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 1.5 }, minWidth: 0, flexShrink: 1 }}>
                           {renderColorSwatch(slice.color)}
-                          <Typography variant="body2" noWrap sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          <Typography
+                            variant="body2"
+                            noWrap
+                            sx={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+                              fontWeight: 500
+                            }}
+                          >
                             {slice.industry_name}
                           </Typography>
                         </Box>
                         <Box textAlign="right" sx={{ flexShrink: 0, ml: 2 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
-                            {formatCurrency(slice.market_value)}{' '}
-                            <Typography component="span" variant="caption" color="textSecondary">
-                              {formatPercent(slice.percentage)}
-                            </Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap', fontSize: { xs: '0.8125rem', sm: '0.875rem' } }}>
+                            {formatCurrency(slice.market_value)}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary" sx={{ fontSize: { xs: '0.6875rem', sm: '0.75rem' } }}>
+                            {formatPercent(slice.percentage)}
                           </Typography>
                         </Box>
                       </Box>
@@ -1298,10 +1420,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
         return (
           <Paper
             sx={{
-              p: { xs: 1, sm: 1.5, md: 2 },
+              p: { xs: 2, sm: 2.5, md: 3 },
               height: '100%',
               display: 'flex',
-              flexDirection: 'column'
+              flexDirection: 'column',
+              boxShadow: { xs: 1, sm: 2 }
             }}
             onMouseEnter={() => handleInsightHover(true)}
             onMouseLeave={() => handleInsightHover(false)}
@@ -1311,7 +1434,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
               justifyContent="space-between"
               alignItems={{ xs: 'flex-start', md: 'center' }}
               flexWrap="wrap"
-              gap={{ xs: 0.5, sm: 1 }}
+              gap={{ xs: 1, sm: 1.5 }}
               className="dashboard-tile-handle"
               sx={{ cursor: 'move' }}
             >
@@ -1322,7 +1445,8 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                   sx={{
                     letterSpacing: '.05em',
                     textTransform: 'uppercase',
-                    fontSize: 'clamp(0.5rem, 2vw, 0.75rem)'
+                    fontSize: { xs: '0.625rem', sm: '0.6875rem', md: '0.75rem' },
+                    fontWeight: 600
                   }}
                 >
                   Portfolio Insights
@@ -1330,110 +1454,367 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                 <Typography
                   variant="body2"
                   color="textSecondary"
-                  sx={{ fontSize: 'clamp(0.625rem, 2vw, 0.875rem)' }}
+                  sx={{ fontSize: { xs: '0.75rem', sm: '0.8125rem', md: '0.875rem' }, mt: 0.5 }}
                 >
                   {insightActiveTab === 'performance' ? `As of ${asOfLabel}` : 'Auto rotating highlights'}
                 </Typography>
               </Box>
+              <Box display="flex" alignItems="center" gap={1}>
+                <Tooltip title="View fullscreen">
+                  <IconButton
+                    size="small"
+                    onClick={() => setIsFullscreen(true)}
+                    sx={{
+                      color: 'primary.main',
+                      '&:hover': {
+                        bgcolor: 'primary.light',
+                        color: 'primary.dark'
+                      }
+                    }}
+                  >
+                    <Fullscreen />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            </Box>
+            <Box sx={{ width: '100%', mt: { xs: 1, sm: 1.5 } }}>
               <Tabs
                 value={insightActiveTab}
                 onChange={handleInsightTabChange}
-                variant="scrollable"
+                variant={isMobile ? "fullWidth" : "standard"}
                 scrollButtons="auto"
                 textColor="primary"
                 indicatorColor="primary"
                 sx={{
                   minHeight: 'auto',
+                  borderBottom: 1,
+                  borderColor: 'divider',
+                  '& .MuiTabs-flexContainer': {
+                    gap: { xs: 0, sm: 0.5 }
+                  },
                   '& .MuiTab-root': {
-                    fontSize: 'clamp(0.625rem, 2vw, 0.875rem)',
-                    minHeight: 'clamp(32px, 10vw, 48px)',
-                    px: 'clamp(0.5rem, 2vw, 1rem)',
-                    py: 'clamp(0.25rem, 1vw, 0.75rem)'
+                    fontSize: { xs: '0.75rem', sm: '0.875rem', md: '0.9375rem' },
+                    minHeight: { xs: 44, sm: 48 },
+                    minWidth: { xs: 'auto', sm: 120 },
+                    px: { xs: 1, sm: 2, md: 3 },
+                    py: { xs: 1, sm: 1.5 },
+                    fontWeight: 500,
+                    textTransform: 'none',
+                    color: 'text.secondary',
+                    '&.Mui-selected': {
+                      color: 'primary.main',
+                      fontWeight: 600
+                    },
+                    '& .MuiTouchRipple-root': {
+                      borderRadius: 1
+                    }
+                  },
+                  '& .MuiTabs-indicator': {
+                    height: 3,
+                    borderRadius: '3px 3px 0 0'
                   }
                 }}
               >
                 {INSIGHT_TABS.map((tab) => (
-                  <Tab key={tab.id} label={tab.label} value={tab.id} disableRipple />
+                  <Tab
+                    key={tab.id}
+                    label={isMobile ? tab.shortLabel : tab.label}
+                    value={tab.id}
+                  />
                 ))}
               </Tabs>
             </Box>
 
             {insightActiveTab === 'performance' && (
-              <Stack
-                direction={{ xs: 'column', md: 'row' }}
-                spacing={{ xs: 0.5, sm: 1 }}
-                alignItems={{ xs: 'flex-start', md: 'center' }}
-                sx={{ mt: { xs: 0.5, sm: 1 } }}
+              <Box
+                sx={{
+                  mt: { xs: 1.5, sm: 2 },
+                  mb: { xs: 1, sm: 1.5 },
+                  p: { xs: 1.5, sm: 2 },
+                  bgcolor: 'background.default',
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: 'divider'
+                }}
               >
-                <FormControl
-                  size="small"
-                  sx={{
-                    minWidth: { xs: '100%', sm: 200 },
-                    '& .MuiInputLabel-root': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' },
-                    '& .MuiSelect-select': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' }
-                  }}
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  spacing={{ xs: 1.5, sm: 2 }}
+                  alignItems={{ xs: 'stretch', sm: 'flex-end' }}
                 >
-                  <InputLabel id="performance-range-label">Range</InputLabel>
-                  <Select
-                    labelId="performance-range-label"
-                    value={performanceRange}
-                    label="Range"
-                    onChange={(event) => setPerformanceRange(event.target.value)}
+                  <FormControl
+                    size="small"
+                    sx={{
+                      flex: { xs: 1, sm: '0 0 auto' },
+                      minWidth: { xs: '100%', sm: 200 }
+                    }}
                   >
-                    <MenuItem value={PERFORMANCE_PRESETS.LAST_MONTH}>Last Month</MenuItem>
-                    <MenuItem value={PERFORMANCE_PRESETS.LAST_3_MONTHS}>Last 3 Months</MenuItem>
-                    <MenuItem value={PERFORMANCE_PRESETS.LAST_6_MONTHS}>Last 6 Months</MenuItem>
-                    <MenuItem value={PERFORMANCE_PRESETS.LAST_YEAR}>Last Year</MenuItem>
-                    <MenuItem value={PERFORMANCE_PRESETS.YEAR_TO_DATE}>Year to Date</MenuItem>
-                    <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_MONTH}>Specific Month</MenuItem>
-                    <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_YEAR}>Specific Year</MenuItem>
-                  </Select>
-                </FormControl>
-                {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_MONTH && (
-                  <TextField
-                    label="Month"
-                    type="month"
-                    size="small"
-                    value={performanceMonth}
-                    onChange={(event) => setPerformanceMonth(event.target.value)}
-                    InputLabelProps={{ shrink: true }}
-                    sx={{
-                      minWidth: { xs: '100%', sm: 'auto' },
-                      '& .MuiInputLabel-root': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' },
-                      '& .MuiInputBase-input': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' }
-                    }}
-                  />
-                )}
-                {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_YEAR && (
-                  <TextField
-                    label="Year"
-                    type="number"
-                    size="small"
-                    value={performanceYear}
-                    onChange={(event) => setPerformanceYear(event.target.value)}
-                    InputProps={{ inputProps: { min: 1900, max: 9999 } }}
-                    sx={{
-                      minWidth: { xs: '100%', sm: 'auto' },
-                      '& .MuiInputLabel-root': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' },
-                      '& .MuiInputBase-input': { fontSize: 'clamp(0.75rem, 2vw, 1rem)' }
-                    }}
-                  />
-                )}
-              </Stack>
+                    <InputLabel id="performance-range-label">Time Range</InputLabel>
+                    <Select
+                      labelId="performance-range-label"
+                      value={performanceRange}
+                      label="Time Range"
+                      onChange={(event) => setPerformanceRange(event.target.value)}
+                    >
+                      <MenuItem value={PERFORMANCE_PRESETS.LAST_MONTH}>Last Month</MenuItem>
+                      <MenuItem value={PERFORMANCE_PRESETS.LAST_3_MONTHS}>Last 3 Months</MenuItem>
+                      <MenuItem value={PERFORMANCE_PRESETS.LAST_6_MONTHS}>Last 6 Months</MenuItem>
+                      <MenuItem value={PERFORMANCE_PRESETS.LAST_YEAR}>Last Year</MenuItem>
+                      <MenuItem value={PERFORMANCE_PRESETS.YEAR_TO_DATE}>Year to Date</MenuItem>
+                      <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_MONTH}>Specific Month</MenuItem>
+                      <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_YEAR}>Specific Year</MenuItem>
+                    </Select>
+                  </FormControl>
+                  {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_MONTH && (
+                    <TextField
+                      label="Select Month"
+                      type="month"
+                      size="small"
+                      value={performanceMonth}
+                      onChange={(event) => setPerformanceMonth(event.target.value)}
+                      InputLabelProps={{ shrink: true }}
+                      sx={{
+                        flex: { xs: 1, sm: '0 0 auto' },
+                        minWidth: { xs: '100%', sm: 180 }
+                      }}
+                    />
+                  )}
+                  {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_YEAR && (
+                    <TextField
+                      label="Select Year"
+                      type="number"
+                      size="small"
+                      value={performanceYear}
+                      onChange={(event) => setPerformanceYear(event.target.value)}
+                      InputProps={{ inputProps: { min: 1900, max: 9999 } }}
+                      sx={{
+                        flex: { xs: 1, sm: '0 0 auto' },
+                        minWidth: { xs: '100%', sm: 150 }
+                      }}
+                    />
+                  )}
+                </Stack>
+              </Box>
             )}
 
-            <Box sx={{ flexGrow: 1, minHeight: chartHeight, mt: { xs: 0.5, sm: 1 } }}>{insightBody}</Box>
+            <Box sx={{ flexGrow: 1, minHeight: chartHeight, mt: { xs: 1.5, sm: 2 } }}>{insightBody}</Box>
 
             <Typography
               variant="caption"
               color="textSecondary"
               sx={{
-                mt: { xs: 0.5, sm: 1 },
-                fontSize: 'clamp(0.5rem, 1.5vw, 0.75rem)'
+                mt: { xs: 1.5, sm: 2 },
+                fontSize: { xs: '0.6875rem', sm: '0.75rem' },
+                fontStyle: 'italic',
+                display: 'block',
+                p: { xs: 1, sm: 1.5 },
+                bgcolor: 'action.hover',
+                borderRadius: 1,
+                borderLeft: 3,
+                borderColor: 'primary.main'
               }}
             >
               {footerText}
             </Typography>
+
+            {/* Fullscreen Dialog */}
+            <Dialog
+              fullScreen
+              open={isFullscreen}
+              onClose={() => setIsFullscreen(false)}
+              TransitionProps={{
+                onEntered: () => {
+                  // Prevent interaction timeout when in fullscreen
+                  setIsInsightInteracting(true);
+                },
+                onExited: () => {
+                  setIsInsightInteracting(false);
+                }
+              }}
+            >
+              <DialogTitle
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  bgcolor: 'background.paper',
+                  borderBottom: 1,
+                  borderColor: 'divider',
+                  p: { xs: 2, sm: 3 }
+                }}
+              >
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 600, fontSize: { xs: '1.125rem', sm: '1.25rem' } }}>
+                    Portfolio Insights - {INSIGHT_TABS.find(tab => tab.id === insightActiveTab)?.label}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5, fontSize: { xs: '0.8125rem', sm: '0.875rem' } }}>
+                    {insightActiveTab === 'performance' ? `As of ${asOfLabel}` : 'Auto rotating highlights'}
+                  </Typography>
+                </Box>
+                <IconButton
+                  edge="end"
+                  color="inherit"
+                  onClick={() => setIsFullscreen(false)}
+                  aria-label="close fullscreen"
+                  sx={{
+                    color: 'text.secondary',
+                    '&:hover': {
+                      bgcolor: 'action.hover'
+                    }
+                  }}
+                >
+                  <Close />
+                </IconButton>
+              </DialogTitle>
+
+              <DialogContent
+                sx={{
+                  p: { xs: 2, sm: 3, md: 4 },
+                  bgcolor: 'background.default',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: { xs: 2, sm: 3 }
+                }}
+              >
+                {/* Tabs in fullscreen */}
+                <Box>
+                  <Tabs
+                    value={insightActiveTab}
+                    onChange={handleInsightTabChange}
+                    variant={isMobile ? "fullWidth" : "standard"}
+                    textColor="primary"
+                    indicatorColor="primary"
+                    sx={{
+                      borderBottom: 1,
+                      borderColor: 'divider',
+                      '& .MuiTab-root': {
+                        fontSize: { xs: '0.875rem', sm: '1rem' },
+                        minHeight: 48,
+                        px: { xs: 2, sm: 3 },
+                        fontWeight: 500,
+                        textTransform: 'none',
+                        '&.Mui-selected': {
+                          fontWeight: 600
+                        }
+                      },
+                      '& .MuiTabs-indicator': {
+                        height: 3
+                      }
+                    }}
+                  >
+                    {INSIGHT_TABS.map((tab) => (
+                      <Tab
+                        key={tab.id}
+                        label={tab.label}
+                        value={tab.id}
+                      />
+                    ))}
+                  </Tabs>
+                </Box>
+
+                {/* Performance controls in fullscreen */}
+                {insightActiveTab === 'performance' && (
+                  <Box
+                    sx={{
+                      p: { xs: 2, sm: 3 },
+                      bgcolor: 'background.paper',
+                      borderRadius: 2,
+                      border: 1,
+                      borderColor: 'divider'
+                    }}
+                  >
+                    <Stack
+                      direction={{ xs: 'column', sm: 'row' }}
+                      spacing={{ xs: 2, sm: 3 }}
+                      alignItems={{ xs: 'stretch', sm: 'flex-end' }}
+                    >
+                      <FormControl
+                        size="medium"
+                        sx={{
+                          flex: { xs: 1, sm: '0 0 auto' },
+                          minWidth: { xs: '100%', sm: 200 }
+                        }}
+                      >
+                        <InputLabel id="fullscreen-performance-range-label">Time Range</InputLabel>
+                        <Select
+                          labelId="fullscreen-performance-range-label"
+                          value={performanceRange}
+                          label="Time Range"
+                          onChange={(event) => setPerformanceRange(event.target.value)}
+                        >
+                          <MenuItem value={PERFORMANCE_PRESETS.LAST_MONTH}>Last Month</MenuItem>
+                          <MenuItem value={PERFORMANCE_PRESETS.LAST_3_MONTHS}>Last 3 Months</MenuItem>
+                          <MenuItem value={PERFORMANCE_PRESETS.LAST_6_MONTHS}>Last 6 Months</MenuItem>
+                          <MenuItem value={PERFORMANCE_PRESETS.LAST_YEAR}>Last Year</MenuItem>
+                          <MenuItem value={PERFORMANCE_PRESETS.YEAR_TO_DATE}>Year to Date</MenuItem>
+                          <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_MONTH}>Specific Month</MenuItem>
+                          <MenuItem value={PERFORMANCE_PRESETS.SPECIFIC_YEAR}>Specific Year</MenuItem>
+                        </Select>
+                      </FormControl>
+                      {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_MONTH && (
+                        <TextField
+                          label="Select Month"
+                          type="month"
+                          size="medium"
+                          value={performanceMonth}
+                          onChange={(event) => setPerformanceMonth(event.target.value)}
+                          InputLabelProps={{ shrink: true }}
+                          sx={{
+                            flex: { xs: 1, sm: '0 0 auto' },
+                            minWidth: { xs: '100%', sm: 180 }
+                          }}
+                        />
+                      )}
+                      {performanceRange === PERFORMANCE_PRESETS.SPECIFIC_YEAR && (
+                        <TextField
+                          label="Select Year"
+                          type="number"
+                          size="medium"
+                          value={performanceYear}
+                          onChange={(event) => setPerformanceYear(event.target.value)}
+                          InputProps={{ inputProps: { min: 1900, max: 9999 } }}
+                          sx={{
+                            flex: { xs: 1, sm: '0 0 auto' },
+                            minWidth: { xs: '100%', sm: 150 }
+                          }}
+                        />
+                      )}
+                    </Stack>
+                  </Box>
+                )}
+
+                {/* Chart content in fullscreen */}
+                <Box
+                  sx={{
+                    flexGrow: 1,
+                    minHeight: { xs: 400, sm: 500, md: 600 },
+                    bgcolor: 'background.paper',
+                    borderRadius: 2,
+                    p: { xs: 2, sm: 3 },
+                    border: 1,
+                    borderColor: 'divider'
+                  }}
+                >
+                  {insightBody}
+                </Box>
+
+                {/* Footer info in fullscreen */}
+                <Typography
+                  variant="body2"
+                  color="textSecondary"
+                  sx={{
+                    fontStyle: 'italic',
+                    p: { xs: 1.5, sm: 2 },
+                    bgcolor: 'info.lighter',
+                    borderRadius: 1,
+                    borderLeft: 3,
+                    borderColor: 'primary.main'
+                  }}
+                >
+                  {footerText}
+                </Typography>
+              </DialogContent>
+            </Dialog>
           </Paper>
         );
       }

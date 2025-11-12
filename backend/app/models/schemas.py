@@ -203,10 +203,18 @@ class TransactionBase(BaseModel):
     fees: float = 0.0
     total: float
     description: Optional[str] = None
+    source: str = "manual"  # Transaction source: manual, plaid, import
     # Plaid Personal Finance Category (PFC) fields
     pfc_primary: Optional[str] = None
     pfc_detailed: Optional[str] = None
     pfc_confidence: Optional[str] = None
+    # Balance validation fields
+    actual_balance: Optional[float] = None  # Balance from source (Plaid, statement, etc.)
+    expected_balance: Optional[float] = None  # Calculated balance
+    has_balance_inconsistency: bool = False  # Flag for inconsistency
+    balance_discrepancy: Optional[float] = None  # Difference between expected and actual
+    # Transaction ordering field
+    import_sequence: Optional[int] = None  # Preserves order from import source
 
 class TransactionCreate(TransactionBase):
     account_id: str
@@ -214,6 +222,7 @@ class TransactionCreate(TransactionBase):
 class Transaction(TransactionBase):
     id: str
     account_id: str
+    running_balance: Optional[float] = None  # Computed field, not stored in DB
 
     class Config:
         from_attributes = True

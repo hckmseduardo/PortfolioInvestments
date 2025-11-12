@@ -41,19 +41,19 @@ case $choice in
         docker-compose down
         echo ""
         echo "Building and starting Docker containers fresh..."
-        docker-compose up --build -d
+        env -u PLAID_CLIENT_ID -u PLAID_SECRET -u PLAID_ENVIRONMENT docker-compose up --build -d
         echo ""
         echo "All containers restarted successfully!"
         ;;
     2)
         echo ""
         echo "Building and starting Docker containers..."
-        docker-compose up --build -d
+        env -u PLAID_CLIENT_ID -u PLAID_SECRET -u PLAID_ENVIRONMENT docker-compose up --build -d
         ;;
     3)
         echo ""
         echo "Building and starting Docker containers with console output..."
-        docker-compose up --build
+        env -u PLAID_CLIENT_ID -u PLAID_SECRET -u PLAID_ENVIRONMENT docker-compose up --build
         ;;
     4)
         echo ""

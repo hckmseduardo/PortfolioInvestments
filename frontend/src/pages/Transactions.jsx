@@ -22,8 +22,17 @@ import {
   Grid,
   Button,
   Stack,
-  TableSortLabel
+  TableSortLabel,
+  Checkbox,
+  FormControlLabel,
+  IconButton,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
+import { Warning as WarningIcon } from '@mui/icons-material';
 import { transactionsAPI, accountsAPI, importAPI } from '../services/api';
 import { format, subDays, startOfMonth, startOfYear, subMonths, subYears } from 'date-fns';
 import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
@@ -59,8 +68,11 @@ const TRANSACTION_FILTER_DEFAULTS = {
   feesMax: '',
   totalMin: '',
   totalMax: '',
+  balanceMin: '',
+  balanceMax: '',
   description: '',
-  source: ''
+  source: '',
+  showOnlyInconsistent: false
 };
 
 const Transactions = () => {
@@ -76,6 +88,7 @@ const Transactions = () => {
   const [error, setError] = useState('');
   const [sortConfig, setSortConfig] = useState({ field: 'date', direction: 'desc' });
   const [filters, setFilters] = useState({ ...TRANSACTION_FILTER_DEFAULTS });
+  const [balanceFixDialog, setBalanceFixDialog] = useState({ open: false, transaction: null, correctedBalance: '' });
 
   useEffect(() => {
     fetchAccounts();
@@ -182,7 +195,8 @@ const Transactions = () => {
       const response = await transactionsAPI.getAll(
         selectedAccount || null,
         start,
-        end
+        end,
+        true  // includeBalance
       );
       setTransactions(response.data);
     } catch (err) {
@@ -203,6 +217,32 @@ const Transactions = () => {
       setBalance(response.data);
     } catch (err) {
       console.error('Error fetching balance:', err);
+    }
+  };
+
+  const handleFixBalanceClick = (transaction) => {
+    setBalanceFixDialog({
+      open: true,
+      transaction,
+      correctedBalance: transaction.expected_balance || ''
+    });
+  };
+
+  const handleFixBalanceSubmit = async () => {
+    try {
+      const { transaction, correctedBalance } = balanceFixDialog;
+      await transactionsAPI.fixBalance(transaction.id, {
+        corrected_balance: parseFloat(correctedBalance)
+      });
+
+      // Close dialog
+      setBalanceFixDialog({ open: false, transaction: null, correctedBalance: '' });
+
+      // Refresh transactions
+      await fetchTransactions();
+    } catch (err) {
+      console.error('Error fixing balance:', err);
+      alert('Failed to fix balance: ' + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -287,6 +327,8 @@ const Transactions = () => {
         return Number(transaction.fees ?? Number.NEGATIVE_INFINITY);
       case 'total':
         return Number(transaction.total ?? Number.NEGATIVE_INFINITY);
+      case 'running_balance':
+        return Number(transaction.running_balance ?? Number.NEGATIVE_INFINITY);
       case 'description':
         return (transaction.description || '').toLowerCase();
       case 'source':
@@ -356,6 +398,10 @@ const Transactions = () => {
         return false;
       }
 
+      if (!passesRangeFilter(tx.running_balance, filters.balanceMin, filters.balanceMax)) {
+        return false;
+      }
+
       if (normalizedTextFilters.description) {
         const description = (tx.description || '').toLowerCase();
         if (!description.includes(normalizedTextFilters.description)) {
@@ -368,6 +414,10 @@ const Transactions = () => {
         if (source !== normalizedTextFilters.source) {
           return false;
         }
+      }
+
+      if (filters.showOnlyInconsistent && !tx.has_balance_inconsistency) {
+        return false;
       }
 
       return true;
@@ -383,6 +433,22 @@ const Transactions = () => {
       if (valueA > valueB) {
         return sortConfig.direction === 'asc' ? 1 : -1;
       }
+
+      // Tie-breaker: when primary sort values are equal, use secondary sorting
+      // For date sorting, use import_sequence to maintain chronological order within the same day
+      if (sortConfig.field === 'date') {
+        const seqA = a.import_sequence ?? Number.MAX_SAFE_INTEGER;
+        const seqB = b.import_sequence ?? Number.MAX_SAFE_INTEGER;
+
+        if (seqA !== seqB) {
+          // When sorting by date DESC (newest first), also sort import_sequence DESC (latest first)
+          // When sorting by date ASC (oldest first), also sort import_sequence ASC (earliest first)
+          return sortConfig.direction === 'asc'
+            ? (seqA - seqB)  // ASC: earliest import_sequence first
+            : (seqB - seqA); // DESC: latest import_sequence first
+        }
+      }
+
       return 0;
     });
 
@@ -396,6 +462,7 @@ const Transactions = () => {
     { field: 'type', header: 'Type' },
     { field: 'description', header: 'Description' },
     { field: 'total', header: 'Total', type: 'currency' },
+    { field: 'running_balance', header: 'Balance', type: 'currency' },
     { field: 'ticker', header: 'Ticker' },
     { field: 'quantity', header: 'Quantity', type: 'number' },
     { field: 'price', header: 'Price', type: 'currency' },
@@ -589,6 +656,15 @@ const Transactions = () => {
                     Total
                   </TableSortLabel>
                 </TableCell>
+                <TableCell align="right" sortDirection={sortConfig.field === 'running_balance' ? sortConfig.direction : false}>
+                  <TableSortLabel
+                    active={sortConfig.field === 'running_balance'}
+                    direction={sortConfig.field === 'running_balance' ? sortConfig.direction : 'asc'}
+                    onClick={() => handleSort('running_balance')}
+                  >
+                    Balance
+                  </TableSortLabel>
+                </TableCell>
                 <TableCell sortDirection={sortConfig.field === 'ticker' ? sortConfig.direction : false}>
                   <TableSortLabel
                     active={sortConfig.field === 'ticker'}
@@ -701,6 +777,43 @@ const Transactions = () => {
                     />
                   </Stack>
                 </TableCell>
+                <TableCell align="right">
+                  <Stack direction="column" spacing={0.5} alignItems="flex-end">
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Min"
+                        value={filters.balanceMin}
+                        onChange={(e) => handleFilterChange('balanceMin', e.target.value)}
+                        sx={{ width: 90 }}
+                      />
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Max"
+                        value={filters.balanceMax}
+                        onChange={(e) => handleFilterChange('balanceMax', e.target.value)}
+                        sx={{ width: 90 }}
+                      />
+                    </Stack>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={filters.showOnlyInconsistent}
+                          onChange={(e) => handleFilterChange('showOnlyInconsistent', e.target.checked)}
+                        />
+                      }
+                      label={
+                        <Typography variant="caption">
+                          Inconsistent only
+                        </Typography>
+                      }
+                      sx={{ mr: 0 }}
+                    />
+                  </Stack>
+                </TableCell>
                 <TableCell>
                   <TextField
                     size="small"
@@ -794,19 +907,19 @@ const Transactions = () => {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center">
+                  <TableCell colSpan={11} align="center">
                     <CircularProgress />
                   </TableCell>
                 </TableRow>
               ) : transactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center">
+                  <TableCell colSpan={11} align="center">
                     No transactions found
                   </TableCell>
                 </TableRow>
               ) : processedTransactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} align="center">
+                  <TableCell colSpan={11} align="center">
                     No transactions match the selected filters
                   </TableCell>
                 </TableRow>
@@ -838,13 +951,70 @@ const Transactions = () => {
                         variant="body2"
                         sx={{
                           fontWeight: 'bold',
-                          color: ['deposit', 'dividend', 'sell', 'bonus'].includes(transaction.type)
+                          color: ['DEPOSIT', 'DIVIDEND', 'SELL', 'BONUS', 'INTEREST'].includes(transaction.type)
                             ? 'success.main'
                             : 'error.main'
                         }}
                       >
                         {formatCurrency(transaction.total)}
                       </Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
+                        {transaction.running_balance !== null && transaction.running_balance !== undefined ? (
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontWeight: 'medium',
+                              color: transaction.running_balance > 0
+                                ? 'success.main'
+                                : transaction.running_balance < 0
+                                  ? 'error.main'
+                                  : 'text.secondary'
+                            }}
+                          >
+                            {formatCurrency(transaction.running_balance)}
+                          </Typography>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">-</Typography>
+                        )}
+                        {transaction.has_balance_inconsistency && (
+                          <Tooltip
+                            title={
+                              <Box>
+                                <Typography variant="caption" display="block">
+                                  <strong>Balance Inconsistency Detected</strong>
+                                </Typography>
+                                <Typography variant="caption" display="block">
+                                  Expected: {formatCurrency(transaction.expected_balance || 0)}
+                                </Typography>
+                                {transaction.actual_balance !== null && transaction.actual_balance !== undefined && (
+                                  <Typography variant="caption" display="block">
+                                    Actual: {formatCurrency(transaction.actual_balance)}
+                                  </Typography>
+                                )}
+                                {transaction.balance_discrepancy !== null && transaction.balance_discrepancy !== undefined && (
+                                  <Typography variant="caption" display="block">
+                                    Discrepancy: {formatCurrency(transaction.balance_discrepancy)}
+                                  </Typography>
+                                )}
+                                <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                                  Click to fix this balance
+                                </Typography>
+                              </Box>
+                            }
+                          >
+                            <IconButton
+                              size="small"
+                              color="warning"
+                              onClick={() => handleFixBalanceClick(transaction)}
+                              sx={{ p: 0.5 }}
+                            >
+                              <WarningIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Stack>
                     </TableCell>
                     <TableCell>{transaction.ticker || '-'}</TableCell>
                     <TableCell align="right">
@@ -874,6 +1044,60 @@ const Transactions = () => {
           </Table>
         </TableContainer>
       </Paper>
+
+      {/* Balance Correction Dialog */}
+      <Dialog
+        open={balanceFixDialog.open}
+        onClose={() => setBalanceFixDialog({ open: false, transaction: null, correctedBalance: '' })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Fix Balance Inconsistency</DialogTitle>
+        <DialogContent>
+          {balanceFixDialog.transaction && (
+            <Box sx={{ pt: 1 }}>
+              <Typography variant="body2" gutterBottom>
+                <strong>Transaction:</strong> {balanceFixDialog.transaction.description || balanceFixDialog.transaction.type}
+              </Typography>
+              <Typography variant="body2" gutterBottom>
+                <strong>Date:</strong> {format(new Date(balanceFixDialog.transaction.date), 'MMM dd, yyyy')}
+              </Typography>
+              <Typography variant="body2" gutterBottom>
+                <strong>Expected Balance:</strong> {formatCurrency(balanceFixDialog.transaction.expected_balance || 0)}
+              </Typography>
+              {balanceFixDialog.transaction.actual_balance !== null && balanceFixDialog.transaction.actual_balance !== undefined && (
+                <Typography variant="body2" gutterBottom>
+                  <strong>Current Actual Balance:</strong> {formatCurrency(balanceFixDialog.transaction.actual_balance)}
+                </Typography>
+              )}
+              {balanceFixDialog.transaction.balance_discrepancy !== null && balanceFixDialog.transaction.balance_discrepancy !== undefined && (
+                <Typography variant="body2" gutterBottom color="error">
+                  <strong>Discrepancy:</strong> {formatCurrency(balanceFixDialog.transaction.balance_discrepancy)}
+                </Typography>
+              )}
+              <TextField
+                autoFocus
+                margin="dense"
+                label="Corrected Balance After This Transaction"
+                type="number"
+                fullWidth
+                value={balanceFixDialog.correctedBalance}
+                onChange={(e) => setBalanceFixDialog(prev => ({ ...prev, correctedBalance: e.target.value }))}
+                sx={{ mt: 2 }}
+                helperText="Enter the correct account balance after this transaction"
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBalanceFixDialog({ open: false, transaction: null, correctedBalance: '' })}>
+            Cancel
+          </Button>
+          <Button onClick={handleFixBalanceSubmit} variant="contained" color="primary">
+            Fix Balance
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };

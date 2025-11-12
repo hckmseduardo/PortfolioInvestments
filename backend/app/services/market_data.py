@@ -101,6 +101,37 @@ class MarketDataService:
     def get_current_price(self, ticker: str, use_cache: bool = True) -> Optional[float]:
         return self.get_current_price_quote(ticker, use_cache=use_cache).price
 
+    def _map_ticker(self, ticker: str, data_source: Optional[str] = None) -> str:
+        """
+        Map ticker to the correct symbol for the data source.
+
+        Args:
+            ticker: Original ticker symbol
+            data_source: Target data source (yfinance, alpha_vantage, etc.)
+
+        Returns:
+            Mapped ticker symbol
+        """
+        try:
+            # Lazy import to avoid circular dependency
+            from app.services.ticker_mapping import ticker_mapping_service
+
+            mapped_ticker = ticker_mapping_service.get_mapped_ticker(
+                original_ticker=ticker,
+                data_source=data_source,
+                institution=None,
+                session=None
+            )
+
+            if mapped_ticker != ticker:
+                logger.debug(f"Mapped ticker {ticker} -> {mapped_ticker} for {data_source}")
+
+            return mapped_ticker
+
+        except Exception as e:
+            logger.warning(f"Error mapping ticker {ticker}: {e}")
+            return ticker
+
     def _fetch_current_price_from_market(self, ticker: str) -> Tuple[Optional[float], Optional[str]]:
         """Fetch current price from market data sources in configured order."""
         tradingview_fallback: Optional[Tuple[float, str]] = None
@@ -109,7 +140,11 @@ class MarketDataService:
             fetcher = self._current_fetchers.get(source)
             if not fetcher:
                 continue
-            price = fetcher(ticker)
+
+            # Map ticker for this specific source
+            mapped_ticker = self._map_ticker(ticker, source)
+
+            price = fetcher(mapped_ticker)
             if price is None:
                 continue
             if source == "tradingview" and price < 1:
@@ -252,7 +287,11 @@ class MarketDataService:
             fetcher = self._historical_fetchers.get(source)
             if not fetcher:
                 continue
-            price = fetcher(ticker, target_date)
+
+            # Map ticker for this specific source
+            mapped_ticker = self._map_ticker(ticker, source)
+
+            price = fetcher(mapped_ticker, target_date)
             if price is not None:
                 return price, source
         return None, None

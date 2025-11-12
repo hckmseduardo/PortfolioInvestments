@@ -106,7 +106,7 @@ class PlaidTransactionMapper:
 
         # For deposits (credits), amount should be positive
         # For withdrawals (debits), amount should be negative in total
-        if txn_type in ['withdrawal', 'fee', 'transfer'] and is_debit:
+        if txn_type in ['WITHDRAWAL', 'FEE', 'TRANSFER'] and is_debit:
             total = -amount
         else:
             total = amount

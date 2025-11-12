@@ -717,11 +717,14 @@ async def refresh_market_prices(
     session: Session = Depends(get_session)
 ):
     """
-    Force refresh all market prices from data sources, bypassing cache.
-    Updates position market values and refreshes the price cache.
+    Queue a background job to refresh all market prices from data sources.
+    Returns immediately with a job ID that can be used to check progress.
     """
+    from app.services.job_queue import enqueue_price_fetch_job
+
     db = get_db_service(session)
 
+    # Get all unique tickers for this user
     user_accounts = db.find("accounts", {"user_id": current_user.id})
     account_ids = [acc["id"] for acc in user_accounts]
 
@@ -731,36 +734,20 @@ async def refresh_market_prices(
 
     tickers = list(set(pos["ticker"] for pos in all_positions if pos.get("ticker") and pos.get("ticker") != "CASH"))
 
-    # Fetch fresh prices from market (bypassing cache) and update cache
-    prices = {}
-    for ticker in tickers:
-        try:
-            # use_cache=False forces fresh fetch from market
-            price = market_service.get_current_price_quote(ticker, use_cache=False).price
-            if price is not None:
-                prices[ticker] = price
-        except Exception as e:
-            logger.warning(f"Failed to refresh price for {ticker}: {e}")
+    if not tickers:
+        return {
+            "message": "No tickers to refresh",
+            "ticker_count": 0
+        }
 
-    # Update position market values
-    updated_count = 0
-    for position in all_positions:
-        ticker = position.get("ticker")
-        if ticker in prices:
-            new_market_value = position["quantity"] * prices[ticker]
-            db.update(
-                "positions",
-                {"id": position["id"]},
-                {"market_value": new_market_value, "last_updated": datetime.utcnow().isoformat()}
-            )
-            updated_count += 1
-
-    session.commit()
+    # Queue the price fetch job (will fetch with use_cache=False)
+    job = enqueue_price_fetch_job(tickers, as_of_date=None)
 
     return {
-        "message": f"Refreshed {len(prices)} prices and updated {updated_count} positions",
-        "prices": prices,
-        "tickers_refreshed": list(prices.keys())
+        "message": f"Price refresh job queued for {len(tickers)} tickers",
+        "job_id": job.id if job else None,
+        "ticker_count": len(tickers),
+        "tickers": tickers
     }
 
 @router.delete("/{position_id}")
