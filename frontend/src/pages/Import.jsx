@@ -93,7 +93,7 @@ const Import = () => {
   const jobNotifications = useRef({});
   const previousStatusesRef = useRef({});
   const hasLoadedOnceRef = useRef(false);
-  const { showSuccess, showError, showJobProgress, updateJobStatus, isJobRunning } = useNotification();
+  const { showSuccess, showError, showJobProgress, updateJobStatus, isJobRunning, clearJob } = useNotification();
 
   const clearProcessingFlag = useCallback((statementId) => {
     setProcessingStatements((prev) => {
@@ -222,9 +222,25 @@ const Import = () => {
         try {
           const response = await importAPI.getJobStatus(jobId);
           const status = response.data.status;
+          const meta = response.data.meta || {};
+
+          console.log(`[JOB POLL] JobID: ${jobId}, JobType: ${jobType}, Status: ${status}`, {
+            stage: meta.stage,
+            progress: meta.progress,
+            hasNotification: jobNotifications.current[jobId] !== undefined
+          });
 
           if (status === 'finished') {
+            console.log(`[JOB COMPLETE] Job ${jobId} (${jobType}) finished. Clearing...`);
+
+            // Get notification ID BEFORE clearing the poller
+            const notifId = jobNotifications.current[jobId];
+            console.log(`[JOB COMPLETE] Notification ID: ${notifId}, updating status...`);
+
+            // Clear the poller (this deletes jobNotifications.current[jobId])
             clearJobPoller(jobId);
+            console.log(`[JOB COMPLETE] Poller cleared for job ${jobId}`);
+
             setProcessingStatements((prev) => {
               const next = new Set(prev);
               statementIds.forEach((id) => next.delete(id));
@@ -232,16 +248,34 @@ const Import = () => {
             });
             setReprocessingAll(false);
 
-            // Update notification to success
-            const notifId = jobNotifications.current[jobId];
+            // Update notification to success using the saved notifId
             if (notifId !== undefined) {
               updateJobStatus(notifId, `${jobDescription} completed successfully`, 'success', jobType);
+              console.log(`[JOB COMPLETE] updateJobStatus called with jobType: ${jobType}`);
+            } else {
+              console.warn(`[JOB COMPLETE] No notification ID found for job ${jobId}`);
+            }
+
+            // Explicitly clear the job from activeJobs as a backup
+            if (jobType) {
+              console.log(`[JOB COMPLETE] Calling clearJob for jobType: ${jobType}`);
+              clearJob(jobType);
+            } else {
+              console.warn(`[JOB COMPLETE] No jobType provided, cannot clear from activeJobs`);
             }
 
             onComplete?.(response.data.result);
             await loadStatements();
+            console.log(`[JOB COMPLETE] Job ${jobId} cleanup complete`);
           } else if (status === 'failed') {
+            console.log(`[JOB FAILED] Job ${jobId} (${jobType}) failed. Clearing...`);
+
+            // Get notification ID BEFORE clearing the poller
+            const notifId = jobNotifications.current[jobId];
+
+            // Clear the poller (this deletes jobNotifications.current[jobId])
             clearJobPoller(jobId);
+
             setProcessingStatements((prev) => {
               const next = new Set(prev);
               statementIds.forEach((id) => next.delete(id));
@@ -249,24 +283,30 @@ const Import = () => {
             });
             setReprocessingAll(false);
 
-            // Update notification to error
-            const notifId = jobNotifications.current[jobId];
+            // Update notification to error using the saved notifId
             if (notifId !== undefined) {
               updateJobStatus(notifId, `${jobDescription} failed`, 'error', jobType);
+              console.log(`[JOB FAILED] updateJobStatus called with jobType: ${jobType}`);
+            }
+
+            // Explicitly clear the job from activeJobs as a backup
+            if (jobType) {
+              console.log(`[JOB FAILED] Calling clearJob for jobType: ${jobType}`);
+              clearJob(jobType);
             }
 
             setError('Statement job failed. Check statement status for details.');
             await loadStatements();
           }
         } catch (err) {
-          console.error('Error polling statement job:', err);
+          console.error('[JOB POLL ERROR] Error polling statement job:', err);
         }
       };
 
       poll();
       jobPollers.current[jobId] = setInterval(poll, 4000);
     },
-    [clearJobPoller, loadStatements, showJobProgress, updateJobStatus, isJobRunning, showError]
+    [clearJobPoller, loadStatements, showJobProgress, updateJobStatus, isJobRunning, showError, clearJob]
   );
 
   const accountMap = useMemo(() => {

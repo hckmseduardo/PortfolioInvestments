@@ -124,6 +124,16 @@ def _process_statement(db, session, user, statement_id: str, reprocess: bool, ne
 
 
 def _reprocess_all_statements(db, session, user, account_scope: Optional[str]):
+    """
+    Reprocess all statements for a user or specific account with progress tracking.
+    """
+    from rq import get_current_job
+
+    job = get_current_job()
+    start_time = datetime.now()
+
+    logger.info(f"=== Statement Reprocessing Started at {start_time.isoformat()} ===")
+
     # Get user's accounts first
     accounts = db.find("accounts", {"user_id": user.id})
     account_ids = [acc["id"] for acc in accounts]
@@ -135,17 +145,52 @@ def _reprocess_all_statements(db, session, user, account_scope: Optional[str]):
 
     # Get statements for user's accounts
     statements = []
+    account_map = {acc["id"]: acc.get("label", acc["id"]) for acc in accounts}
+
     for account_id in account_ids:
         statements.extend(db.find("statements", {"account_id": account_id}))
 
     if not statements:
         raise ValueError("No statements found to reprocess")
 
+    # Sort statements chronologically
+    sorted_statements = sorted(statements, key=lambda x: x.get("uploaded_at", ""))
+
+    # Build file list with status
+    file_list = []
+    for stmt in sorted_statements:
+        file_list.append({
+            "id": stmt["id"],
+            "filename": stmt.get("filename", "Unknown"),
+            "account": account_map.get(stmt.get("account_id"), "Unknown"),
+            "status": "pending"
+        })
+
+    # Initialize job meta with file list
+    if job:
+        job.meta = job.meta or {}
+        job.meta["stage"] = "clearing_data"
+        job.meta["total_files"] = len(file_list)
+        job.meta["files"] = file_list
+        job.meta["current_file"] = None
+        job.meta["progress"] = {
+            "current": 0,
+            "total": len(file_list),
+            "successful": 0,
+            "failed": 0
+        }
+        job.save_meta()
+
+    logger.info(f"Found {len(sorted_statements)} statements to reprocess")
+    for stmt in sorted_statements:
+        logger.info(f"  - {stmt.get('filename')} ({account_map.get(stmt.get('account_id'))})")
+
+    # Clear all prior data for the affected accounts
     account_ids = {stmt.get("account_id") for stmt in statements if stmt.get("account_id")}
     if account_scope:
         account_ids = {account_scope}
 
-    # Clear all prior data for the affected accounts
+    logger.info(f"Clearing existing data for {len(account_ids)} account(s)...")
     for account_id in account_ids:
         if not account_id:
             continue
@@ -153,13 +198,42 @@ def _reprocess_all_statements(db, session, user, account_scope: Optional[str]):
         db.delete_many("dividends", {"account_id": account_id})
         db.delete_many("positions", {"account_id": account_id})
     session.commit()
+    logger.info("Data cleared successfully")
 
     successful = 0
     failed = 0
+    failed_files = []
 
-    for statement in sorted(statements, key=lambda x: x.get("uploaded_at", "")):
+    # Process each statement with progress updates
+    for idx, statement in enumerate(sorted_statements, 1):
+        filename = statement.get("filename", "Unknown")
+        account_name = account_map.get(statement.get("account_id"), "Unknown")
+
+        # Update job meta with current file
+        if job:
+            job.meta["stage"] = "processing"
+            job.meta["current_file"] = {
+                "index": idx,
+                "filename": filename,
+                "account": account_name
+            }
+            job.meta["progress"] = {
+                "current": idx - 1,
+                "total": len(sorted_statements),
+                "successful": successful,
+                "failed": failed
+            }
+            # Update file status to processing
+            for f in job.meta["files"]:
+                if f["id"] == statement["id"]:
+                    f["status"] = "processing"
+                    break
+            job.save_meta()
+
+        logger.info(f"[{idx}/{len(sorted_statements)}] Processing: {filename} ({account_name})")
+
         try:
-            _process_statement(
+            result = _process_statement(
                 db=db,
                 session=session,
                 user=user,
@@ -168,12 +242,63 @@ def _reprocess_all_statements(db, session, user, account_scope: Optional[str]):
                 new_account_id=None,
             )
             successful += 1
-        except Exception:
+
+            # Update file status to completed
+            if job:
+                for f in job.meta["files"]:
+                    if f["id"] == statement["id"]:
+                        f["status"] = "completed"
+                        f["transactions_created"] = result.get("result", {}).get("transactions_created", 0)
+                        break
+                job.save_meta()
+
+            logger.info(f"[{idx}/{len(sorted_statements)}] ✓ Success: {filename}")
+
+        except Exception as e:
             failed += 1
+            failed_files.append({"filename": filename, "error": str(e)})
+
+            # Update file status to failed
+            if job:
+                for f in job.meta["files"]:
+                    if f["id"] == statement["id"]:
+                        f["status"] = "failed"
+                        f["error"] = str(e)
+                        break
+                job.save_meta()
+
+            logger.error(f"[{idx}/{len(sorted_statements)}] ✗ Failed: {filename} - {str(e)}")
+
+    # Final update
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+
+    if job:
+        job.meta["stage"] = "completed"
+        job.meta["current_file"] = None
+        job.meta["progress"] = {
+            "current": len(sorted_statements),
+            "total": len(sorted_statements),
+            "successful": successful,
+            "failed": failed
+        }
+        job.meta["duration_seconds"] = duration
+        job.save_meta()
+
+    logger.info(f"=== Statement Reprocessing Completed at {end_time.isoformat()} ===")
+    logger.info(f"Duration: {duration:.2f} seconds")
+    logger.info(f"Results: {successful} successful, {failed} failed out of {len(sorted_statements)} total")
+
+    if failed_files:
+        logger.warning("Failed files:")
+        for failed_file in failed_files:
+            logger.warning(f"  - {failed_file['filename']}: {failed_file['error']}")
 
     return {
-        "total": len(statements),
+        "total": len(sorted_statements),
         "successful": successful,
         "failed": failed,
         "account_scope": account_scope,
+        "duration_seconds": duration,
+        "failed_files": failed_files
     }

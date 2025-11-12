@@ -21,9 +21,11 @@ import {
   MenuItem,
   Chip,
   CircularProgress,
-  Divider
+  Divider,
+  TableSortLabel,
+  Tooltip
 } from '@mui/material';
-import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History } from '@mui/icons-material';
+import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History, FilterList } from '@mui/icons-material';
 import { accountsAPI, transactionsAPI, plaidAPI } from '../services/api';
 import { stickyTableHeadSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
@@ -65,6 +67,16 @@ const AccountManagement = () => {
   const syncPollRefs = useRef({});
   const syncNotificationIds = useRef({});
   const JOB_TYPE_PLAID_SYNC = 'plaid-sync';
+
+  // Sorting and filtering state
+  const [orderBy, setOrderBy] = useState('label');
+  const [order, setOrder] = useState('asc');
+  const [filterValues, setFilterValues] = useState({
+    label: '',
+    account_type: '',
+    institution: '',
+    account_number: ''
+  });
 
   useEffect(() => {
     loadAccounts();
@@ -523,6 +535,80 @@ const AccountManagement = () => {
     }).format(amount);
   };
 
+  // Sorting and filtering functions
+  const handleRequestSort = (property) => {
+    const isAsc = orderBy === property && order === 'asc';
+    setOrder(isAsc ? 'desc' : 'asc');
+    setOrderBy(property);
+  };
+
+  const handleFilterChange = (column, value) => {
+    setFilterValues(prev => ({
+      ...prev,
+      [column]: value
+    }));
+  };
+
+  const getComparator = (order, orderBy) => {
+    return order === 'desc'
+      ? (a, b) => descendingComparator(a, b, orderBy)
+      : (a, b) => -descendingComparator(a, b, orderBy);
+  };
+
+  const descendingComparator = (a, b, orderBy) => {
+    let aVal = a[orderBy];
+    let bVal = b[orderBy];
+
+    // Special handling for balance (use derived balance)
+    if (orderBy === 'balance') {
+      aVal = accountBalances[a.id] ?? a.balance ?? 0;
+      bVal = accountBalances[b.id] ?? b.balance ?? 0;
+    }
+
+    // Convert to lowercase for string comparison
+    if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+    if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+    if (bVal < aVal) return -1;
+    if (bVal > aVal) return 1;
+    return 0;
+  };
+
+  const applyFiltersAndSort = (accountsList) => {
+    // Apply filters
+    let filtered = accountsList.filter(account => {
+      return Object.keys(filterValues).every(key => {
+        const filterValue = filterValues[key].toLowerCase();
+        if (!filterValue) return true;
+
+        const accountValue = (account[key] || '').toString().toLowerCase();
+        return accountValue.includes(filterValue);
+      });
+    });
+
+    // Apply sorting
+    const comparator = getComparator(order, orderBy);
+    return filtered.sort(comparator);
+  };
+
+  const formatLastSyncTime = (lastSynced) => {
+    if (!lastSynced) return 'Never synced';
+
+    const date = new Date(lastSynced);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+  };
+
   // Export configuration
   const accountExportColumns = [
     { field: 'label', header: 'Label' },
@@ -587,14 +673,109 @@ const AccountManagement = () => {
         <TableContainer>
           <Table stickyHeader>
             <TableHead sx={stickyTableHeadSx}>
+              {/* Header row with sort labels */}
               <TableRow>
-                <TableCell>Label</TableCell>
-                <TableCell>Type</TableCell>
-                <TableCell>Institution</TableCell>
-                <TableCell>Account Number</TableCell>
-                <TableCell align="right">Balance</TableCell>
+                <TableCell sortDirection={orderBy === 'label' ? order : false}>
+                  <TableSortLabel
+                    active={orderBy === 'label'}
+                    direction={orderBy === 'label' ? order : 'asc'}
+                    onClick={() => handleRequestSort('label')}
+                  >
+                    Label
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sortDirection={orderBy === 'account_type' ? order : false}>
+                  <TableSortLabel
+                    active={orderBy === 'account_type'}
+                    direction={orderBy === 'account_type' ? order : 'asc'}
+                    onClick={() => handleRequestSort('account_type')}
+                  >
+                    Type
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sortDirection={orderBy === 'institution' ? order : false}>
+                  <TableSortLabel
+                    active={orderBy === 'institution'}
+                    direction={orderBy === 'institution' ? order : 'asc'}
+                    onClick={() => handleRequestSort('institution')}
+                  >
+                    Institution
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sortDirection={orderBy === 'account_number' ? order : false}>
+                  <TableSortLabel
+                    active={orderBy === 'account_number'}
+                    direction={orderBy === 'account_number' ? order : 'asc'}
+                    onClick={() => handleRequestSort('account_number')}
+                  >
+                    Account Number
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right" sortDirection={orderBy === 'balance' ? order : false}>
+                  <TableSortLabel
+                    active={orderBy === 'balance'}
+                    direction={orderBy === 'balance' ? order : 'asc'}
+                    onClick={() => handleRequestSort('balance')}
+                  >
+                    Balance
+                  </TableSortLabel>
+                </TableCell>
                 <TableCell align="center">Plaid</TableCell>
                 <TableCell align="center">Actions</TableCell>
+              </TableRow>
+              {/* Filter row */}
+              <TableRow>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    placeholder="Filter..."
+                    value={filterValues.label}
+                    onChange={(e) => handleFilterChange('label', e.target.value)}
+                    InputProps={{
+                      startAdornment: <FilterList fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
+                    }}
+                    fullWidth
+                  />
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    placeholder="Filter..."
+                    value={filterValues.account_type}
+                    onChange={(e) => handleFilterChange('account_type', e.target.value)}
+                    InputProps={{
+                      startAdornment: <FilterList fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
+                    }}
+                    fullWidth
+                  />
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    placeholder="Filter..."
+                    value={filterValues.institution}
+                    onChange={(e) => handleFilterChange('institution', e.target.value)}
+                    InputProps={{
+                      startAdornment: <FilterList fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
+                    }}
+                    fullWidth
+                  />
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    placeholder="Filter..."
+                    value={filterValues.account_number}
+                    onChange={(e) => handleFilterChange('account_number', e.target.value)}
+                    InputProps={{
+                      startAdornment: <FilterList fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
+                    }}
+                    fullWidth
+                  />
+                </TableCell>
+                <TableCell />
+                <TableCell />
+                <TableCell />
               </TableRow>
             </TableHead>
             <TableBody>
@@ -610,7 +791,7 @@ const AccountManagement = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                accounts.map((account) => {
+                applyFiltersAndSort(accounts).map((account) => {
                   const derivedBalance = accountBalances[account.id] ?? account.balance ?? 0;
                   return (
                     <TableRow key={account.id}>
@@ -631,26 +812,39 @@ const AccountManagement = () => {
                       <TableCell align="right">{formatCurrency(derivedBalance)}</TableCell>
                       <TableCell align="center">
                         {account.is_plaid_linked && (
-                          <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center', alignItems: 'center' }}>
-                            <IconButton
-                              size="small"
-                              color="primary"
-                              onClick={() => handleSync(account.plaid_item_id, account.plaid_institution_name)}
-                              disabled={syncingItems[account.plaid_item_id]}
-                              title="Sync Now"
-                            >
-                              {syncingItems[account.plaid_item_id] ? <CircularProgress size={16} /> : <Sync />}
-                            </IconButton>
-                            <IconButton
-                              size="small"
-                              color="primary"
-                              onClick={() => handleFullResyncClick(account.plaid_item_id, account.plaid_institution_name)}
-                              disabled={syncingItems[account.plaid_item_id]}
-                              title="Full Resync - Import All History"
-                            >
-                              <History />
-                            </IconButton>
-                          </Box>
+                          <Tooltip
+                            title={
+                              <Box>
+                                <Typography variant="caption" display="block">
+                                  Last Sync: {formatLastSyncTime(
+                                    plaidItems.find(item => item.item_id === account.plaid_item_id)?.last_synced
+                                  )}
+                                </Typography>
+                              </Box>
+                            }
+                            arrow
+                          >
+                            <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center', alignItems: 'center' }}>
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                onClick={() => handleSync(account.plaid_item_id, account.plaid_institution_name)}
+                                disabled={syncingItems[account.plaid_item_id]}
+                                title="Sync Now"
+                              >
+                                {syncingItems[account.plaid_item_id] ? <CircularProgress size={16} /> : <Sync />}
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                onClick={() => handleFullResyncClick(account.plaid_item_id, account.plaid_institution_name)}
+                                disabled={syncingItems[account.plaid_item_id]}
+                                title="Full Resync - Import All History"
+                              >
+                                <History />
+                              </IconButton>
+                            </Box>
+                          </Tooltip>
                         )}
                       </TableCell>
                       <TableCell align="center">

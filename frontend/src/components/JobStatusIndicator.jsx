@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   IconButton,
   Badge,
@@ -13,15 +13,28 @@ import {
   CircularProgress,
   Tooltip,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  LinearProgress,
+  Chip,
+  Collapse,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper
 } from '@mui/material';
-import { PlayArrow as PlayArrowIcon, Close as CloseIcon } from '@mui/icons-material';
+import { PlayArrow as PlayArrowIcon, Close as CloseIcon, CheckCircle, Error as ErrorIcon, ExpandMore, ExpandLess, HourglassEmpty } from '@mui/icons-material';
 import { useNotification } from '../context/NotificationContext';
+import { importAPI } from '../services/api';
 
 const JobStatusIndicator = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [expandedJobs, setExpandedJobs] = useState({});
+  const [jobDetails, setJobDetails] = useState({});
   const { activeJobs } = useNotification();
 
   const activeJobList = Object.entries(activeJobs).map(([jobType, jobInfo]) => ({
@@ -31,12 +44,53 @@ const JobStatusIndicator = () => {
 
   const jobCount = activeJobList.length;
 
+  // Poll for job details when dialog is open
+  useEffect(() => {
+    if (!dialogOpen || jobCount === 0) return;
+
+    const pollJobDetails = async () => {
+      const promises = activeJobList.map(async (job) => {
+        try {
+          const response = await importAPI.getJobStatus(job.jobId);
+          return { jobId: job.jobId, data: response.data };
+        } catch (error) {
+          console.error(`Failed to fetch job details for ${job.jobId}:`, error);
+          return { jobId: job.jobId, data: null };
+        }
+      });
+
+      const results = await Promise.all(promises);
+      const detailsMap = {};
+      results.forEach(({ jobId, data }) => {
+        if (data) {
+          detailsMap[jobId] = data;
+        }
+      });
+      setJobDetails(detailsMap);
+    };
+
+    // Initial poll
+    pollJobDetails();
+
+    // Poll every 2 seconds while dialog is open
+    const interval = setInterval(pollJobDetails, 2000);
+
+    return () => clearInterval(interval);
+  }, [dialogOpen, jobCount, activeJobList.map(j => j.jobId).join(',')]);
+
   const handleOpen = () => {
     setDialogOpen(true);
   };
 
   const handleClose = () => {
     setDialogOpen(false);
+  };
+
+  const toggleExpanded = (jobId) => {
+    setExpandedJobs(prev => ({
+      ...prev,
+      [jobId]: !prev[jobId]
+    }));
   };
 
   const formatJobType = (jobType) => {
@@ -77,6 +131,140 @@ const JobStatusIndicator = () => {
     return `${seconds}s`;
   };
 
+  const getFileStatusIcon = (status) => {
+    switch (status) {
+      case 'completed':
+        return <CheckCircle sx={{ color: 'success.main', fontSize: 16 }} />;
+      case 'failed':
+        return <ErrorIcon sx={{ color: 'error.main', fontSize: 16 }} />;
+      case 'processing':
+        return <CircularProgress size={16} />;
+      default:
+        return <HourglassEmpty sx={{ color: 'text.secondary', fontSize: 16 }} />;
+    }
+  };
+
+  const renderJobProgress = (job, details) => {
+    const meta = details?.meta || {};
+    const progress = meta.progress || {};
+    const currentFile = meta.current_file;
+    const files = meta.files || [];
+    const stage = meta.stage;
+
+    const isReprocessAll = job.jobType === 'reprocess-all';
+    const hasFiles = files.length > 0;
+
+    return (
+      <Box>
+        {/* Progress bar for jobs with progress */}
+        {progress.total > 0 && (
+          <Box sx={{ mb: 1 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+              <Typography variant="caption" color="text.secondary">
+                Progress: {progress.current}/{progress.total}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                ✓ {progress.successful} | ✗ {progress.failed}
+              </Typography>
+            </Box>
+            <LinearProgress
+              variant="determinate"
+              value={(progress.current / progress.total) * 100}
+              sx={{ height: 6, borderRadius: 1 }}
+            />
+          </Box>
+        )}
+
+        {/* Current file being processed */}
+        {currentFile && (
+          <Box sx={{ mb: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+            <Typography variant="caption" fontWeight="bold" display="block">
+              Currently Processing:
+            </Typography>
+            <Typography variant="caption" display="block">
+              [{currentFile.index}/{progress.total}] {currentFile.filename}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {currentFile.account}
+            </Typography>
+          </Box>
+        )}
+
+        {/* Stage indicator */}
+        {stage && stage !== 'processing' && stage !== 'completed' && (
+          <Chip
+            label={stage.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+            size="small"
+            sx={{ mb: 1 }}
+          />
+        )}
+
+        {/* File list for reprocess-all jobs */}
+        {isReprocessAll && hasFiles && (
+          <Box>
+            <Box
+              onClick={() => toggleExpanded(job.jobId)}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+                cursor: 'pointer',
+                '&:hover': { bgcolor: 'action.hover' },
+                p: 0.5,
+                borderRadius: 1
+              }}
+            >
+              <Typography variant="caption" fontWeight="bold">
+                Files ({files.length})
+              </Typography>
+              {expandedJobs[job.jobId] ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
+            </Box>
+
+            <Collapse in={expandedJobs[job.jobId]}>
+              <TableContainer component={Paper} variant="outlined" sx={{ mt: 1, maxHeight: 300 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell width={40}></TableCell>
+                      <TableCell>File</TableCell>
+                      <TableCell>Account</TableCell>
+                      <TableCell align="right">Txns</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {files.map((file) => (
+                      <TableRow key={file.id} hover>
+                        <TableCell>{getFileStatusIcon(file.status)}</TableCell>
+                        <TableCell>
+                          <Typography variant="caption" display="block">
+                            {file.filename}
+                          </Typography>
+                          {file.error && (
+                            <Typography variant="caption" color="error.main" display="block">
+                              {file.error}
+                            </Typography>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption">{file.account}</Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          {file.transactions_created !== undefined && (
+                            <Typography variant="caption">{file.transactions_created}</Typography>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Collapse>
+          </Box>
+        )}
+      </Box>
+    );
+  };
+
   // Don't show indicator if no jobs are running
   if (jobCount === 0) {
     return null;
@@ -105,7 +293,7 @@ const JobStatusIndicator = () => {
       <Dialog
         open={dialogOpen}
         onClose={handleClose}
-        maxWidth="sm"
+        maxWidth="md"
         fullWidth
         fullScreen={isMobile}
       >
@@ -163,24 +351,19 @@ const JobStatusIndicator = () => {
                     <CircularProgress size={24} />
                     <ListItemText
                       primary={formatJobType(jobType)}
-                      secondary={`Job ID: ${jobId.substring(0, 8)}...`}
+                      secondary={`Job ID: ${jobId.substring(0, 8)}... | Running for: ${formatElapsedTime(startTime)}`}
                       primaryTypographyProps={{
                         fontWeight: 500
                       }}
                     />
                   </Box>
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      width: '100%',
-                      pl: 5
-                    }}
-                  >
-                    <Typography variant="caption" color="text.secondary">
-                      Running for: {formatElapsedTime(startTime)}
-                    </Typography>
-                  </Box>
+
+                  {/* Render job-specific progress */}
+                  {jobDetails[jobId] && (
+                    <Box sx={{ width: '100%', pl: 5 }}>
+                      {renderJobProgress({ jobType, jobId }, jobDetails[jobId])}
+                    </Box>
+                  )}
                 </ListItem>
               ))}
             </List>

@@ -87,6 +87,13 @@ export const NotificationProvider = ({ children }) => {
   }, [addNotification]);
 
   const updateJobStatus = useCallback((notificationId, message, severity, jobType) => {
+    console.log(`[NOTIFICATION] updateJobStatus called:`, {
+      notificationId,
+      message,
+      severity,
+      jobType
+    });
+
     setNotifications(prev =>
       prev.map(n =>
         n.id === notificationId
@@ -97,15 +104,21 @@ export const NotificationProvider = ({ children }) => {
 
     // Remove from active jobs
     if (jobType) {
+      console.log(`[NOTIFICATION] Removing jobType '${jobType}' from activeJobs`);
       setActiveJobs(prev => {
         const next = { ...prev };
+        const existed = jobType in next;
         delete next[jobType];
+        console.log(`[NOTIFICATION] Job '${jobType}' ${existed ? 'was' : 'was NOT'} in activeJobs. Remaining jobs:`, Object.keys(next));
         return next;
       });
+    } else {
+      console.warn(`[NOTIFICATION] No jobType provided to updateJobStatus`);
     }
 
     // Auto-remove after updating status
     setTimeout(() => {
+      console.log(`[NOTIFICATION] Auto-removing notification ${notificationId} after 5s`);
       removeNotification(notificationId);
     }, 5000);
   }, [removeNotification]);
@@ -122,14 +135,19 @@ export const NotificationProvider = ({ children }) => {
 
   // Cancel/clear a running job (removes notification but doesn't stop the actual job)
   const clearJob = useCallback((jobType) => {
+    console.log(`[NOTIFICATION] clearJob called for jobType: '${jobType}'`);
     const job = activeJobs[jobType];
     if (job) {
+      console.log(`[NOTIFICATION] Found job in activeJobs, removing notification ${job.notificationId}`);
       removeNotification(job.notificationId);
       setActiveJobs(prev => {
         const next = { ...prev };
         delete next[jobType];
+        console.log(`[NOTIFICATION] Removed '${jobType}' from activeJobs. Remaining jobs:`, Object.keys(next));
         return next;
       });
+    } else {
+      console.warn(`[NOTIFICATION] Job '${jobType}' not found in activeJobs. Current jobs:`, Object.keys(activeJobs));
     }
   }, [activeJobs, removeNotification]);
 

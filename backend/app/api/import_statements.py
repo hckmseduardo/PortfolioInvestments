@@ -323,16 +323,23 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
     transaction_last_date = None
     credit_volume = 0.0
     debit_volume = 0.0
-    for transaction_data in parsed_data.get('transactions', []):
+    for idx, transaction_data in enumerate(parsed_data.get('transactions', []), 1):
         if transaction_data.get('type') is None:
             continue
 
-        # Check for duplicate transaction (same account, date, type, ticker, quantity, total)
+        # Normalize transaction type to uppercase for database enum
+        txn_type = transaction_data.get('type')
+        if isinstance(txn_type, str):
+            txn_type = txn_type.upper()
+
+        # Check for duplicate transaction from OTHER statements only
+        # (same account, date, type, total, but different statement_id)
         # This prevents importing the same transaction multiple times from overlapping statements
+        # but allows duplicate amounts on the same day within the SAME statement
         duplicate_filter = {
             "account_id": account_id,
             "date": transaction_data.get('date'),
-            "type": transaction_data.get('type'),
+            "type": txn_type,
             "total": transaction_data.get('total')
         }
         # Add optional fields to the filter if they exist
@@ -342,14 +349,26 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
             duplicate_filter["quantity"] = transaction_data.get('quantity')
 
         existing = db.find("transactions", duplicate_filter)
-        if existing:
-            # Duplicate found - skip this transaction
+        # Only skip if the existing transaction is from a DIFFERENT statement
+        if existing and statement_id:
+            is_duplicate_from_other_statement = any(
+                txn.get('statement_id') != statement_id for txn in existing
+            )
+            if is_duplicate_from_other_statement:
+                transactions_skipped += 1
+                continue
+        elif existing and not statement_id:
+            # If no statement_id provided, skip duplicates (backwards compatibility)
             transactions_skipped += 1
             continue
 
+        # Prepare transaction document with normalized type
         transaction_doc = {
             **transaction_data,
-            "account_id": account_id
+            "type": txn_type,  # Use normalized uppercase type
+            "account_id": account_id,
+            "source": "import",  # Mark as imported from statement
+            "import_sequence": idx  # Preserve order from statement file
         }
         # Link transaction to statement if statement_id is provided
         if statement_id:
@@ -399,6 +418,22 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
 
     positions_created = recalculate_positions_from_transactions(account_id, db, statement_id)
 
+    # Balance validation: Calculate expected_balance for all transactions
+    # This ensures running balances are coherent
+    from app.services.balance_validator import validate_and_update_balances
+
+    # Note: Statement imports don't provide a current balance from the source,
+    # so we just calculate expected_balance without external validation
+    # If the statement parser extracts a closing balance in the future, pass it here
+    validation_result = validate_and_update_balances(
+        db=db,
+        account_id=account_id,
+        source_current_balance=None,  # Statement imports don't provide current balance
+        source_name="statement_import"
+    )
+
+    logger.info(f"Balance validation for statement import: {validation_result}")
+
     return {
         "account_id": account_id,
         "positions_created": positions_created,
@@ -409,7 +444,8 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
         "transaction_first_date": transaction_first_date.isoformat() if transaction_first_date else None,
         "transaction_last_date": transaction_last_date.isoformat() if transaction_last_date else None,
         "credit_volume": round(credit_volume, 2),
-        "debit_volume": round(debit_volume, 2)
+        "debit_volume": round(debit_volume, 2),
+        "balance_validation": validation_result
     }
 
 @router.post("/statement")
