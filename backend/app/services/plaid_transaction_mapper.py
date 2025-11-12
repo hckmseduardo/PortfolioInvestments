@@ -111,6 +111,9 @@ class PlaidTransactionMapper:
         else:
             total = amount
 
+        # Extract Plaid Personal Finance Category (PFC) if available
+        pfc_data = self._extract_pfc(plaid_txn)
+
         return {
             "date": date,
             "type": txn_type,
@@ -122,6 +125,9 @@ class PlaidTransactionMapper:
             "description": description,
             "source": "plaid",
             "plaid_transaction_id": plaid_txn['transaction_id'],
+            "pfc_primary": pfc_data.get('primary'),
+            "pfc_detailed": pfc_data.get('detailed'),
+            "pfc_confidence": pfc_data.get('confidence_level'),
         }
 
     def map_to_expense(
@@ -151,8 +157,15 @@ class PlaidTransactionMapper:
         # Build description
         description = self._build_description(plaid_txn)
 
-        # Get category from Plaid
+        # Get category from Plaid (legacy mapping for backward compatibility)
         category = self._map_plaid_category(plaid_txn.get('category', []))
+
+        # Extract Plaid Personal Finance Category (PFC) if available
+        pfc_data = self._extract_pfc(plaid_txn)
+
+        # If we have PFC data but no legacy category, try to map PFC to a category
+        if not category and pfc_data.get('detailed'):
+            category = self._map_pfc_to_category(pfc_data['detailed'])
 
         # Amount is always positive for expenses
         amount = abs(plaid_txn['amount'])
@@ -163,6 +176,9 @@ class PlaidTransactionMapper:
             "amount": amount,
             "category": category,
             "transaction_id": transaction_id,
+            "pfc_primary": pfc_data.get('primary'),
+            "pfc_detailed": pfc_data.get('detailed'),
+            "pfc_confidence": pfc_data.get('confidence_level'),
         }
 
     def is_duplicate(
@@ -371,6 +387,153 @@ class PlaidTransactionMapper:
         similarity = intersection / union if union > 0 else 0
 
         return similarity >= threshold
+
+    def _extract_pfc(self, plaid_txn: Dict[str, Any]) -> Dict[str, Optional[str]]:
+        """
+        Extract Plaid Personal Finance Category (PFC) from transaction
+
+        Args:
+            plaid_txn: Plaid transaction object
+
+        Returns:
+            Dictionary with primary, detailed, and confidence_level keys
+        """
+        pfc = plaid_txn.get('personal_finance_category')
+
+        if not pfc:
+            return {
+                'primary': None,
+                'detailed': None,
+                'confidence_level': None
+            }
+
+        return {
+            'primary': pfc.get('primary'),
+            'detailed': pfc.get('detailed'),
+            'confidence_level': pfc.get('confidence_level')
+        }
+
+    def _map_pfc_to_category(self, pfc_detailed: str) -> str:
+        """
+        Map Plaid Personal Finance Category (detailed) to our expense categories
+
+        Args:
+            pfc_detailed: Plaid PFC detailed category (e.g., FOOD_AND_DRINK_GROCERIES)
+
+        Returns:
+            Our category name
+        """
+        # Mapping from PFC detailed categories to our categories
+        pfc_map = {
+            # Food & Drink
+            'FOOD_AND_DRINK_GROCERIES': 'Groceries',
+            'FOOD_AND_DRINK_RESTAURANT': 'Dining',
+            'FOOD_AND_DRINK_FAST_FOOD': 'Dining',
+            'FOOD_AND_DRINK_COFFEE': 'Dining',
+            'FOOD_AND_DRINK_BEER_WINE_AND_LIQUOR': 'Dining',
+            'FOOD_AND_DRINK_VENDING_MACHINES': 'Dining',
+            'FOOD_AND_DRINK_OTHER_FOOD_AND_DRINK': 'Dining',
+
+            # Transportation
+            'TRANSPORTATION_GAS': 'Transportation',
+            'TRANSPORTATION_PUBLIC_TRANSIT': 'Transportation',
+            'TRANSPORTATION_TAXIS_AND_RIDE_SHARES': 'Transportation',
+            'TRANSPORTATION_PARKING': 'Transportation',
+            'TRANSPORTATION_TOLLS': 'Transportation',
+            'TRANSPORTATION_BIKES_AND_SCOOTERS': 'Transportation',
+            'TRANSPORTATION_OTHER_TRANSPORTATION': 'Transportation',
+
+            # Travel
+            'TRAVEL_FLIGHTS': 'Travel',
+            'TRAVEL_LODGING': 'Travel',
+            'TRAVEL_RENTAL_CARS': 'Travel',
+            'TRAVEL_OTHER_TRAVEL': 'Travel',
+
+            # Shopping
+            'GENERAL_MERCHANDISE_BOOKSTORES_AND_NEWSSTANDS': 'Shopping',
+            'GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES': 'Shopping',
+            'GENERAL_MERCHANDISE_CONVENIENCE_STORES': 'Shopping',
+            'GENERAL_MERCHANDISE_DEPARTMENT_STORES': 'Shopping',
+            'GENERAL_MERCHANDISE_DISCOUNT_STORES': 'Shopping',
+            'GENERAL_MERCHANDISE_ELECTRONICS': 'Shopping',
+            'GENERAL_MERCHANDISE_GIFTS_AND_NOVELTIES': 'Shopping',
+            'GENERAL_MERCHANDISE_OFFICE_SUPPLIES': 'Shopping',
+            'GENERAL_MERCHANDISE_ONLINE_MARKETPLACES': 'Shopping',
+            'GENERAL_MERCHANDISE_PET_SUPPLIES': 'Shopping',
+            'GENERAL_MERCHANDISE_SPORTING_GOODS': 'Shopping',
+            'GENERAL_MERCHANDISE_SUPERSTORES': 'Shopping',
+            'GENERAL_MERCHANDISE_TOBACCO_AND_VAPE': 'Shopping',
+            'GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE': 'Shopping',
+
+            # Entertainment
+            'ENTERTAINMENT_CASINOS_AND_GAMBLING': 'Entertainment',
+            'ENTERTAINMENT_MUSIC_AND_AUDIO': 'Entertainment',
+            'ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS': 'Entertainment',
+            'ENTERTAINMENT_TV_AND_MOVIES': 'Entertainment',
+            'ENTERTAINMENT_VIDEO_GAMES': 'Entertainment',
+            'ENTERTAINMENT_OTHER_ENTERTAINMENT': 'Entertainment',
+
+            # Healthcare
+            'MEDICAL_DENTAL_CARE': 'Healthcare',
+            'MEDICAL_EYE_CARE': 'Healthcare',
+            'MEDICAL_NURSING_CARE': 'Healthcare',
+            'MEDICAL_PHARMACIES_AND_SUPPLEMENTS': 'Healthcare',
+            'MEDICAL_PRIMARY_CARE': 'Healthcare',
+            'MEDICAL_VETERINARY_SERVICES': 'Healthcare',
+            'MEDICAL_OTHER_MEDICAL': 'Healthcare',
+
+            # Personal Care
+            'PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS': 'Entertainment',
+            'PERSONAL_CARE_HAIR_AND_BEAUTY': 'Personal Care',
+            'PERSONAL_CARE_LAUNDRY_AND_DRY_CLEANING': 'Personal Care',
+            'PERSONAL_CARE_OTHER_PERSONAL_CARE': 'Personal Care',
+
+            # Housing
+            'HOME_IMPROVEMENT_FURNITURE': 'Housing',
+            'HOME_IMPROVEMENT_HARDWARE': 'Housing',
+            'HOME_IMPROVEMENT_REPAIR_AND_MAINTENANCE': 'Housing',
+            'HOME_IMPROVEMENT_SECURITY': 'Housing',
+            'HOME_IMPROVEMENT_OTHER_HOME_IMPROVEMENT': 'Housing',
+            'RENT_AND_UTILITIES_RENT': 'Housing',
+            'RENT_AND_UTILITIES_GAS_AND_ELECTRICITY': 'Utilities',
+            'RENT_AND_UTILITIES_INTERNET_AND_CABLE': 'Utilities',
+            'RENT_AND_UTILITIES_SEWAGE_AND_WASTE_MANAGEMENT': 'Utilities',
+            'RENT_AND_UTILITIES_TELEPHONE': 'Utilities',
+            'RENT_AND_UTILITIES_WATER': 'Utilities',
+            'RENT_AND_UTILITIES_OTHER_UTILITIES': 'Utilities',
+
+            # Transfers & Payments
+            'TRANSFER_IN_DEPOSIT': 'Transfer',
+            'TRANSFER_IN_CASH_ADVANCES_AND_LOANS': 'Transfer',
+            'TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS': 'Transfer',
+            'TRANSFER_IN_SAVINGS': 'Transfer',
+            'TRANSFER_IN_ACCOUNT_TRANSFER': 'Transfer',
+            'TRANSFER_IN_OTHER_TRANSFER_IN': 'Transfer',
+            'TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS': 'Transfer',
+            'TRANSFER_OUT_SAVINGS': 'Transfer',
+            'TRANSFER_OUT_WITHDRAWAL': 'Transfer',
+            'TRANSFER_OUT_ACCOUNT_TRANSFER': 'Transfer',
+            'TRANSFER_OUT_OTHER_TRANSFER_OUT': 'Transfer',
+            'LOAN_PAYMENTS_CAR_PAYMENT': 'Payment',
+            'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT': 'Payment',
+            'LOAN_PAYMENTS_PERSONAL_LOAN_PAYMENT': 'Payment',
+            'LOAN_PAYMENTS_MORTGAGE_PAYMENT': 'Payment',
+            'LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT': 'Payment',
+            'LOAN_PAYMENTS_OTHER_PAYMENT': 'Payment',
+
+            # Services
+            'GENERAL_SERVICES_ACCOUNTING_AND_FINANCIAL_PLANNING': 'Services',
+            'GENERAL_SERVICES_AUTOMOTIVE': 'Transportation',
+            'GENERAL_SERVICES_CHILDCARE': 'Services',
+            'GENERAL_SERVICES_CONSULTING_AND_LEGAL': 'Services',
+            'GENERAL_SERVICES_EDUCATION': 'Education',
+            'GENERAL_SERVICES_INSURANCE': 'Insurance',
+            'GENERAL_SERVICES_POSTAGE_AND_SHIPPING': 'Services',
+            'GENERAL_SERVICES_STORAGE': 'Services',
+            'GENERAL_SERVICES_OTHER_GENERAL_SERVICES': 'Services',
+        }
+
+        return pfc_map.get(pfc_detailed, 'Uncategorized')
 
 
 # Helper function for easy access

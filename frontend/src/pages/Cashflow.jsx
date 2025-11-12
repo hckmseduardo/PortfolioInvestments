@@ -59,7 +59,18 @@ const COLOR_PALETTE = [
   '#607D8B', '#795548', '#9E9E9E', '#757575', '#424242', '#212121'
 ];
 
-const ALLOWED_EXPENSE_ACCOUNT_TYPES = ['checking', 'credit_card'];
+// Account types that can have expenses tracked
+// Includes depository accounts, credit accounts, and loan accounts
+const ALLOWED_EXPENSE_ACCOUNT_TYPES = [
+  // Depository accounts
+  'checking', 'savings', 'money_market', 'cd', 'cash_management',
+  'prepaid', 'paypal', 'hsa', 'ebt',
+  // Credit accounts
+  'credit_card',
+  // Loan accounts (mortgages, auto loans, etc. can have payment tracking)
+  'mortgage', 'auto_loan', 'student_loan', 'home_equity',
+  'personal_loan', 'business_loan', 'line_of_credit'
+];
 
 const isAllowedExpenseAccount = (account = {}) =>
   ALLOWED_EXPENSE_ACCOUNT_TYPES.includes(String(account.account_type || '').toLowerCase());

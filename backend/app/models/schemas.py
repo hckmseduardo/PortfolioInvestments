@@ -4,10 +4,60 @@ from datetime import datetime
 from enum import Enum
 
 class AccountType(str, Enum):
-    INVESTMENT = "investment"
+    # Depository accounts
     CHECKING = "checking"
     SAVINGS = "savings"
+    MONEY_MARKET = "money_market"
+    CD = "cd"
+    CASH_MANAGEMENT = "cash_management"
+    PREPAID = "prepaid"
+    PAYPAL = "paypal"
+    HSA = "hsa"
+    EBT = "ebt"
+
+    # Credit accounts
     CREDIT_CARD = "credit_card"
+
+    # Loan accounts
+    MORTGAGE = "mortgage"
+    AUTO_LOAN = "auto_loan"
+    STUDENT_LOAN = "student_loan"
+    HOME_EQUITY = "home_equity"
+    PERSONAL_LOAN = "personal_loan"
+    BUSINESS_LOAN = "business_loan"
+    LINE_OF_CREDIT = "line_of_credit"
+
+    # Investment & Retirement accounts
+    INVESTMENT = "investment"
+    BROKERAGE = "brokerage"
+    RETIREMENT_401K = "401k"
+    RETIREMENT_403B = "403b"
+    RETIREMENT_457B = "457b"
+    RETIREMENT_529 = "529"
+    IRA = "ira"
+    ROTH_IRA = "roth_ira"
+    SEP_IRA = "sep_ira"
+    SIMPLE_IRA = "simple_ira"
+    PENSION = "pension"
+    STOCK_PLAN = "stock_plan"
+
+    # Canadian retirement accounts
+    TFSA = "tfsa"
+    RRSP = "rrsp"
+    RRIF = "rrif"
+    RESP = "resp"
+    RDSP = "rdsp"
+    LIRA = "lira"
+
+    # Other specialized accounts
+    CRYPTO = "crypto"
+    MUTUAL_FUND = "mutual_fund"
+    ANNUITY = "annuity"
+    LIFE_INSURANCE = "life_insurance"
+    TRUST = "trust"
+
+    # Catch-all
+    OTHER = "other"
 
 class TransactionType(str, Enum):
     BUY = "BUY"
@@ -89,6 +139,11 @@ class Account(AccountBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
+    # Plaid connection information
+    is_plaid_linked: bool = False
+    plaid_item_id: Optional[str] = None
+    plaid_institution_name: Optional[str] = None
+
     class Config:
         from_attributes = True
 
@@ -148,6 +203,10 @@ class TransactionBase(BaseModel):
     fees: float = 0.0
     total: float
     description: Optional[str] = None
+    # Plaid Personal Finance Category (PFC) fields
+    pfc_primary: Optional[str] = None
+    pfc_detailed: Optional[str] = None
+    pfc_confidence: Optional[str] = None
 
 class TransactionCreate(TransactionBase):
     account_id: str
@@ -187,6 +246,10 @@ class ExpenseBase(BaseModel):
     is_transfer_primary: Optional[bool] = True  # True if this is the primary expense record for a transfer pair
     confidence: Optional[float] = None  # Categorization confidence (0.0 to 1.0)
     suggested_category: Optional[str] = None  # AI-suggested category if different from current
+    # Plaid Personal Finance Category (PFC) fields
+    pfc_primary: Optional[str] = None
+    pfc_detailed: Optional[str] = None
+    pfc_confidence: Optional[str] = None
 
 class ExpenseCreate(ExpenseBase):
     account_id: str

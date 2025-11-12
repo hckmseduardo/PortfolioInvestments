@@ -120,6 +120,7 @@ export const accountsAPI = {
   create: (data) => api.post('/accounts', data),
   update: (id, data) => api.put(`/accounts/${id}`, data),
   delete: (id) => api.delete(`/accounts/${id}`),
+  getAccountPlaidItem: (id) => api.get(`/accounts/${id}/plaid-item`),
 };
 
 export const positionsAPI = {
@@ -296,6 +297,7 @@ export const plaidAPI = {
     api.post('/plaid/exchange-token', { public_token: publicToken, metadata }),
   getItems: () => api.get('/plaid/items'),
   syncTransactions: (itemId) => api.post(`/plaid/sync/${itemId}`),
+  fullResync: (itemId) => api.post(`/plaid/full-resync/${itemId}`),
   getSyncStatus: (jobId) => api.get(`/plaid/sync-status/${jobId}`),
   disconnectItem: (itemId) => api.delete(`/plaid/disconnect/${itemId}`),
 };

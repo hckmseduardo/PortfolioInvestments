@@ -165,19 +165,22 @@ async def exchange_public_token(
             logger.info(f"  Mapped to AccountTypeEnum: {acc_type}")
 
             # Create Account record
+            current_balance = plaid_acc['balances'].get('current', 0.0) or 0.0
             account = Account(
                 id=str(uuid.uuid4()),
                 user_id=current_user.id,
                 account_type=acc_type,
                 account_number=plaid_acc.get('mask', 'XXXX'),
                 institution=institution_name,
-                balance=plaid_acc['balances'].get('current', 0.0) or 0.0,
+                balance=current_balance,
                 label=plaid_acc['name'],
                 is_plaid_linked=1,
+                opening_balance=current_balance,  # Set opening balance to current Plaid balance
+                opening_balance_date=datetime.utcnow(),  # Balance is as of now
                 created_at=datetime.utcnow()
             )
             db.add(account)
-            logger.info(f"  Created Account record with ID: {account.id}")
+            logger.info(f"  Created Account record with ID: {account.id}, opening balance: {current_balance}")
 
             # Create PlaidAccount mapping
             # Note: type/subtype should already be converted to strings in plaid_client._format_account()
@@ -311,6 +314,52 @@ async def sync_transactions(
     )
 
 
+@router.post("/full-resync/{plaid_item_id}", response_model=SyncResponse)
+async def full_resync_transactions(
+    plaid_item_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger a full resync of all transaction history for a Plaid item.
+    This deletes the sync cursor to force reimporting all available history.
+    """
+    # Verify the item belongs to the user
+    plaid_item = db.query(PlaidItem).filter(
+        PlaidItem.id == plaid_item_id,
+        PlaidItem.user_id == current_user.id
+    ).first()
+
+    if not plaid_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plaid item not found"
+        )
+
+    # Delete sync cursor so we can establish a new cursor after historical fetch
+    from app.database.models import PlaidSyncCursor
+    cursor_record = db.query(PlaidSyncCursor).filter(
+        PlaidSyncCursor.plaid_item_id == plaid_item_id
+    ).first()
+
+    if cursor_record:
+        logger.info(f"Deleting sync cursor for Plaid item {plaid_item_id} to trigger full resync")
+        db.delete(cursor_record)
+        db.commit()
+    else:
+        logger.info(f"No sync cursor found for Plaid item {plaid_item_id}, will perform initial sync")
+
+    # Enqueue full resync job (will fetch historical transactions and establish new cursor)
+    job = enqueue_plaid_sync_job(current_user.id, plaid_item_id, full_resync=True)
+
+    logger.info(f"Full resync job {job.id} enqueued for Plaid item {plaid_item_id}")
+
+    return SyncResponse(
+        job_id=job.id,
+        status="queued"
+    )
+
+
 @router.get("/sync-status/{job_id}")
 async def get_sync_status(
     job_id: str,
@@ -336,6 +385,85 @@ async def get_sync_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Job not found"
         )
+
+
+@router.get("/test-sync/{plaid_item_id}")
+async def test_sync_transactions(
+    plaid_item_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Test endpoint to see what transactions Plaid returns for this item
+    """
+    # Verify the item belongs to the user
+    plaid_item = db.query(PlaidItem).filter(
+        PlaidItem.id == plaid_item_id,
+        PlaidItem.user_id == current_user.id
+    ).first()
+
+    if not plaid_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plaid item not found"
+        )
+
+    # Get sync cursor
+    from app.database.models import PlaidSyncCursor
+    cursor_record = db.query(PlaidSyncCursor).filter(
+        PlaidSyncCursor.plaid_item_id == plaid_item_id
+    ).first()
+
+    # Sync transactions from Plaid
+    sync_result = plaid_client.sync_transactions(
+        access_token=plaid_item.access_token,
+        cursor=cursor_record.cursor if cursor_record else None,
+        count=500
+    )
+
+    if not sync_result:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch transactions from Plaid"
+        )
+
+    # Get account mappings
+    plaid_accounts = db.query(PlaidAccount).filter(
+        PlaidAccount.plaid_item_id == plaid_item_id
+    ).all()
+
+    account_map = {pa.plaid_account_id: {"name": pa.name, "type": pa.type, "subtype": pa.subtype}
+                   for pa in plaid_accounts}
+
+    # Group transactions by account
+    transactions_by_account = {}
+    for txn in sync_result['added']:
+        plaid_acc_id = txn['account_id']
+        acc_info = account_map.get(plaid_acc_id, {"name": "Unknown", "type": "unknown", "subtype": None})
+        acc_key = f"{acc_info['name']} ({acc_info['type']}/{acc_info['subtype']})"
+
+        if acc_key not in transactions_by_account:
+            transactions_by_account[acc_key] = []
+
+        transactions_by_account[acc_key].append({
+            "date": txn['date'],
+            "name": txn.get('name'),
+            "amount": txn['amount'],
+            "pending": txn.get('pending', False)
+        })
+
+    return {
+        "institution": plaid_item.institution_name,
+        "total_accounts": len(plaid_accounts),
+        "total_added": len(sync_result['added']),
+        "total_modified": len(sync_result['modified']),
+        "total_removed": len(sync_result['removed']),
+        "has_more": sync_result.get('has_more', False),
+        "accounts": {name: len(txns) for name, txns in transactions_by_account.items()},
+        "sample_transactions": {
+            name: txns[:5] for name, txns in transactions_by_account.items()
+        }
+    }
 
 
 @router.delete("/disconnect/{plaid_item_id}")
@@ -409,27 +537,105 @@ def _map_plaid_account_type(plaid_type: str, plaid_subtype: Optional[str]) -> Ac
     Map Plaid account type/subtype to our AccountTypeEnum
 
     Args:
-        plaid_type: Plaid account type (depository, credit, investment, loan)
+        plaid_type: Plaid account type (depository, credit, investment, loan, other)
         plaid_subtype: Plaid account subtype
 
     Returns:
         Our account type enum
     """
+    # Normalize subtype for easier matching
+    subtype_lower = (plaid_subtype or "").lower().replace(" ", "_")
+
     # Map based on type and subtype
     if plaid_type == "depository":
-        if plaid_subtype in ["checking", "prepaid"]:
-            return AccountTypeEnum.CHECKING
-        elif plaid_subtype in ["savings", "money market", "cd"]:
-            return AccountTypeEnum.SAVINGS
-        else:
-            return AccountTypeEnum.CHECKING  # Default for depository
+        # Map depository subtypes
+        subtype_map = {
+            "checking": AccountTypeEnum.CHECKING,
+            "savings": AccountTypeEnum.SAVINGS,
+            "money_market": AccountTypeEnum.MONEY_MARKET,
+            "cd": AccountTypeEnum.CD,
+            "cash_management": AccountTypeEnum.CASH_MANAGEMENT,
+            "prepaid": AccountTypeEnum.PREPAID,
+            "paypal": AccountTypeEnum.PAYPAL,
+            "hsa": AccountTypeEnum.HSA,
+            "ebt": AccountTypeEnum.EBT,
+        }
+        return subtype_map.get(subtype_lower, AccountTypeEnum.CHECKING)
 
     elif plaid_type == "credit":
+        # All credit types map to credit card
         return AccountTypeEnum.CREDIT_CARD
 
-    elif plaid_type == "investment":
-        return AccountTypeEnum.INVESTMENT
+    elif plaid_type == "loan":
+        # Map loan subtypes
+        subtype_map = {
+            "mortgage": AccountTypeEnum.MORTGAGE,
+            "auto": AccountTypeEnum.AUTO_LOAN,
+            "student": AccountTypeEnum.STUDENT_LOAN,
+            "home_equity": AccountTypeEnum.HOME_EQUITY,
+            "personal": AccountTypeEnum.PERSONAL_LOAN,
+            "business": AccountTypeEnum.BUSINESS_LOAN,
+            "commercial": AccountTypeEnum.BUSINESS_LOAN,
+            "line_of_credit": AccountTypeEnum.LINE_OF_CREDIT,
+            "overdraft": AccountTypeEnum.LINE_OF_CREDIT,
+            "consumer": AccountTypeEnum.PERSONAL_LOAN,
+            "construction": AccountTypeEnum.MORTGAGE,
+        }
+        return subtype_map.get(subtype_lower, AccountTypeEnum.PERSONAL_LOAN)
+
+    elif plaid_type == "investment" or plaid_type == "brokerage":
+        # Map investment/retirement subtypes
+        subtype_map = {
+            "401k": AccountTypeEnum.RETIREMENT_401K,
+            "401a": AccountTypeEnum.RETIREMENT_401K,
+            "403b": AccountTypeEnum.RETIREMENT_403B,
+            "457b": AccountTypeEnum.RETIREMENT_457B,
+            "529": AccountTypeEnum.RETIREMENT_529,
+            "ira": AccountTypeEnum.IRA,
+            "roth": AccountTypeEnum.ROTH_IRA,
+            "roth_401k": AccountTypeEnum.ROTH_IRA,
+            "sep_ira": AccountTypeEnum.SEP_IRA,
+            "sarsep": AccountTypeEnum.SEP_IRA,
+            "simple_ira": AccountTypeEnum.SIMPLE_IRA,
+            "pension": AccountTypeEnum.PENSION,
+            "profit_sharing_plan": AccountTypeEnum.PENSION,
+            "stock_plan": AccountTypeEnum.STOCK_PLAN,
+            "brokerage": AccountTypeEnum.BROKERAGE,
+            "non-taxable_brokerage_account": AccountTypeEnum.BROKERAGE,
+            "ugma": AccountTypeEnum.TRUST,
+            "utma": AccountTypeEnum.TRUST,
+            "trust": AccountTypeEnum.TRUST,
+            # Canadian retirement accounts
+            "tfsa": AccountTypeEnum.TFSA,
+            "rrsp": AccountTypeEnum.RRSP,
+            "rrif": AccountTypeEnum.RRIF,
+            "resp": AccountTypeEnum.RESP,
+            "rdsp": AccountTypeEnum.RDSP,
+            "lira": AccountTypeEnum.LIRA,
+            "lrsp": AccountTypeEnum.RRSP,
+            "lrif": AccountTypeEnum.RRIF,
+            "rlif": AccountTypeEnum.RRIF,
+            "prif": AccountTypeEnum.RRIF,
+            "lif": AccountTypeEnum.RRIF,
+            # Specialized investment types
+            "crypto_exchange": AccountTypeEnum.CRYPTO,
+            "non-custodial_wallet": AccountTypeEnum.CRYPTO,
+            "mutual_fund": AccountTypeEnum.MUTUAL_FUND,
+            "fixed_annuity": AccountTypeEnum.ANNUITY,
+            "variable_annuity": AccountTypeEnum.ANNUITY,
+            "other_annuity": AccountTypeEnum.ANNUITY,
+            "life_insurance": AccountTypeEnum.LIFE_INSURANCE,
+            "other_insurance": AccountTypeEnum.LIFE_INSURANCE,
+            "gic": AccountTypeEnum.CD,  # Canadian equivalent of CD
+            "cash_isa": AccountTypeEnum.SAVINGS,
+            "education_savings_account": AccountTypeEnum.RETIREMENT_529,
+            "health_reimbursement_arrangement": AccountTypeEnum.HSA,
+            "sipp": AccountTypeEnum.PENSION,
+            "keogh": AccountTypeEnum.PENSION,
+            "thrift_savings_plan": AccountTypeEnum.PENSION,
+        }
+        return subtype_map.get(subtype_lower, AccountTypeEnum.INVESTMENT)
 
     else:
-        # Default for unknown types
-        return AccountTypeEnum.CHECKING
+        # Other or unknown types
+        return AccountTypeEnum.OTHER

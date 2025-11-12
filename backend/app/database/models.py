@@ -11,10 +11,60 @@ Base = declarative_base()
 
 
 class AccountTypeEnum(str, enum.Enum):
-    INVESTMENT = "investment"
+    # Depository accounts (checking, savings, etc.)
     CHECKING = "checking"
     SAVINGS = "savings"
+    MONEY_MARKET = "money_market"
+    CD = "cd"  # Certificate of Deposit
+    CASH_MANAGEMENT = "cash_management"
+    PREPAID = "prepaid"
+    PAYPAL = "paypal"
+    HSA = "hsa"  # Health Savings Account
+    EBT = "ebt"  # Electronic Benefits Transfer
+
+    # Credit accounts
     CREDIT_CARD = "credit_card"
+
+    # Loan accounts
+    MORTGAGE = "mortgage"
+    AUTO_LOAN = "auto_loan"
+    STUDENT_LOAN = "student_loan"
+    HOME_EQUITY = "home_equity"
+    PERSONAL_LOAN = "personal_loan"
+    BUSINESS_LOAN = "business_loan"
+    LINE_OF_CREDIT = "line_of_credit"
+
+    # Investment & Retirement accounts
+    INVESTMENT = "investment"  # Generic investment/brokerage
+    BROKERAGE = "brokerage"
+    RETIREMENT_401K = "401k"
+    RETIREMENT_403B = "403b"
+    RETIREMENT_457B = "457b"
+    RETIREMENT_529 = "529"
+    IRA = "ira"
+    ROTH_IRA = "roth_ira"
+    SEP_IRA = "sep_ira"
+    SIMPLE_IRA = "simple_ira"
+    PENSION = "pension"
+    STOCK_PLAN = "stock_plan"
+
+    # Canadian retirement accounts
+    TFSA = "tfsa"
+    RRSP = "rrsp"
+    RRIF = "rrif"
+    RESP = "resp"
+    RDSP = "rdsp"
+    LIRA = "lira"
+
+    # Other specialized accounts
+    CRYPTO = "crypto"
+    MUTUAL_FUND = "mutual_fund"
+    ANNUITY = "annuity"
+    LIFE_INSURANCE = "life_insurance"
+    TRUST = "trust"
+
+    # Catch-all
+    OTHER = "other"
 
 
 class TransactionTypeEnum(str, enum.Enum):
@@ -68,12 +118,14 @@ class Account(Base):
 
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    account_type = Column(SQLEnum(AccountTypeEnum), nullable=False)
+    account_type = Column(SQLEnum(AccountTypeEnum, values_callable=lambda x: [e.value for e in x]), nullable=False)
     account_number = Column(String, nullable=False)
     institution = Column(String, nullable=False)
     balance = Column(Float, nullable=False, default=0.0)
     label = Column(String, nullable=True)
     is_plaid_linked = Column(Integer, default=0, nullable=False)  # 0 = not linked, 1 = linked
+    opening_balance = Column(Float, nullable=True)  # Starting balance before oldest transaction
+    opening_balance_date = Column(DateTime, nullable=True)  # Date of the opening balance
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, onupdate=datetime.utcnow, nullable=True)
 
@@ -124,6 +176,11 @@ class Transaction(Base):
     source = Column(String, default="manual", nullable=False, index=True)  # manual, plaid, import
     plaid_transaction_id = Column(String, nullable=True, unique=True, index=True)  # Plaid's transaction ID for deduplication
 
+    # Plaid Personal Finance Category (PFC) fields
+    pfc_primary = Column(String(100), nullable=True, index=True)  # e.g., FOOD_AND_DRINK, TRANSPORTATION
+    pfc_detailed = Column(String(100), nullable=True, index=True)  # e.g., FOOD_AND_DRINK_GROCERIES
+    pfc_confidence = Column(String(20), nullable=True)  # VERY_HIGH, HIGH, MEDIUM, LOW, UNKNOWN
+
     # Relationships
     account = relationship("Account", back_populates="transactions")
     statement = relationship("Statement", back_populates="transactions")
@@ -167,6 +224,11 @@ class Expense(Base):
     paired_transaction_id = Column(String, nullable=True, index=True)  # ID of the paired transaction in a transfer
     paired_account_id = Column(String, nullable=True, index=True)  # Account ID of the paired side of the transfer
     is_transfer_primary = Column(Boolean, default=True)  # True if this is the primary expense record for a transfer pair
+
+    # Plaid Personal Finance Category (PFC) fields
+    pfc_primary = Column(String(100), nullable=True, index=True)  # e.g., FOOD_AND_DRINK, TRANSPORTATION
+    pfc_detailed = Column(String(100), nullable=True, index=True)  # e.g., FOOD_AND_DRINK_GROCERIES
+    pfc_confidence = Column(String(20), nullable=True)  # VERY_HIGH, HIGH, MEDIUM, LOW, UNKNOWN
 
     # Relationships
     account = relationship("Account", back_populates="expenses")
@@ -351,5 +413,53 @@ class StockPrice(Base):
     __table_args__ = (
         # Unique constraint on ticker + date combination
         # This ensures we don't store duplicate prices for the same ticker on the same date
+        {'sqlite_autoincrement': True}
+    )
+
+
+class TickerMapping(Base):
+    """
+    Ticker symbol mapping table for resolving ticker symbols across different data sources.
+
+    This table stores mappings between original ticker symbols (as they appear in user accounts)
+    and the correct ticker symbols for various market data sources (Yahoo Finance, Alpha Vantage, etc.).
+    """
+    __tablename__ = "ticker_mappings"
+
+    id = Column(String, primary_key=True)
+
+    # Original ticker as it appears in the user's account/institution
+    original_ticker = Column(String, nullable=False, index=True)
+
+    # Mapped ticker symbol for the data source
+    mapped_ticker = Column(String, nullable=False, index=True)
+
+    # Data source this mapping applies to (yfinance, alpha_vantage, tradingview, etc.)
+    # NULL means it applies to all sources
+    data_source = Column(String, nullable=True, index=True)
+
+    # Institution/broker where the original ticker came from (helps with context)
+    institution = Column(String, nullable=True, index=True)
+
+    # How this mapping was created: 'system', 'user', 'ollama', 'auto'
+    mapped_by = Column(String, nullable=False, default='system')
+
+    # Confidence score (0.0 - 1.0)
+    confidence = Column(Float, nullable=False, default=1.0)
+
+    # Status: 'active', 'deprecated', 'pending_verification'
+    status = Column(String, nullable=False, default='active', index=True)
+
+    # Additional mapping info (JSON stored as text) - e.g., reason for mapping, old ticker info
+    mapping_metadata = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_verified = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow, nullable=True)
+
+    __table_args__ = (
+        # Composite index for fast lookups
+        Index('idx_ticker_mapping_lookup', 'original_ticker', 'data_source', 'institution'),
         {'sqlite_autoincrement': True}
     )
