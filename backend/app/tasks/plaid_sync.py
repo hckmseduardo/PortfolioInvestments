@@ -653,6 +653,31 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
     logger.info(f"[INVESTMENT SYNC DEBUG] Retrieved {len(transactions)} investment transactions")
     logger.info(f"[INVESTMENT SYNC DEBUG] Retrieved {len(securities)} securities")
 
+    # Save Plaid investment sync payload for debugging
+    try:
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        debug_file = PLAID_DEBUG_DIR / f"investment_sync_{plaid_item.user_id}_{plaid_item.id}_{timestamp}.json"
+        debug_data = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "user_id": plaid_item.user_id,
+            "plaid_item_id": plaid_item.id,
+            "institution_name": plaid_item.institution_name,
+            "sync_type": "investment",
+            "date_range": {
+                "start": start_date_str,
+                "end": end_date_str
+            },
+            "transaction_count": len(transactions),
+            "security_count": len(securities),
+            "transactions": transactions[:10],  # Save first 10 for sample
+            "securities": list(securities.values())[:10]  # First 10 securities
+        }
+        with open(debug_file, 'w') as f:
+            json.dump(debug_data, f, indent=2, default=str)
+        logger.info(f"Saved Plaid investment sync payload to {debug_file}")
+    except Exception as debug_error:
+        logger.warning(f"Failed to save investment sync debug payload: {debug_error}")
+
     # Log sample of transactions if any
     if transactions:
         sample = transactions[:3]
