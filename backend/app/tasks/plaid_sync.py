@@ -739,12 +739,12 @@ def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account
                 continue
 
             # Get all transactions for this account, ordered chronologically
-            # Use import_sequence to preserve intra-day order, fallback to ID for manual entries
+            # Order by date, then by transaction value for clearer balance progression
             transactions = db.query(Transaction).filter(
                 Transaction.account_id == account_id
             ).order_by(
                 Transaction.date.asc(),
-                Transaction.import_sequence.asc().nullslast(),
+                Transaction.total.asc(),
                 Transaction.id.asc()
             ).all()
 
@@ -845,12 +845,12 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
                 continue
 
             # Get all transactions for this account
-            # Use import_sequence to preserve intra-day order, fallback to ID for manual entries
+            # Order by date, then by transaction value for clearer balance progression
             transactions = db.query(Transaction).filter(
                 Transaction.account_id == account_id
             ).order_by(
                 Transaction.date.asc(),
-                Transaction.import_sequence.asc().nullslast(),
+                Transaction.total.asc(),
                 Transaction.id.asc()
             ).all()
 

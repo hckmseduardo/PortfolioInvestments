@@ -48,7 +48,7 @@ def validate_and_update_balances(
         return {"status": "error", "message": "Account not found"}
 
     # Get all transactions for this account, ordered chronologically
-    # Use import_sequence to preserve intra-day order, fallback to ID for manual entries
+    # Order by date, then by transaction value for clearer balance progression
     transactions = db.find("transactions", {"account_id": account_id})
     if not transactions:
         logger.info(f"Account {account.get('label')} has no transactions, skipping validation")
@@ -59,7 +59,7 @@ def validate_and_update_balances(
         transactions,
         key=lambda t: (
             t.get('date', ''),
-            t.get('import_sequence') if t.get('import_sequence') is not None else float('inf'),
+            t.get('total', 0.0),
             t.get('id', '')
         )
     )
@@ -161,7 +161,7 @@ def update_opening_balance_from_source(
         transactions,
         key=lambda t: (
             t.get('date', ''),
-            t.get('import_sequence') if t.get('import_sequence') is not None else float('inf'),
+            t.get('total', 0.0),
             t.get('id', '')
         )
     )
