@@ -97,6 +97,7 @@ def validate_and_update_balances(
     # For transactions FROM first Plaid transaction: use opening_balance
     running_balance = 0.0  # Start at 0 for pre-Plaid transactions
     reached_first_plaid = False
+    first_inconsistent_txn = None  # Track the first transaction with balance inconsistency
 
     for txn in sorted_transactions:
         # When we reach the first Plaid transaction, set running balance to opening_balance
@@ -109,62 +110,80 @@ def validate_and_update_balances(
             logger.info(f"Reached first Plaid transaction, setting balance to opening_balance: ${opening_balance}")
 
         running_balance += txn.get('total', 0.0)
+        calculated_balance = round(running_balance, 2)
 
-        # IMPORTANT: Only update balance for statement transactions
-        # Plaid transactions already have correct balance from Plaid API - don't recalculate
-        if not txn.get('plaid_transaction_id'):
-            # This is a statement-imported transaction, update its expected balance
-            db.update("transactions", {"id": txn['id']}, {
-                "expected_balance": round(running_balance, 2),
-                "has_balance_inconsistency": False,
-                "balance_discrepancy": None
-            })
-        else:
-            # This is a Plaid transaction - use its existing balance to keep running_balance in sync
-            # Don't overwrite the balance, just read it to maintain continuity
-            if txn.get('expected_balance') is not None:
-                running_balance = txn.get('expected_balance')
-                logger.debug(f"Using Plaid transaction balance: ${running_balance} for {txn.get('id')}")
+        # Check if this transaction has an inconsistency by comparing calculated vs actual balance
+        # actual_balance is the "truth" from the source (bank statement, Plaid, or user correction)
+        actual_balance = txn.get('actual_balance')
+        has_inconsistency = False
+        discrepancy = None
+
+        if actual_balance is not None:
+            # Compare our calculated balance with the actual balance from the source
+            discrepancy = calculated_balance - actual_balance
+            if abs(discrepancy) > TOLERANCE:
+                has_inconsistency = True
+                if first_inconsistent_txn is None:
+                    # This is the first inconsistent transaction we found
+                    first_inconsistent_txn = txn
+                    logger.warning(
+                        f"Balance inconsistency detected at transaction {txn['id']} "
+                        f"({txn.get('date')}): Expected (calculated): ${calculated_balance:.2f}, "
+                        f"Actual (from source): ${actual_balance:.2f}, Discrepancy: ${discrepancy:.2f}"
+                    )
+
+        # Always update expected_balance to our calculated value
+        # This ensures the running balance calculation is always fresh
+        db.update("transactions", {"id": txn['id']}, {
+            "expected_balance": calculated_balance,
+            "has_balance_inconsistency": has_inconsistency,
+            "balance_discrepancy": round(discrepancy, 2) if discrepancy is not None else None
+        })
 
     # Validate against source current balance if provided
     final_expected_balance = running_balance
     validation_result = {
-        "status": "success",
+        "status": "success" if first_inconsistent_txn is None else "inconsistent",
         "opening_balance": opening_balance,
         "opening_balance_applies_from": first_plaid_date if first_plaid_txn_id else None,
         "final_expected_balance": round(final_expected_balance, 2),
         "transaction_count": len(sorted_transactions),
         "oldest_date": sorted_transactions[0].get('date'),
         "newest_date": sorted_transactions[-1].get('date'),
-        "has_plaid_transactions": first_plaid_txn_id is not None
+        "has_plaid_transactions": first_plaid_txn_id is not None,
+        "first_inconsistent_transaction_id": first_inconsistent_txn['id'] if first_inconsistent_txn else None
     }
 
+    # Additional validation against source current balance (if provided)
+    # This checks if our final calculated balance matches what the bank/Plaid reports
     if source_current_balance is not None:
         discrepancy = abs(final_expected_balance - source_current_balance)
         validation_result["source_current_balance"] = source_current_balance
-        validation_result["discrepancy"] = round(discrepancy, 2)
+        validation_result["source_balance_discrepancy"] = round(discrepancy, 2)
 
         if discrepancy > TOLERANCE:
             logger.warning(
-                f"Balance inconsistency detected for {account.get('label')} ({source_name}): "
-                f"Expected: ${final_expected_balance:.2f}, "
-                f"Source current: ${source_current_balance:.2f}, "
+                f"Final balance mismatch for {account.get('label')} ({source_name}): "
+                f"Calculated: ${final_expected_balance:.2f}, "
+                f"Source reports: ${source_current_balance:.2f}, "
                 f"Discrepancy: ${discrepancy:.2f}"
             )
 
-            # Flag the last transaction as inconsistent
-            last_txn = sorted_transactions[-1]
-            db.update("transactions", {"id": last_txn['id']}, {
-                "has_balance_inconsistency": True,
-                "balance_discrepancy": round(final_expected_balance - source_current_balance, 2)
-            })
+            # Only flag the last transaction if no other inconsistencies were found
+            # (If we already found inconsistencies, they're the root cause)
+            if first_inconsistent_txn is None:
+                last_txn = sorted_transactions[-1]
+                db.update("transactions", {"id": last_txn['id']}, {
+                    "has_balance_inconsistency": True,
+                    "balance_discrepancy": round(final_expected_balance - source_current_balance, 2)
+                })
+                validation_result["flagged_transaction_id"] = last_txn['id']
 
             validation_result["status"] = "inconsistent"
-            validation_result["flagged_transaction_id"] = last_txn['id']
         else:
             logger.info(
                 f"Balance validation passed for {account.get('label')} ({source_name}): "
-                f"Expected: ${final_expected_balance:.2f}, "
+                f"Calculated: ${final_expected_balance:.2f}, "
                 f"Source: ${source_current_balance:.2f}, "
                 f"Discrepancy: ${discrepancy:.2f} (within tolerance)"
             )
@@ -247,3 +266,4 @@ def update_opening_balance_from_source(
         "transaction_sum": round(transaction_sum, 2),
         "transaction_count": len(transactions)
     }
+    
