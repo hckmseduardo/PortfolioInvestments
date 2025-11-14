@@ -932,7 +932,11 @@ const Import = () => {
             <MenuItem value="">
               All accounts
             </MenuItem>
-            {accounts.map((account) => (
+            {[...accounts].sort((a, b) => {
+              const aDisplay = `${a.institution || ''} ${a.label}`.trim();
+              const bDisplay = `${b.institution || ''} ${b.label}`.trim();
+              return aDisplay.localeCompare(bDisplay);
+            }).map((account) => (
               <MenuItem key={account.id} value={account.id}>
                 {account.institution && `${account.institution} - `}
                 {account.label}
@@ -1180,7 +1184,11 @@ const Import = () => {
                             <MenuItem value="">
                               <em>Unassigned</em>
                             </MenuItem>
-                            {accounts.map((account) => (
+                            {[...accounts].sort((a, b) => {
+                              const aDisplay = `${a.institution || ''} ${a.label}`.trim();
+                              const bDisplay = `${b.institution || ''} ${b.label}`.trim();
+                              return aDisplay.localeCompare(bDisplay);
+                            }).map((account) => (
                               <MenuItem key={account.id} value={account.id}>
                                 {account.institution && `${account.institution} - `}
                                 {account.label}
@@ -1340,7 +1348,11 @@ const Import = () => {
                                   <MenuItem value="">
                                     <em>Unassigned</em>
                                   </MenuItem>
-                                  {accounts.map((account) => (
+                                  {[...accounts].sort((a, b) => {
+                                    const aDisplay = `${a.institution || ''} ${a.label}`.trim();
+                                    const bDisplay = `${b.institution || ''} ${b.label}`.trim();
+                                    return aDisplay.localeCompare(bDisplay);
+                                  }).map((account) => (
                                     <MenuItem key={account.id} value={account.id}>
                                       {account.institution && `${account.institution} - `}
                                       {account.label}
