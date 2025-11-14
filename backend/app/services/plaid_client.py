@@ -90,7 +90,7 @@ class PlaidClient:
             request = LinkTokenCreateRequest(
                 user=LinkTokenCreateRequestUser(client_user_id=str(user_id)),
                 client_name=client_name,
-                products=[Products("transactions")],  # Removed investments - not authorized in production
+                products=[Products("transactions"), Products("investments")],  # Request both transactions and investments
                 country_codes=[CountryCode("US"), CountryCode("CA")],
                 language="en",
             )
