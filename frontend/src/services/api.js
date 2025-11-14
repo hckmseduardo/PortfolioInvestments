@@ -296,6 +296,7 @@ export const transactionsAPI = {
 
 export const plaidAPI = {
   createLinkToken: () => api.post('/plaid/create-link-token'),
+  createUpdateLinkToken: (itemId) => api.post(`/plaid/update-link-token/${itemId}`),
   exchangeToken: (publicToken, metadata) =>
     api.post('/plaid/exchange-token', { public_token: publicToken, metadata }),
   getItems: () => api.get('/plaid/items'),

@@ -613,14 +613,21 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
     Returns:
         Number of investment transactions added
     """
+    logger.info(f"[INVESTMENT SYNC] Starting investment sync for item {plaid_item.id}")
+    logger.info(f"[INVESTMENT SYNC] Total plaid_accounts to check: {len(plaid_accounts)}")
+    for pa in plaid_accounts:
+        logger.info(f"[INVESTMENT SYNC]   Account: {pa.name}, type: {pa.type}, subtype: {pa.subtype}")
+
     # Filter to only investment accounts
     investment_accounts = [
         pa for pa in plaid_accounts
         if pa.type == 'investment'
     ]
 
+    logger.info(f"[INVESTMENT SYNC] Filtered to {len(investment_accounts)} investment accounts")
+
     if not investment_accounts:
-        logger.info("No investment accounts found, skipping investment sync")
+        logger.warning("[INVESTMENT SYNC] No investment accounts found, skipping investment sync")
         return 0
 
     logger.info(f"[INVESTMENT SYNC DEBUG] Found {len(investment_accounts)} investment accounts to sync")
@@ -635,6 +642,7 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
     end_date_str = end_date.strftime('%Y-%m-%d')
 
     logger.info(f"[INVESTMENT SYNC DEBUG] Fetching investment transactions from {start_date_str} to {end_date_str}")
+    logger.info(f"[INVESTMENT SYNC] Calling plaid_client.get_investment_transactions()...")
 
     # Fetch investment transactions
     investment_result = plaid_client.get_investment_transactions(
@@ -643,8 +651,11 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
         end_date=end_date_str
     )
 
+    logger.info(f"[INVESTMENT SYNC] API call completed, result is: {type(investment_result).__name__ if investment_result else 'None'}")
+
     if not investment_result:
-        logger.warning("[INVESTMENT SYNC DEBUG] Failed to fetch investment transactions - result is None")
+        logger.error("[INVESTMENT SYNC] Failed to fetch investment transactions - result is None!")
+        logger.error("[INVESTMENT SYNC] This usually means the Plaid API call failed. Check logs above for Plaid API errors.")
         return 0
 
     transactions = investment_result.get('transactions', [])

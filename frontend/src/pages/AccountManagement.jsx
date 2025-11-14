@@ -28,7 +28,7 @@ import {
   ListItemIcon,
   ListItemText
 } from '@mui/material';
-import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History, FilterList, MoreVert, DeleteSweep } from '@mui/icons-material';
+import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History, FilterList, MoreVert, DeleteSweep, VpnKey } from '@mui/icons-material';
 import { accountsAPI, transactionsAPI, plaidAPI } from '../services/api';
 import { stickyTableHeadSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
@@ -629,6 +629,51 @@ const AccountManagement = () => {
     }
   };
 
+  const handleUpdatePermissions = async () => {
+    handleActionMenuClose();
+    if (!selectedAccount || !selectedAccount.plaid_item_id) return;
+
+    setPlaidLoading(true);
+    setError('');
+
+    try {
+      // Get update link token from backend
+      const response = await plaidAPI.createUpdateLinkToken(selectedAccount.plaid_item_id);
+      const { link_token } = response.data;
+
+      // Open Plaid Link in update mode
+      const plaidHandler = window.Plaid.create({
+        token: link_token,
+        onSuccess: async (public_token, metadata) => {
+          // No need to exchange token - same Item, just updated permissions
+          setSuccess(`Permissions updated successfully for ${selectedAccount.institution}! Running sync...`);
+
+          // Trigger a sync to fetch investment transactions
+          try {
+            await plaidAPI.syncTransactions(selectedAccount.plaid_item_id);
+            setSuccess(`Permissions updated and sync started for ${selectedAccount.institution}`);
+          } catch (syncErr) {
+            setError('Permissions updated but sync failed to start. Please try manual sync.');
+          }
+
+          loadPlaidItems();
+          loadAccounts();
+        },
+        onExit: (err, metadata) => {
+          if (err != null) {
+            setError(`Failed to update permissions: ${err.error_message}`);
+          }
+          setPlaidLoading(false);
+        },
+      });
+
+      plaidHandler.open();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to create update link token');
+      setPlaidLoading(false);
+    }
+  };
+
   const handleDeletePlaidTransactionsClick = () => {
     // Close menu but keep selectedAccount for the dialog
     setActionMenuAnchor(null);
@@ -1068,6 +1113,18 @@ const AccountManagement = () => {
             secondary="Update account details and settings"
           />
         </MenuItem>
+
+        {selectedAccount?.is_plaid_linked && (
+          <MenuItem onClick={handleUpdatePermissions}>
+            <ListItemIcon>
+              <VpnKey fontSize="small" color="primary" />
+            </ListItemIcon>
+            <ListItemText
+              primary="Update Permissions"
+              secondary="Add investment access without disconnecting"
+            />
+          </MenuItem>
+        )}
 
         {selectedAccount?.is_plaid_linked && (
           <MenuItem onClick={handleDeletePlaidTransactionsClick}>

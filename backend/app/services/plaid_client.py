@@ -71,13 +71,14 @@ class PlaidClient:
             logger.error(f"Failed to initialize Plaid client: {e}")
             raise
 
-    def create_link_token(self, user_id: str, client_name: str = "Portfolio Investments") -> Optional[Dict[str, Any]]:
+    def create_link_token(self, user_id: str, client_name: str = "Portfolio Investments", access_token: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
-        Create a link token for Plaid Link initialization
+        Create a link token for Plaid Link initialization or update mode
 
         Args:
             user_id: Your application's user ID
             client_name: Display name for your application
+            access_token: Optional - if provided, creates link token in update mode to add new products
 
         Returns:
             Dictionary with link_token and expiration
@@ -87,13 +88,22 @@ class PlaidClient:
             return None
 
         try:
-            request = LinkTokenCreateRequest(
-                user=LinkTokenCreateRequestUser(client_user_id=str(user_id)),
-                client_name=client_name,
-                products=[Products("transactions"), Products("investments")],  # Request both transactions and investments
-                country_codes=[CountryCode("US"), CountryCode("CA")],
-                language="en",
-            )
+            request_params = {
+                "user": LinkTokenCreateRequestUser(client_user_id=str(user_id)),
+                "client_name": client_name,
+                "products": [Products("transactions"), Products("investments")],  # Request both transactions and investments
+                "country_codes": [CountryCode("US"), CountryCode("CA")],
+                "language": "en",
+            }
+
+            # If access_token provided, create in update mode to add products
+            if access_token:
+                logger.info(f"Creating link token in UPDATE mode to add investment product access")
+                request_params["access_token"] = access_token
+            else:
+                logger.info(f"Creating link token in INITIAL mode for new connection")
+
+            request = LinkTokenCreateRequest(**request_params)
 
             response = self.client.link_token_create(request)
 

@@ -89,6 +89,50 @@ async def create_link_token(current_user: User = Depends(get_current_user)):
     return LinkTokenResponse(**result)
 
 
+@router.post("/update-link-token/{plaid_item_id}", response_model=LinkTokenResponse)
+async def create_update_link_token(
+    plaid_item_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a Plaid Link token in UPDATE mode to add investment product consent
+    to an existing Plaid connection without disconnecting
+    """
+    if not plaid_client._is_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Plaid is not configured. Please set PLAID_CLIENT_ID and PLAID_SECRET."
+        )
+
+    # Get the PlaidItem to retrieve the access token
+    plaid_item = db.query(PlaidItem).filter(
+        PlaidItem.id == plaid_item_id,
+        PlaidItem.user_id == current_user.id
+    ).first()
+
+    if not plaid_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plaid connection not found"
+        )
+
+    # Create link token in update mode with the existing access token
+    result = plaid_client.create_link_token(
+        user_id=current_user.id,
+        client_name="Portfolio Investments",
+        access_token=plaid_item.access_token
+    )
+
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create update link token"
+        )
+
+    return LinkTokenResponse(**result)
+
+
 @router.post("/exchange-token")
 async def exchange_public_token(
     request: ExchangeTokenRequest,
