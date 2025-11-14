@@ -121,6 +121,7 @@ export const accountsAPI = {
   update: (id, data) => api.put(`/accounts/${id}`, data),
   delete: (id) => api.delete(`/accounts/${id}`),
   getAccountPlaidItem: (id) => api.get(`/accounts/${id}/plaid-item`),
+  deletePlaidTransactions: (id) => api.delete(`/accounts/${id}/plaid-transactions`),
 };
 
 export const positionsAPI = {

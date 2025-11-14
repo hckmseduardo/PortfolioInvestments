@@ -4,7 +4,7 @@ import os
 import aiofiles
 from pathlib import Path
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from rq.exceptions import NoSuchJobError
@@ -21,6 +21,22 @@ from app.services.job_queue import enqueue_statement_job, get_job_info
 
 router = APIRouter(prefix="/import", tags=["import"])
 logger = logging.getLogger(__name__)
+
+
+def _get_date_only(txn: Dict) -> date:
+    """Extract date part from transaction's date field."""
+    txn_date = txn.get('date', '')
+    if isinstance(txn_date, datetime):
+        return txn_date.date()
+    elif isinstance(txn_date, date):
+        return txn_date
+    elif isinstance(txn_date, str):
+        try:
+            parsed = datetime.fromisoformat(txn_date.replace('Z', '+00:00'))
+            return parsed.date()
+        except (ValueError, AttributeError):
+            return date.min
+    return date.min
 
 ALLOWED_EXTENSIONS = {'.pdf', '.csv', '.xlsx', '.xls', '.qfx', '.ofx'}
 
@@ -40,6 +56,9 @@ def allowed_file(filename: str) -> bool:
 def _coerce_datetime(value):
     if isinstance(value, datetime):
         return value
+    if isinstance(value, date):
+        # Convert date to datetime at midnight
+        return datetime.combine(value, datetime.min.time())
     if isinstance(value, str):
         normalized = value.replace("Z", "+00:00") if value.endswith("Z") else value
         try:
@@ -132,9 +151,9 @@ def recalculate_positions_from_transactions(account_id: str, db, statement_id: O
         statement_id: IGNORED - kept for backward compatibility
     """
     transactions = db.find("transactions", {"account_id": account_id})
-    # Filter out transactions with None dates and sort
+    # Filter out transactions with None dates and sort by date (date part only), then by value DESC (credits before debits), then by ID
     transactions = [t for t in transactions if t.get('date') is not None]
-    transactions = sorted(transactions, key=lambda x: x.get('date', ''))
+    transactions = sorted(transactions, key=lambda x: (_get_date_only(x), -x.get('total', 0.0), x.get('id', '')))
 
     positions_map: Dict[str, Dict] = {}
 
@@ -238,6 +257,106 @@ def recalculate_positions_from_transactions(account_id: str, db, statement_id: O
 
     return positions_created
 
+def remove_duplicate_transactions(account_id: str, db) -> Dict:
+    """
+    Remove duplicate transactions for an account.
+    Keeps Plaid-synced transactions, removes statement imports that duplicate Plaid data.
+    Also removes duplicates within the same source type.
+
+    Args:
+        account_id: Account ID to clean up
+        db: Database service instance
+
+    Returns:
+        Dictionary with cleanup statistics
+    """
+    logger.info(f"Starting duplicate cleanup for account {account_id}")
+
+    # First, remove statement-imported transactions that have matching Plaid transactions
+    transactions = db.find("transactions", {"account_id": account_id})
+
+    duplicates_removed = 0
+    plaid_vs_statement_removed = 0
+    statement_vs_statement_removed = 0
+
+    # Group transactions by (date, type, total) to find duplicates
+    # Normalize date to date-only to match datetime and date objects
+    from collections import defaultdict
+    groups = defaultdict(list)
+
+    for txn in transactions:
+        # Normalize date to date-only for grouping
+        txn_date = txn.get('date')
+        if isinstance(txn_date, datetime):
+            date_key = txn_date.date()
+        elif isinstance(txn_date, date):
+            date_key = txn_date
+        elif isinstance(txn_date, str):
+            try:
+                parsed = datetime.fromisoformat(txn_date.replace('Z', '+00:00'))
+                date_key = parsed.date()
+            except (ValueError, AttributeError):
+                date_key = txn_date
+        else:
+            date_key = txn_date
+
+        key = (
+            date_key,
+            txn.get('type'),
+            txn.get('total')
+        )
+        groups[key].append(txn)
+
+    # Process each group
+    for key, txn_group in groups.items():
+        if len(txn_group) <= 1:
+            continue  # No duplicates
+
+        # Separate Plaid and statement transactions
+        # Any transaction without plaid_transaction_id is considered a statement import
+        plaid_txns = [t for t in txn_group if t.get('plaid_transaction_id')]
+        statement_txns = [t for t in txn_group if not t.get('plaid_transaction_id')]
+
+        # If both Plaid and statement transactions exist, remove statement ones
+        if plaid_txns and statement_txns:
+            for stmt_txn in statement_txns:
+                db.delete("transactions", stmt_txn['id'])
+                duplicates_removed += 1
+                plaid_vs_statement_removed += 1
+                logger.debug(f"Removed duplicate statement transaction (has Plaid version): {stmt_txn['id']}")
+
+        # If only statement transactions with duplicates, keep first one
+        elif len(statement_txns) > 1:
+            # Sort by import sequence or ID to keep the first one
+            sorted_stmt = sorted(statement_txns, key=lambda t: (t.get('import_sequence') or 0, t.get('id')))
+            for stmt_txn in sorted_stmt[1:]:
+                db.delete("transactions", stmt_txn['id'])
+                duplicates_removed += 1
+                statement_vs_statement_removed += 1
+                logger.debug(f"Removed duplicate statement transaction: {stmt_txn['id']}")
+
+        # If only Plaid transactions with duplicates, keep first one
+        elif len(plaid_txns) > 1:
+            sorted_plaid = sorted(plaid_txns, key=lambda t: t.get('id'))
+            for plaid_txn in sorted_plaid[1:]:
+                db.delete("transactions", plaid_txn['id'])
+                duplicates_removed += 1
+                logger.debug(f"Removed duplicate Plaid transaction: {plaid_txn['id']}")
+
+    logger.info(
+        f"Duplicate cleanup complete for account {account_id}: "
+        f"{duplicates_removed} total removed "
+        f"({plaid_vs_statement_removed} Plaid vs statement, "
+        f"{statement_vs_statement_removed} statement vs statement)"
+    )
+
+    return {
+        "duplicates_removed": duplicates_removed,
+        "plaid_vs_statement_removed": plaid_vs_statement_removed,
+        "statement_vs_statement_removed": statement_vs_statement_removed
+    }
+
+
 def detect_statement_type(file_path: str) -> str:
     """
     Detect which bank/institution the statement is from.
@@ -319,6 +438,7 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
 
     transactions_created = 0
     transactions_skipped = 0
+    skipped_transactions_details = []  # Track details of skipped transactions
     transaction_first_date = None
     transaction_last_date = None
     credit_volume = 0.0
@@ -332,35 +452,115 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
         if isinstance(txn_type, str):
             txn_type = txn_type.upper()
 
-        # Check for duplicate transaction from OTHER statements only
-        # (same account, date, type, total, but different statement_id)
-        # This prevents importing the same transaction multiple times from overlapping statements
-        # but allows duplicate amounts on the same day within the SAME statement
+        # Enhanced duplicate detection:
+        # 1. Check for Plaid-synced transactions (same account, date, amount)
+        # 2. Check for duplicates from OTHER statements
+        # This prevents importing transactions that already exist from Plaid sync
+        # or from overlapping statement imports
+
+        # Query for transactions with same account, type, and amount
+        # We'll filter by date separately to handle time component differences
         duplicate_filter = {
             "account_id": account_id,
-            "date": transaction_data.get('date'),
             "type": txn_type,
             "total": transaction_data.get('total')
         }
         # Add optional fields to the filter if they exist
+        # Only use ticker and quantity for investment transactions where they're meaningful
         if transaction_data.get('ticker'):
             duplicate_filter["ticker"] = transaction_data.get('ticker')
-        if transaction_data.get('quantity') is not None:
+        # Only use quantity as a filter if it's non-zero (investment transactions)
+        # Bank transactions typically have quantity=0 or NULL, which shouldn't be used for matching
+        if transaction_data.get('quantity') and transaction_data.get('quantity') != 0:
             duplicate_filter["quantity"] = transaction_data.get('quantity')
 
-        existing = db.find("transactions", duplicate_filter)
-        # Only skip if the existing transaction is from a DIFFERENT statement
-        if existing and statement_id:
-            is_duplicate_from_other_statement = any(
-                txn.get('statement_id') != statement_id for txn in existing
+        # Get all potential duplicates (same account, type, amount)
+        potential_duplicates = db.find("transactions", duplicate_filter)
+
+        # DEBUG: Log the filter and results for first transaction
+        if idx == 1:
+            logger.info(f"[DUPLICATE DEBUG] Filter: {duplicate_filter}")
+            logger.info(f"[DUPLICATE DEBUG] Found {len(potential_duplicates)} potential duplicates")
+            for pd in potential_duplicates[:3]:
+                logger.info(f"[DUPLICATE DEBUG]   - ID: {pd.get('id')}, date: {pd.get('date')}, plaid: {pd.get('plaid_transaction_id') is not None}, stmt: {pd.get('statement_id') is not None}")
+
+        # Filter by date (comparing only the date part, ignoring time)
+        # This ensures we match transactions regardless of time-of-day differences
+        txn_date = transaction_data.get('date')
+        if isinstance(txn_date, datetime):
+            txn_date_only = txn_date.date()
+        elif isinstance(txn_date, date):
+            txn_date_only = txn_date
+        else:
+            txn_date_only = txn_date
+
+        existing = []
+        for txn in potential_duplicates:
+            txn_db_date = _coerce_datetime(txn.get('date'))
+            if txn_db_date:
+                if isinstance(txn_db_date, datetime):
+                    txn_db_date_only = txn_db_date.date()
+                else:
+                    txn_db_date_only = txn_db_date
+
+                # Compare date parts only
+                if txn_date_only == txn_db_date_only:
+                    existing.append(txn)
+
+        # Debug: Log what we found (only for first few transactions)
+        if idx <= 5:
+            logger.info(f"[DEBUG {idx}] Checking: date={txn_date_only} type={txn_type} total={transaction_data.get('total')} desc={transaction_data.get('description')[:30]}")
+            logger.info(f"[DEBUG {idx}] Found {len(potential_duplicates)} potential duplicates (same account/type/amount)")
+            logger.info(f"[DEBUG {idx}] Found {len(existing)} exact matches after date filtering")
+            for e in existing[:3]:
+                e_date = _coerce_datetime(e.get('date'))
+                e_date_str = e_date.isoformat() if e_date else 'None'
+                logger.info(f"[DEBUG {idx}]   - date: {e_date_str}, plaid_id: {e.get('plaid_transaction_id') is not None}, stmt_id: {e.get('statement_id') is not None}, desc: {e.get('description')[:30]}")
+
+        existing_committed = [
+            txn for txn in existing
+            if txn.get('plaid_transaction_id') is not None or txn.get('statement_id') is not None
+        ]
+
+        if idx <= 5:
+            logger.info(f"[DEBUG {idx}] After filtering: {len(existing_committed)} committed transactions")
+
+        # Check if duplicate exists from:
+        # 1. Plaid sync (has plaid_transaction_id)
+        # 2. Different statement import (different statement_id)
+        if existing_committed:
+            # Skip if any transaction is from Plaid sync
+            has_plaid_duplicate = any(
+                txn.get('plaid_transaction_id') is not None for txn in existing_committed
             )
-            if is_duplicate_from_other_statement:
+
+            if has_plaid_duplicate:
+                transactions_skipped += 1
+                # Track details of skipped transaction
+                skipped_transactions_details.append({
+                    "date": str(transaction_data.get('date')),
+                    "description": transaction_data.get('description'),
+                    "amount": transaction_data.get('total'),
+                    "type": txn_type,
+                    "reason": "Already imported from Plaid",
+                    "plaid_transaction_id": existing_committed[0].get('plaid_transaction_id') if existing_committed else None
+                })
+                logger.debug(f"Skipping transaction - already synced from Plaid: {transaction_data.get('date')} {transaction_data.get('total')}")
+                continue
+
+            # Skip if transaction exists from a different statement
+            if statement_id:
+                is_duplicate_from_other_statement = any(
+                    txn.get('statement_id') != statement_id for txn in existing
+                )
+                if is_duplicate_from_other_statement:
+                    transactions_skipped += 1
+                    logger.debug(f"Skipping transaction - already imported from another statement: {transaction_data.get('date')} {transaction_data.get('total')}")
+                    continue
+            elif not statement_id:
+                # If no statement_id provided, skip duplicates (backwards compatibility)
                 transactions_skipped += 1
                 continue
-        elif existing and not statement_id:
-            # If no statement_id provided, skip duplicates (backwards compatibility)
-            transactions_skipped += 1
-            continue
 
         # Prepare transaction document with normalized type
         transaction_doc = {
@@ -416,29 +616,94 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
         db.insert("dividends", dividend_doc)
         dividends_created += 1
 
+    # Recalculate positions from imported transactions
     positions_created = recalculate_positions_from_transactions(account_id, db, statement_id)
+
+    # NOTE: We do NOT automatically remove "duplicate" transactions during import
+    # because CSV statements from banks (especially credit cards with multiple card numbers)
+    # can legitimately have the same amount on the same day for different cards.
+    # Users can manually run cleanup via the /accounts/{account_id}/cleanup-duplicates endpoint if needed.
+    cleanup_result = {
+        "duplicates_removed": 0,
+        "plaid_vs_statement_removed": 0,
+        "statement_vs_statement_removed": 0
+    }
 
     # Balance validation: Calculate expected_balance for all transactions
     # This ensures running balances are coherent
     from app.services.balance_validator import validate_and_update_balances
 
-    # Note: Statement imports don't provide a current balance from the source,
-    # so we just calculate expected_balance without external validation
-    # If the statement parser extracts a closing balance in the future, pass it here
+    # Check if account is linked to Plaid to reconcile balance
+    plaid_current_balance = None
+    try:
+        from app.database.models import PlaidAccount, PlaidItem
+        from app.services.plaid_client import plaid_client
+        from sqlalchemy.orm import Session
+
+        # Get session from db object (assuming it has a session attribute)
+        if hasattr(db, 'session'):
+            session = db.session
+
+            # Check if account is linked to Plaid
+            plaid_account = session.query(PlaidAccount).filter(
+                PlaidAccount.account_id == account_id
+            ).first()
+
+            if plaid_account:
+                # Get the Plaid item
+                plaid_item = session.query(PlaidItem).filter(
+                    PlaidItem.id == plaid_account.plaid_item_id
+                ).first()
+
+                if plaid_item and plaid_item.access_token:
+                    # Fetch current balance from Plaid
+                    accounts_response = plaid_client.get_accounts(plaid_item.access_token)
+                    if accounts_response and accounts_response.get('accounts'):
+                        for plaid_acc in accounts_response['accounts']:
+                            if plaid_acc['account_id'] == plaid_account.plaid_account_id:
+                                # Get current balance from Plaid
+                                balances = plaid_acc.get('balances', {})
+                                plaid_current_balance = balances.get('current')
+
+                                logger.info(
+                                    f"Account {account_id} is Plaid-linked. "
+                                    f"Current balance from Plaid: ${plaid_current_balance}"
+                                )
+
+                                # Update account balance to match Plaid
+                                if plaid_current_balance is not None:
+                                    db.update("accounts", {"id": account_id}, {
+                                        "balance": plaid_current_balance
+                                    })
+                                    logger.info(
+                                        f"Updated account {account_id} balance to match Plaid: ${plaid_current_balance}"
+                                    )
+                                break
+    except Exception as e:
+        logger.warning(f"Could not fetch Plaid balance for reconciliation: {e}")
+
+    # Validate and update balances with Plaid's current balance if available
     validation_result = validate_and_update_balances(
         db=db,
         account_id=account_id,
-        source_current_balance=None,  # Statement imports don't provide current balance
+        source_current_balance=plaid_current_balance,
         source_name="statement_import"
     )
 
     logger.info(f"Balance validation for statement import: {validation_result}")
+
+    # Note: Skipped transactions are returned in the result dict below
+    # (not stored in database as the schema doesn't have these fields)
 
     return {
         "account_id": account_id,
         "positions_created": positions_created,
         "transactions_created": transactions_created,
         "transactions_skipped": transactions_skipped,
+        "skipped_transactions": skipped_transactions_details,  # List of skipped transaction details
+        "duplicates_removed": cleanup_result['duplicates_removed'],
+        "plaid_vs_statement_removed": cleanup_result['plaid_vs_statement_removed'],
+        "statement_vs_statement_removed": cleanup_result['statement_vs_statement_removed'],
         "dividends_created": dividends_created,
         "dividends_skipped": dividends_skipped,
         "transaction_first_date": transaction_first_date.isoformat() if transaction_first_date else None,
@@ -509,7 +774,7 @@ async def import_statement(
     logger.info(f"Statement {statement['id']} uploaded and queued for processing with job {job.id}")
 
     return {
-        "message": "Statement uploaded and queued for processing",
+        "message": "Statement uploaded successfully. Processing started.",
         "statement_id": statement['id'],
         "job_id": job.id,
         "statement": statement
@@ -537,7 +802,7 @@ async def process_statement(
     )
 
     return {
-        "message": "Statement queued for processing",
+        "message": "Statement is being processed",
         "statement_id": statement_id,
         "job_id": job.id
     }
@@ -614,7 +879,7 @@ async def reprocess_statement(
     )
 
     return {
-        "message": "Statement queued for reprocessing",
+        "message": "Statement is being reprocessed",
         "statement_id": statement_id,
         "job_id": job.id
     }
@@ -717,6 +982,89 @@ async def get_statement_job_status(
 
     return info
 
+@router.post("/accounts/{account_id}/cleanup-duplicates")
+async def cleanup_duplicate_transactions(
+    account_id: str,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """
+    Remove duplicate transactions for an account.
+    Keeps Plaid-synced transactions, removes statement imports that duplicate Plaid data.
+    Also reconciles balance with Plaid after cleanup.
+    """
+    db = get_db_service(session)
+
+    # Verify account belongs to user
+    account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found"
+        )
+
+    # Remove duplicates
+    cleanup_result = remove_duplicate_transactions(account_id, db)
+    session.commit()
+
+    # Recalculate positions after cleanup
+    positions_created = recalculate_positions_from_transactions(account_id, db)
+    session.commit()
+
+    # Reconcile balance with Plaid
+    plaid_current_balance = None
+    try:
+        from app.database.models import PlaidAccount, PlaidItem
+        from app.services.plaid_client import plaid_client
+
+        plaid_account = session.query(PlaidAccount).filter(
+            PlaidAccount.account_id == account_id
+        ).first()
+
+        if plaid_account:
+            plaid_item = session.query(PlaidItem).filter(
+                PlaidItem.id == plaid_account.plaid_item_id
+            ).first()
+
+            if plaid_item and plaid_item.access_token:
+                accounts_response = plaid_client.get_accounts(plaid_item.access_token)
+                if accounts_response and accounts_response.get('accounts'):
+                    for plaid_acc in accounts_response['accounts']:
+                        if plaid_acc['account_id'] == plaid_account.plaid_account_id:
+                            balances = plaid_acc.get('balances', {})
+                            plaid_current_balance = balances.get('current')
+
+                            if plaid_current_balance is not None:
+                                db.update("accounts", {"id": account_id}, {
+                                    "balance": plaid_current_balance
+                                })
+                                session.commit()
+                                logger.info(
+                                    f"Updated account {account_id} balance to match Plaid: ${plaid_current_balance}"
+                                )
+                            break
+    except Exception as e:
+        logger.warning(f"Could not fetch Plaid balance for reconciliation: {e}")
+
+    # Validate balances
+    from app.services.balance_validator import validate_and_update_balances
+    validation_result = validate_and_update_balances(
+        db=db,
+        account_id=account_id,
+        source_current_balance=plaid_current_balance,
+        source_name="cleanup"
+    )
+    session.commit()
+
+    return {
+        "message": "Duplicate cleanup completed",
+        "cleanup": cleanup_result,
+        "positions_recalculated": positions_created,
+        "plaid_balance": plaid_current_balance,
+        "validation": validation_result
+    }
+
+
 @router.put("/statements/{statement_id}/account")
 async def change_statement_account(
     statement_id: str,
@@ -762,7 +1110,7 @@ async def change_statement_account(
     )
 
     return {
-        "message": "Account updated. Statement queued for reprocessing.",
+        "message": "Account updated. Statement is being reprocessed.",
         "job_id": job.id,
         "statement_id": statement_id
     }

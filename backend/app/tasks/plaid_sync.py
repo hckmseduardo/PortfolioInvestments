@@ -739,12 +739,13 @@ def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account
                 continue
 
             # Get all transactions for this account, ordered chronologically
-            # Use import_sequence to preserve intra-day order, fallback to ID for manual entries
+            # Sort by date (date part only), then by value DESC (credits before debits), then by ID
+            from sqlalchemy import cast, Date
             transactions = db.query(Transaction).filter(
                 Transaction.account_id == account_id
             ).order_by(
-                Transaction.date.asc(),
-                Transaction.import_sequence.asc().nullslast(),
+                cast(Transaction.date, Date).asc(),
+                Transaction.total.desc(),
                 Transaction.id.asc()
             ).all()
 
@@ -767,6 +768,11 @@ def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account
 
             # Get current balance from Plaid
             current_plaid_balance = plaid_balances.get(plaid_account.plaid_account_id, 0.0)
+
+            # For credit cards, Plaid returns positive balance = amount owed
+            # We need to negate it so owing money = negative balance in our system
+            if account.account_type.value == 'credit_card':
+                current_plaid_balance = -current_plaid_balance
 
             # Compare final calculated balance with Plaid current balance
             final_expected_balance = running_balance
@@ -845,12 +851,13 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
                 continue
 
             # Get all transactions for this account
-            # Use import_sequence to preserve intra-day order, fallback to ID for manual entries
+            # Sort by date (date part only), then by value DESC (credits before debits), then by ID
+            from sqlalchemy import cast, Date
             transactions = db.query(Transaction).filter(
                 Transaction.account_id == account_id
             ).order_by(
-                Transaction.date.asc(),
-                Transaction.import_sequence.asc().nullslast(),
+                cast(Transaction.date, Date).asc(),
+                Transaction.total.desc(),
                 Transaction.id.asc()
             ).all()
 
@@ -861,6 +868,12 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
 
             # Get current balance from Plaid
             current_plaid_balance = plaid_balances.get(plaid_account.plaid_account_id, 0.0)
+
+            # For credit cards, Plaid returns positive balance = amount owed
+            # We need to negate it so owing money = negative balance in our system
+            if account.account_type.value == 'credit_card':
+                logger.info(f"Credit card {account.label}: negating Plaid balance ${current_plaid_balance:.2f} -> ${-current_plaid_balance:.2f}")
+                current_plaid_balance = -current_plaid_balance
 
             # Calculate sum of all transactions
             transaction_sum = sum(txn.total for txn in transactions)

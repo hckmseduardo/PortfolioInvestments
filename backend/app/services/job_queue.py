@@ -165,6 +165,28 @@ def enqueue_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool =
     return job
 
 
+def enqueue_delete_plaid_transactions_job(user_id: str, account_id: str) -> Job:
+    from app.tasks.delete_plaid_transactions import run_delete_plaid_transactions_job
+
+    queue = get_plaid_queue()
+    job = queue.enqueue(
+        run_delete_plaid_transactions_job,
+        user_id,
+        account_id,
+        job_timeout=settings.PLAID_JOB_TIMEOUT,
+    )
+    job.meta = job.meta or {}
+    job.meta.update(
+        {
+            "user_id": user_id,
+            "account_id": account_id,
+        }
+    )
+    job.save_meta()
+    logger.info("Enqueued delete Plaid transactions job %s for user %s, account %s", job.id, user_id, account_id)
+    return job
+
+
 def get_ticker_mapping_queue() -> Queue:
     global _ticker_mapping_queue
     if _ticker_mapping_queue is None:

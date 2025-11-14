@@ -435,17 +435,15 @@ const Transactions = () => {
       }
 
       // Tie-breaker: when primary sort values are equal, use secondary sorting
-      // For date sorting, use import_sequence to maintain chronological order within the same day
+      // For date sorting, use total (value) ASC to show debits before credits within the same day
       if (sortConfig.field === 'date') {
-        const seqA = a.import_sequence ?? Number.MAX_SAFE_INTEGER;
-        const seqB = b.import_sequence ?? Number.MAX_SAFE_INTEGER;
+        const totalA = a.total ?? 0;
+        const totalB = b.total ?? 0;
 
-        if (seqA !== seqB) {
-          // When sorting by date DESC (newest first), also sort import_sequence DESC (latest first)
-          // When sorting by date ASC (oldest first), also sort import_sequence ASC (earliest first)
-          return sortConfig.direction === 'asc'
-            ? (seqA - seqB)  // ASC: earliest import_sequence first
-            : (seqB - seqA); // DESC: latest import_sequence first
+        if (totalA !== totalB) {
+          // Always sort by total ASC (debits before credits for display)
+          // This shows smallest debits first, then larger debits, then credits
+          return totalA - totalB;  // ASC: debits (negative) first, then credits (positive)
         }
       }
 

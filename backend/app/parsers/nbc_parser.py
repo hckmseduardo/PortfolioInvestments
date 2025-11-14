@@ -117,7 +117,7 @@ class NBCParser:
                 full_description += f" ({category})"
 
             # Map NBC transaction to our system
-            mapped_type = self._map_transaction_type(description, category, amount, is_credit_card)
+            mapped_type = self._map_transaction_type(description, category, amount)
 
             return {
                 "date": date,
@@ -134,7 +134,7 @@ class NBCParser:
             logger.warning(f"Error parsing row: {row}. Error: {e}")
             return None
 
-    def _map_transaction_type(self, description: str, category: str, amount: float, is_credit_card: bool = False) -> str:
+    def _map_transaction_type(self, description: str, category: str, amount: float) -> str:
         """
         Map NBC transaction to our system.
 
@@ -142,7 +142,6 @@ class NBCParser:
             description: Transaction description
             category: NBC category
             amount: Transaction amount (positive = credit, negative = debit)
-            is_credit_card: Whether this is from a credit card statement
 
         Returns:
             Mapped transaction type
@@ -154,80 +153,12 @@ class NBCParser:
         # More specific patterns should come before generic ones
 
         # Credit card specific handling
-        if is_credit_card:
-            # Payment received on credit card
-            if 'payment received' in desc_lower or 'credit card payment' in cat_lower:
-                return 'deposit'  # Payment to credit card (reduces balance)
-            # All other credit card transactions are purchases (withdrawals)
-            else:
-                return 'withdrawal'
-
-        # Salary/Income
-        if 'paie' in desc_lower or 'paycheck' in desc_lower or 'salary' in cat_lower:
-            return 'deposit'
-        elif 'government' in desc_lower or 'gouv' in desc_lower:
-            return 'deposit'
-        elif 'revenue' in cat_lower or 'mobile deposit' in desc_lower:
-            return 'deposit'
-
-        # INTERAC e-Transfer
-        if 'interac e-transfer' in desc_lower:
-            if amount > 0:
-                return 'deposit'
-            else:
-                return 'withdrawal'
-
-        # Investments
-        if 'investment' in desc_lower or 'investments' in cat_lower:
-            return 'transfer'
-
-        # Transfers to/from other banks
-        if 'tangerine' in desc_lower:
-            return 'transfer'
-
-        # Insurance
-        if 'insurance' in cat_lower or 'assurance' in desc_lower:
+        if amount > 0:
+            return 'deposit'  # Payment to credit card (reduces balance)
+        # All other credit card transactions are purchases (withdrawals)
+        else:
             return 'withdrawal'
 
-        # Mortgage and rent
-        if 'mortgage' in desc_lower or 'mortgage' in cat_lower:
-            return 'withdrawal'
-
-        # Credit card payments
-        if 'mastercard' in desc_lower or 'credit card' in cat_lower:
-            return 'withdrawal'
-
-        # Bills and utilities
-        if 'bill' in desc_lower or 'bill' in cat_lower or 'utilities' in cat_lower:
-            return 'withdrawal'
-
-        # Fees
-        if 'fee' in desc_lower or 'fees' in cat_lower or 'frais' in desc_lower:
-            return 'fee'
-        elif 'service charge' in desc_lower or 'bank fee' in cat_lower:
-            return 'fee'
-
-        # Bonus/interest
-        if 'interest' in desc_lower or 'bonus' in desc_lower:
-            return 'bonus'
-
-        # General transfers
-        if 'transfer' in desc_lower or 'transfer' in cat_lower:
-            if amount > 0:
-                return 'deposit'
-            else:
-                return 'withdrawal'
-
-        # Online payments
-        if 'online' in desc_lower or 'mobile' in desc_lower:
-            return 'withdrawal'
-
-        # Restaurants and shopping
-        if any(keyword in cat_lower for keyword in ['restaurant', 'hairdresser', 'miscellaneous']):
-            return 'withdrawal'
-
-        # Default based on amount
-        return 'deposit' if amount > 0 else 'withdrawal'
 
 
 def parse_nbc_statement(file_path: str) -> Dict[str, Any]:

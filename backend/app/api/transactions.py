@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from typing import List, Optional, Dict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.models.schemas import Transaction, TransactionCreate, User
@@ -9,6 +9,22 @@ from app.database.postgres_db import get_db as get_session
 from app.database.db_service import get_db_service
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
+
+
+def _get_date_only(txn: Dict) -> date:
+    """Extract date part from transaction's date field."""
+    txn_date = txn.get('date', '')
+    if isinstance(txn_date, datetime):
+        return txn_date.date()
+    elif isinstance(txn_date, date):
+        return txn_date
+    elif isinstance(txn_date, str):
+        try:
+            parsed = datetime.fromisoformat(txn_date.replace('Z', '+00:00'))
+            return parsed.date()
+        except (ValueError, AttributeError):
+            return date.min
+    return date.min
 
 
 class BalanceFixRequest(BaseModel):
@@ -44,11 +60,10 @@ def _calculate_running_balances(
         account = db.find_one("accounts", {"id": account_id})
         starting_balance = _get_starting_balance(db, account, start_date)
 
-        # Sort transactions by date ASC (oldest first), then by import_sequence (preserves intra-day order)
-        # Use a tuple: (date, import_sequence with None as high value, id as fallback)
+        # Sort transactions by date ASC (oldest first, date part only), then by value DESC (credits before debits), then by ID
         sorted_txns = sorted(transactions, key=lambda x: (
-            x.get('date', ''),
-            x.get('import_sequence') if x.get('import_sequence') is not None else float('inf'),
+            _get_date_only(x),
+            -x.get('total', 0.0),  # Negative for descending order
             x.get('id', '')
         ))
 
@@ -86,11 +101,10 @@ def _calculate_running_balances(
 
         # Calculate running balance for each account, respecting stored balances
         for acc_id, acc_data in accounts_map.items():
-            # Sort transactions by date ASC (oldest first), then by import_sequence (preserves intra-day order)
-            # Use a tuple: (date, import_sequence with None as high value, id as fallback)
+            # Sort transactions by date ASC (oldest first, date part only), then by value DESC (credits before debits), then by ID
             sorted_txns = sorted(acc_data['transactions'], key=lambda x: (
-                x.get('date', ''),
-                x.get('import_sequence') if x.get('import_sequence') is not None else float('inf'),
+                _get_date_only(x),
+                -x.get('total', 0.0),  # Negative for descending order
                 x.get('id', '')
             ))
 
@@ -220,15 +234,14 @@ async def get_transactions(
             db, transactions, account_id, start_date, current_user.id
         )
 
-    # Sort by date DESC (newest first), then by import_sequence DESC (latest first within same day)
-    # import_sequence preserves chronological order for transactions on the same day
-    # Use negative infinity for None values to sort them last
+    # Sort by date DESC (newest first), then by value ASC (debits before credits for display)
+    # Balance was calculated with credits first, but display shows debits first
     transactions.sort(
         key=lambda x: (
-            x.get('date', ''),
-            -(x.get('import_sequence') if x.get('import_sequence') is not None else float('-inf'))
-        ),
-        reverse=True
+            -_get_date_only(x).toordinal() if _get_date_only(x) != date.min else float('-inf'),  # Negative for DESC date
+            x.get('total', 0.0),  # ASC value (most negative/debits first, then credits)
+            x.get('id', '')  # ASC by ID
+        )
     )
 
     return [Transaction(**txn) for txn in transactions]
@@ -407,12 +420,13 @@ async def fix_transaction_balance(
     transaction.actual_balance = corrected_balance
 
     # Get all transactions for this account, ordered chronologically
-    # Use import_sequence to preserve intra-day order, fallback to ID for manual entries
+    # Sort by date (date part only), then by value DESC (credits before debits), then by ID
+    from sqlalchemy import cast, Date
     all_transactions = session.query(TransactionModel).filter(
         TransactionModel.account_id == transaction.account_id
     ).order_by(
-        TransactionModel.date.asc(),
-        TransactionModel.import_sequence.asc().nullslast(),
+        cast(TransactionModel.date, Date).asc(),
+        TransactionModel.total.desc(),
         TransactionModel.id.asc()
     ).all()
 

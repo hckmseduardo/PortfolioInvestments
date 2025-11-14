@@ -6,9 +6,25 @@ Provides balance validation logic for transactions imported from any source
 """
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
+
+
+def _get_date_only(txn: Dict) -> date:
+    """Extract date part from transaction's date field."""
+    txn_date = txn.get('date', '')
+    if isinstance(txn_date, datetime):
+        return txn_date.date()
+    elif isinstance(txn_date, date):
+        return txn_date
+    elif isinstance(txn_date, str):
+        try:
+            parsed = datetime.fromisoformat(txn_date.replace('Z', '+00:00'))
+            return parsed.date()
+        except (ValueError, AttributeError):
+            return date.min
+    return date.min
 
 
 def validate_and_update_balances(
@@ -54,40 +70,73 @@ def validate_and_update_balances(
         logger.info(f"Account {account.get('label')} has no transactions, skipping validation")
         return {"status": "skipped", "message": "No transactions"}
 
-    # Sort transactions chronologically
+    # Sort transactions chronologically by date (date part only), then by value DESC (credits before debits), then by ID
     sorted_transactions = sorted(
         transactions,
         key=lambda t: (
-            t.get('date', ''),
-            t.get('import_sequence') if t.get('import_sequence') is not None else float('inf'),
+            _get_date_only(t),
+            -t.get('total', 0.0),  # Negative for descending order
             t.get('id', '')
         )
     )
 
-    # Get opening balance
+    # Find the first Plaid transaction
+    # Opening balance from Plaid applies from this transaction forward
+    plaid_transactions = [t for t in sorted_transactions if t.get('plaid_transaction_id')]
+    first_plaid_txn_id = None
+    if plaid_transactions:
+        first_plaid_txn_id = plaid_transactions[0].get('id')
+        first_plaid_date = plaid_transactions[0].get('date')
+        logger.info(f"First Plaid transaction: {first_plaid_txn_id} on {first_plaid_date}")
+
+    # Get opening balance from account (this is the balance at first Plaid transaction)
     opening_balance = account.get('opening_balance') or 0.0
 
     # Calculate expected balance for each transaction
-    running_balance = opening_balance
+    # For transactions BEFORE first Plaid transaction: start at 0
+    # For transactions FROM first Plaid transaction: use opening_balance
+    running_balance = 0.0  # Start at 0 for pre-Plaid transactions
+    reached_first_plaid = False
+
     for txn in sorted_transactions:
+        # When we reach the first Plaid transaction, set running balance to opening_balance
+        # This represents the balance at the START of Plaid sync
+        if first_plaid_txn_id and txn.get('id') == first_plaid_txn_id and not reached_first_plaid:
+            # This is the first Plaid transaction
+            # Set running balance to opening balance BEFORE adding this transaction
+            running_balance = opening_balance
+            reached_first_plaid = True
+            logger.info(f"Reached first Plaid transaction, setting balance to opening_balance: ${opening_balance}")
+
         running_balance += txn.get('total', 0.0)
 
-        # Update transaction with expected balance
-        db.update("transactions", {"id": txn['id']}, {
-            "expected_balance": round(running_balance, 2),
-            "has_balance_inconsistency": False,  # Reset flag, will update if needed
-            "balance_discrepancy": None
-        })
+        # IMPORTANT: Only update balance for statement transactions
+        # Plaid transactions already have correct balance from Plaid API - don't recalculate
+        if not txn.get('plaid_transaction_id'):
+            # This is a statement-imported transaction, update its expected balance
+            db.update("transactions", {"id": txn['id']}, {
+                "expected_balance": round(running_balance, 2),
+                "has_balance_inconsistency": False,
+                "balance_discrepancy": None
+            })
+        else:
+            # This is a Plaid transaction - use its existing balance to keep running_balance in sync
+            # Don't overwrite the balance, just read it to maintain continuity
+            if txn.get('expected_balance') is not None:
+                running_balance = txn.get('expected_balance')
+                logger.debug(f"Using Plaid transaction balance: ${running_balance} for {txn.get('id')}")
 
     # Validate against source current balance if provided
     final_expected_balance = running_balance
     validation_result = {
         "status": "success",
         "opening_balance": opening_balance,
+        "opening_balance_applies_from": first_plaid_date if first_plaid_txn_id else None,
         "final_expected_balance": round(final_expected_balance, 2),
         "transaction_count": len(sorted_transactions),
         "oldest_date": sorted_transactions[0].get('date'),
-        "newest_date": sorted_transactions[-1].get('date')
+        "newest_date": sorted_transactions[-1].get('date'),
+        "has_plaid_transactions": first_plaid_txn_id is not None
     }
 
     if source_current_balance is not None:
@@ -156,12 +205,12 @@ def update_opening_balance_from_source(
         logger.info(f"Account {account.get('label')} has no transactions, keeping opening balance")
         return {"status": "skipped", "message": "No transactions"}
 
-    # Sort transactions chronologically
+    # Sort transactions chronologically by date (date part only), then by value DESC (credits before debits), then by ID
     sorted_transactions = sorted(
         transactions,
         key=lambda t: (
-            t.get('date', ''),
-            t.get('import_sequence') if t.get('import_sequence') is not None else float('inf'),
+            _get_date_only(t),
+            -t.get('total', 0.0),  # Negative for descending order
             t.get('id', '')
         )
     )

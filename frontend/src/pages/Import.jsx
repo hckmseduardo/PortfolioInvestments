@@ -541,9 +541,26 @@ const Import = () => {
         importAPI.uploadStatement(file, selectedAccountId)
       );
 
-      await Promise.all(uploadPromises);
+      const responses = await Promise.all(uploadPromises);
 
-      setResult({ message: `${files.length} file(s) uploaded successfully. Click "Process" to import the data.` });
+      // Start job polling for each uploaded file
+      responses.forEach((response, index) => {
+        const jobId = response.data?.job_id;
+        const statementId = response.data?.statement_id;
+        const filename = files[index].name;
+        const jobType = `statement-upload-${statementId}`;
+
+        if (jobId) {
+          startJobPolling(jobId, {
+            statementIds: [statementId],
+            onComplete: () => loadStatements(),
+            jobDescription: `Processing ${filename}`,
+            jobType
+          });
+        }
+      });
+
+      setResult({ message: `${files.length} file(s) uploaded. Processing started.` });
       setFiles([]);
       document.getElementById('file-input').value = '';
       loadStatements();

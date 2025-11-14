@@ -23,9 +23,12 @@ import {
   CircularProgress,
   Divider,
   TableSortLabel,
-  Tooltip
+  Tooltip,
+  Menu,
+  ListItemIcon,
+  ListItemText
 } from '@mui/material';
-import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History, FilterList } from '@mui/icons-material';
+import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History, FilterList, MoreVert, DeleteSweep } from '@mui/icons-material';
 import { accountsAPI, transactionsAPI, plaidAPI } from '../services/api';
 import { stickyTableHeadSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
@@ -61,12 +64,25 @@ const AccountManagement = () => {
   const [accountToDisconnect, setAccountToDisconnect] = useState(null);
   const [plaidItemInfo, setPlaidItemInfo] = useState(null);
 
+  // Action menu state
+  const [actionMenuAnchor, setActionMenuAnchor] = useState(null);
+  const [selectedAccount, setSelectedAccount] = useState(null);
+  const [deletePlaidDialogOpen, setDeletePlaidDialogOpen] = useState(false);
+  const [deletingPlaidTransactions, setDeletingPlaidTransactions] = useState(false);
+
   // Job tracking state
   const [syncJobIds, setSyncJobIds] = useState({});
   const [syncJobStatuses, setSyncJobStatuses] = useState({});
   const syncPollRefs = useRef({});
   const syncNotificationIds = useRef({});
   const JOB_TYPE_PLAID_SYNC = 'plaid-sync';
+
+  // Delete Plaid transactions job tracking
+  const [deleteJobId, setDeleteJobId] = useState(null);
+  const [deleteJobStatus, setDeleteJobStatus] = useState(null);
+  const deletePollRef = useRef(null);
+  const deleteNotificationIdRef = useRef(null);
+  const JOB_TYPE_DELETE_PLAID = 'delete-plaid-transactions';
 
   // Sorting and filtering state
   const [orderBy, setOrderBy] = useState('label');
@@ -94,6 +110,7 @@ const AccountManagement = () => {
       Object.values(syncPollRefs.current).forEach(intervalId => {
         if (intervalId) clearInterval(intervalId);
       });
+      clearDeletePolling();
     };
   }, []);
 
@@ -355,6 +372,85 @@ const AccountManagement = () => {
     }
   };
 
+  // Helper function to clear polling for delete job
+  const clearDeletePolling = () => {
+    if (deletePollRef.current) {
+      clearInterval(deletePollRef.current);
+      deletePollRef.current = null;
+    }
+  };
+
+  // Poll job status for delete Plaid transactions job
+  const pollDeleteJob = async (jobId, accountLabel) => {
+    try {
+      console.log(`[DELETE PLAID DEBUG] Polling job ${jobId}...`);
+      const response = await plaidAPI.getSyncStatus(jobId);
+      const data = response.data;
+
+      console.log(`[DELETE PLAID DEBUG] Job ${jobId} poll result:`);
+      console.log(`  Status: ${data.status}`);
+      console.log(`  Meta stage: ${data.meta?.stage}`);
+      console.log(`  Meta progress:`, data.meta?.progress);
+      console.log(`  Result:`, data.result);
+
+      setDeleteJobStatus(data.status);
+
+      // Check both status and meta.stage to detect completion
+      const isFinished = data.status === 'finished' || data.meta?.stage === 'completed';
+      const isFailed = data.status === 'failed' || data.meta?.stage === 'failed';
+
+      console.log(`[DELETE PLAID DEBUG] isFinished: ${isFinished}, isFailed: ${isFailed}`);
+
+      if (isFinished) {
+        console.log(`[DELETE PLAID DEBUG] Job ${jobId} completed, stopping poll`);
+        clearDeletePolling();
+        const result = data.result || {};
+        const newBalance = result.new_balance != null ? formatCurrency(result.new_balance) : 'N/A';
+        const message = `Successfully removed ${result.transactions_deleted || 0} transactions. New balance: ${newBalance}`;
+
+        console.log(`[DELETE PLAID DEBUG] Success message: ${message}`);
+
+        const notifId = deleteNotificationIdRef.current;
+        console.log(`[DELETE PLAID DEBUG] Notification ID: ${notifId}`);
+
+        if (notifId !== undefined && notifId !== null) {
+          console.log(`[DELETE PLAID DEBUG] Calling updateJobStatus with notifId: ${notifId}`);
+          updateJobStatus(notifId, message, 'success', JOB_TYPE_DELETE_PLAID);
+        } else {
+          console.warn(`[DELETE PLAID DEBUG] No notification ID found`);
+        }
+
+        setDeletingPlaidTransactions(false);
+        setDeleteJobId(null);
+
+        console.log(`[DELETE PLAID DEBUG] Reloading accounts...`);
+        await loadAccounts();
+      } else if (isFailed) {
+        console.log(`[DELETE PLAID DEBUG] Job ${jobId} failed, stopping poll`);
+        clearDeletePolling();
+        const errorMsg = data.error || 'Delete failed';
+        const message = `Failed to delete Plaid transactions: ${errorMsg}`;
+
+        const notifId = deleteNotificationIdRef.current;
+        if (notifId !== undefined && notifId !== null) {
+          updateJobStatus(notifId, message, 'error', JOB_TYPE_DELETE_PLAID);
+        }
+
+        setDeletingPlaidTransactions(false);
+        setDeleteJobId(null);
+        setError(message);
+      } else {
+        console.log(`[DELETE PLAID DEBUG] Job still running, continuing to poll...`);
+      }
+    } catch (error) {
+      console.error('[DELETE PLAID DEBUG] Error polling delete job:', error);
+      clearDeletePolling();
+      setDeletingPlaidTransactions(false);
+      setDeleteJobId(null);
+      setError('Error checking delete job status');
+    }
+  };
+
   const handleSync = async (itemId, institutionName) => {
     setSyncingItems(prev => ({ ...prev, [itemId]: true }));
     setError('');
@@ -501,6 +597,93 @@ const AccountManagement = () => {
     setPlaidDisconnectDialogOpen(false);
     setAccountToDisconnect(null);
     setPlaidItemInfo(null);
+  };
+
+  // Action menu handlers
+  const handleActionMenuOpen = (event, account) => {
+    setActionMenuAnchor(event.currentTarget);
+    setSelectedAccount(account);
+  };
+
+  const handleActionMenuClose = () => {
+    setActionMenuAnchor(null);
+    setSelectedAccount(null);
+  };
+
+  const handleEditFromMenu = () => {
+    handleActionMenuClose();
+    handleOpenDialog(selectedAccount);
+  };
+
+  const handleDisconnectFromMenu = () => {
+    handleActionMenuClose();
+    if (selectedAccount) {
+      handleAccountPlaidDisconnectClick(selectedAccount);
+    }
+  };
+
+  const handleDeleteFromMenu = () => {
+    handleActionMenuClose();
+    if (selectedAccount) {
+      handleDeleteClick(selectedAccount);
+    }
+  };
+
+  const handleDeletePlaidTransactionsClick = () => {
+    // Close menu but keep selectedAccount for the dialog
+    setActionMenuAnchor(null);
+    setDeletePlaidDialogOpen(true);
+  };
+
+  const handleDeletePlaidTransactionsConfirm = async () => {
+    if (!selectedAccount) {
+      return;
+    }
+
+    setDeletingPlaidTransactions(true);
+    setError('');
+
+    try {
+      const accountLabel = selectedAccount.label || selectedAccount.account_number;
+      const response = await accountsAPI.deletePlaidTransactions(selectedAccount.id);
+      const jobId = response.data.job_id;
+
+      console.log(`[DELETE PLAID] Starting delete job ${jobId} for account ${accountLabel}`);
+
+      // Close dialog
+      setDeletePlaidDialogOpen(false);
+      setSelectedAccount(null);
+      setDeleteJobId(jobId);
+      setDeleteJobStatus('queued');
+
+      // Show notification with job progress - appears in notification center
+      const notifId = showJobProgress(
+        `Removing Plaid transactions from ${accountLabel}...`,
+        jobId,
+        JOB_TYPE_DELETE_PLAID
+      );
+      deleteNotificationIdRef.current = notifId;
+
+      console.log(`[DELETE PLAID] Created notification ${notifId} for job ${jobId}`);
+
+      // Start polling for job status every 4 seconds
+      const pollInterval = setInterval(() => {
+        pollDeleteJob(jobId, accountLabel);
+      }, 4000);
+      deletePollRef.current = pollInterval;
+
+      // Do initial poll after 2 seconds
+      setTimeout(() => pollDeleteJob(jobId, accountLabel), 2000);
+    } catch (err) {
+      console.error('[DELETE PLAID] Error:', err);
+      setError(err.response?.data?.detail || 'Failed to start delete job');
+      setDeletingPlaidTransactions(false);
+    }
+  };
+
+  const handleDeletePlaidTransactionsCancel = () => {
+    setDeletePlaidDialogOpen(false);
+    setSelectedAccount(null);
   };
 
   const getAccountTypeColor = (type) => {
@@ -848,30 +1031,14 @@ const AccountManagement = () => {
                         )}
                       </TableCell>
                       <TableCell align="center">
-                        <IconButton
-                          color="primary"
-                          onClick={() => handleOpenDialog(account)}
-                          size="small"
-                        >
-                          <Edit />
-                        </IconButton>
-                        {account.is_plaid_linked && (
+                        <Tooltip title="Actions">
                           <IconButton
-                            color="warning"
-                            onClick={() => handleAccountPlaidDisconnectClick(account)}
+                            onClick={(e) => handleActionMenuOpen(e, account)}
                             size="small"
-                            title="Disconnect from Plaid"
                           >
-                            <LinkOff />
+                            <MoreVert />
                           </IconButton>
-                        )}
-                        <IconButton
-                          color="error"
-                          onClick={() => handleDeleteClick(account)}
-                          size="small"
-                        >
-                          <Delete />
-                        </IconButton>
+                        </Tooltip>
                       </TableCell>
                     </TableRow>
                   );
@@ -881,6 +1048,63 @@ const AccountManagement = () => {
           </Table>
         </TableContainer>
       </Paper>
+
+      {/* Action Menu */}
+      <Menu
+        anchorEl={actionMenuAnchor}
+        open={Boolean(actionMenuAnchor)}
+        onClose={handleActionMenuClose}
+        PaperProps={{
+          elevation: 3,
+          sx: { width: 320 }
+        }}
+      >
+        <MenuItem onClick={handleEditFromMenu}>
+          <ListItemIcon>
+            <Edit fontSize="small" />
+          </ListItemIcon>
+          <ListItemText
+            primary="Edit Account"
+            secondary="Update account details and settings"
+          />
+        </MenuItem>
+
+        {selectedAccount?.is_plaid_linked && (
+          <MenuItem onClick={handleDeletePlaidTransactionsClick}>
+            <ListItemIcon>
+              <DeleteSweep fontSize="small" color="warning" />
+            </ListItemIcon>
+            <ListItemText
+              primary="Delete Plaid Transactions"
+              secondary="Remove all Plaid-synced transactions. Statement imports will be preserved."
+            />
+          </MenuItem>
+        )}
+
+        {selectedAccount?.is_plaid_linked && (
+          <MenuItem onClick={handleDisconnectFromMenu}>
+            <ListItemIcon>
+              <LinkOff fontSize="small" color="warning" />
+            </ListItemIcon>
+            <ListItemText
+              primary="Disconnect from Plaid"
+              secondary="Stop automatic sync. Transaction history will not be deleted."
+            />
+          </MenuItem>
+        )}
+
+        <Divider />
+
+        <MenuItem onClick={handleDeleteFromMenu}>
+          <ListItemIcon>
+            <Delete fontSize="small" color="error" />
+          </ListItemIcon>
+          <ListItemText
+            primary="Delete Account"
+            secondary="Permanently delete this account and all its data"
+          />
+        </MenuItem>
+      </Menu>
 
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <DialogTitle>
@@ -1092,6 +1316,80 @@ const AccountManagement = () => {
           <Button onClick={handlePlaidDisconnectCancel}>Cancel</Button>
           <Button onClick={handlePlaidDisconnectConfirm} variant="contained" color="error">
             Disconnect All {plaidItemInfo?.linked_accounts.length || 0} Account(s)
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deletePlaidDialogOpen} onClose={handleDeletePlaidTransactionsCancel} maxWidth="sm" fullWidth>
+        <DialogTitle>Delete Plaid Transactions</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            <Typography variant="body2" fontWeight="medium" gutterBottom>
+              This action will delete all Plaid-synced transactions
+            </Typography>
+            <Typography variant="body2">
+              This removes all transactions that were automatically imported via Plaid sync.
+              Statement-imported transactions will be preserved.
+            </Typography>
+          </Alert>
+
+          {selectedAccount && (
+            <>
+              <Typography paragraph>
+                You are about to delete all Plaid transactions for:
+              </Typography>
+              <Box sx={{ p: 2, bgcolor: 'grey.100', borderRadius: 1, mb: 2 }}>
+                <Typography variant="body2">
+                  <strong>Label:</strong> {selectedAccount.label || '-'}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Institution:</strong> {selectedAccount.institution}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Account Number:</strong> {selectedAccount.account_number}
+                </Typography>
+              </Box>
+
+              <Alert severity="info">
+                <Typography variant="body2">
+                  <strong>What will be deleted:</strong>
+                </Typography>
+                <Typography variant="body2" component="div">
+                  • All transactions with Plaid sync data
+                  <br />
+                  • Associated expense records
+                  <br />
+                  • Positions will be recalculated from remaining transactions
+                </Typography>
+              </Alert>
+
+              <Alert severity="success" sx={{ mt: 2 }}>
+                <Typography variant="body2">
+                  <strong>What will be preserved:</strong>
+                </Typography>
+                <Typography variant="body2" component="div">
+                  • Manual statement imports
+                  <br />
+                  • Account information
+                  <br />
+                  • Plaid connection (you can still sync)
+                </Typography>
+              </Alert>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeletePlaidTransactionsCancel} disabled={deletingPlaidTransactions}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDeletePlaidTransactionsConfirm}
+            variant="contained"
+            color="warning"
+            disabled={deletingPlaidTransactions}
+            startIcon={deletingPlaidTransactions ? <CircularProgress size={16} /> : <DeleteSweep />}
+          >
+            {deletingPlaidTransactions ? 'Deleting...' : 'Delete Plaid Transactions'}
           </Button>
         </DialogActions>
       </Dialog>

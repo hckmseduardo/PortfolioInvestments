@@ -7,6 +7,9 @@ from app.database.postgres_db import get_db as get_session
 from app.database.db_service import get_db_service
 from app.database.models import PlaidAccount as PlaidAccountModel, PlaidItem
 from pydantic import BaseModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -177,6 +180,43 @@ async def get_account_plaid_item(
         institution_name=plaid_item.institution_name,
         linked_accounts=linked_accounts
     )
+
+
+@router.delete("/{account_id}/plaid-transactions")
+async def delete_plaid_transactions(
+    account_id: str,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """
+    Delete all Plaid-synced transactions for an account.
+    This removes transactions that were imported via Plaid sync (have plaid_transaction_id).
+    Statement-imported transactions are preserved.
+    Runs as a background job.
+    """
+    from app.services.job_queue import enqueue_delete_plaid_transactions_job
+
+    db = get_db_service(session)
+
+    # Verify account belongs to user
+    existing_account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+    if not existing_account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found"
+        )
+
+    logger.info(
+        f"Enqueuing delete Plaid transactions job for account {account_id} ({existing_account.get('label')})"
+    )
+
+    # Enqueue the deletion as a background job
+    job = enqueue_delete_plaid_transactions_job(current_user.id, account_id)
+
+    return {
+        "message": "Delete Plaid transactions job started",
+        "job_id": job.id
+    }
 
 
 @router.delete("/{account_id}")
