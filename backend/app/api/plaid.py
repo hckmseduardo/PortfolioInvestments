@@ -8,8 +8,10 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
 from sqlalchemy.orm import Session
+from pathlib import Path
 import logging
 import uuid
+import json
 
 from app.models.schemas import User
 from app.api.auth import get_current_user
@@ -20,6 +22,10 @@ from app.services.job_queue import enqueue_plaid_sync_job, get_job_info
 
 router = APIRouter(prefix="/plaid", tags=["plaid"])
 logger = logging.getLogger(__name__)
+
+# Create debug directory for Plaid payloads
+PLAID_DEBUG_DIR = Path("/app/logs/plaid_debug")
+PLAID_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # Pydantic models for request/response
@@ -124,6 +130,25 @@ async def exchange_public_token(
             )
 
         logger.info(f"Retrieved {len(accounts_result['accounts'])} accounts from Plaid")
+
+        # Save Plaid account creation payload for debugging
+        try:
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            debug_file = PLAID_DEBUG_DIR / f"account_creation_{current_user.id}_{timestamp}.json"
+            debug_data = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "user_id": current_user.id,
+                "institution_id": institution_id,
+                "institution_name": institution_name,
+                "item_id": item_id,
+                "accounts": accounts_result['accounts']
+            }
+            with open(debug_file, 'w') as f:
+                json.dump(debug_data, f, indent=2, default=str)
+            logger.info(f"Saved Plaid account creation payload to {debug_file}")
+        except Exception as debug_error:
+            logger.warning(f"Failed to save debug payload: {debug_error}")
+
     except HTTPException:
         raise
     except Exception as e:
@@ -150,12 +175,18 @@ async def exchange_public_token(
 
     # Create accounts and PlaidAccount mappings
     created_accounts = []
+    updated_accounts = []
     try:
         for idx, plaid_acc in enumerate(accounts_result['accounts']):
             logger.info(f"Processing account {idx + 1}/{len(accounts_result['accounts'])}: {plaid_acc['name']}")
             logger.info(f"  Account ID: {plaid_acc['account_id']}")
             logger.info(f"  Type: {plaid_acc['type']} (Python type: {type(plaid_acc['type']).__name__})")
             logger.info(f"  Subtype: {plaid_acc.get('subtype')} (Python type: {type(plaid_acc.get('subtype')).__name__ if plaid_acc.get('subtype') else 'None'})")
+
+            # Check if this PlaidAccount already exists (for deduplication when reconnecting)
+            existing_plaid_account = db.query(PlaidAccount).filter(
+                PlaidAccount.plaid_account_id == plaid_acc['account_id']
+            ).first()
 
             # Map Plaid account type to our AccountTypeEnum
             acc_type = _map_plaid_account_type(
@@ -164,53 +195,102 @@ async def exchange_public_token(
             )
             logger.info(f"  Mapped to AccountTypeEnum: {acc_type}")
 
-            # Create Account record
+            # Get current balance from Plaid
             current_balance = plaid_acc['balances'].get('current', 0.0) or 0.0
-            account = Account(
-                id=str(uuid.uuid4()),
-                user_id=current_user.id,
-                account_type=acc_type,
-                account_number=plaid_acc.get('mask', 'XXXX'),
-                institution=institution_name,
-                balance=current_balance,
-                label=plaid_acc['name'],
-                is_plaid_linked=1,
-                opening_balance=current_balance,  # Set opening balance to current Plaid balance
-                opening_balance_date=datetime.utcnow(),  # Balance is as of now
-                created_at=datetime.utcnow()
-            )
-            db.add(account)
-            logger.info(f"  Created Account record with ID: {account.id}, opening balance: {current_balance}")
 
-            # Create PlaidAccount mapping
-            # Note: type/subtype should already be converted to strings in plaid_client._format_account()
-            logger.info(f"  Creating PlaidAccount mapping with type={plaid_acc['type']}, subtype={plaid_acc.get('subtype')}")
-            plaid_account_mapping = PlaidAccount(
-                id=str(uuid.uuid4()),
-                plaid_item_id=plaid_item.id,
-                account_id=account.id,
-                plaid_account_id=plaid_acc['account_id'],
-                mask=plaid_acc.get('mask'),
-                name=plaid_acc['name'],
-                official_name=plaid_acc.get('official_name'),
-                type=plaid_acc['type'],
-                subtype=plaid_acc.get('subtype'),
-                created_at=datetime.utcnow()
-            )
-            db.add(plaid_account_mapping)
-            logger.info(f"  Created PlaidAccount mapping")
+            # For liability accounts, negate the balance
+            # (Plaid returns positive for amount owed, we store as negative)
+            liability_account_types = [
+                AccountTypeEnum.CREDIT_CARD,
+                AccountTypeEnum.MORTGAGE,
+                AccountTypeEnum.AUTO_LOAN,
+                AccountTypeEnum.STUDENT_LOAN,
+                AccountTypeEnum.HOME_EQUITY,
+                AccountTypeEnum.PERSONAL_LOAN,
+                AccountTypeEnum.BUSINESS_LOAN,
+                AccountTypeEnum.LINE_OF_CREDIT
+            ]
+            if acc_type in liability_account_types:
+                logger.info(f"  Liability account detected - negating balance: ${current_balance:.2f} -> ${-current_balance:.2f}")
+                current_balance = -current_balance
 
-            created_accounts.append({
-                "account_id": account.id,
-                "plaid_account_id": plaid_acc['account_id'],
-                "name": plaid_acc['name'],
-                "mask": plaid_acc.get('mask'),
-                "type": plaid_acc['type'],
-                "subtype": plaid_acc.get('subtype'),
-            })
+            if existing_plaid_account:
+                # Update existing account
+                logger.info(f"  Found existing PlaidAccount - updating instead of creating new")
+                account = db.query(Account).filter(Account.id == existing_plaid_account.account_id).first()
+
+                if account:
+                    # Update account details
+                    account.balance = current_balance
+                    account.label = plaid_acc['name']
+                    account.account_type = acc_type
+                    account.is_plaid_linked = 1
+                    logger.info(f"  Updated existing Account {account.id} with new balance: {current_balance}")
+
+                    # Update PlaidAccount mapping to point to new PlaidItem
+                    existing_plaid_account.plaid_item_id = plaid_item.id
+                    existing_plaid_account.name = plaid_acc['name']
+                    existing_plaid_account.official_name = plaid_acc.get('official_name')
+                    existing_plaid_account.mask = plaid_acc.get('mask')
+                    existing_plaid_account.type = plaid_acc['type']
+                    existing_plaid_account.subtype = plaid_acc.get('subtype')
+
+                    updated_accounts.append({
+                        "account_id": account.id,
+                        "plaid_account_id": plaid_acc['account_id'],
+                        "name": plaid_acc['name'],
+                        "mask": plaid_acc.get('mask'),
+                        "type": plaid_acc['type'],
+                        "subtype": plaid_acc.get('subtype'),
+                    })
+            else:
+                # Create new Account record
+                account = Account(
+                    id=str(uuid.uuid4()),
+                    user_id=current_user.id,
+                    account_type=acc_type,
+                    account_number=plaid_acc.get('mask', 'XXXX'),
+                    institution=institution_name,
+                    balance=current_balance,
+                    label=plaid_acc['name'],
+                    is_plaid_linked=1,
+                    opening_balance=current_balance,  # Set opening balance to current Plaid balance
+                    opening_balance_date=datetime.utcnow(),  # Balance is as of now
+                    created_at=datetime.utcnow()
+                )
+                db.add(account)
+                logger.info(f"  Created Account record with ID: {account.id}, opening balance: {current_balance}")
+
+                # Create PlaidAccount mapping
+                # Note: type/subtype should already be converted to strings in plaid_client._format_account()
+                logger.info(f"  Creating PlaidAccount mapping with type={plaid_acc['type']}, subtype={plaid_acc.get('subtype')}")
+                plaid_account_mapping = PlaidAccount(
+                    id=str(uuid.uuid4()),
+                    plaid_item_id=plaid_item.id,
+                    account_id=account.id,
+                    plaid_account_id=plaid_acc['account_id'],
+                    mask=plaid_acc.get('mask'),
+                    name=plaid_acc['name'],
+                    official_name=plaid_acc.get('official_name'),
+                    type=plaid_acc['type'],
+                    subtype=plaid_acc.get('subtype'),
+                    created_at=datetime.utcnow()
+                )
+                db.add(plaid_account_mapping)
+                logger.info(f"  Created PlaidAccount mapping")
+
+                created_accounts.append({
+                    "account_id": account.id,
+                    "plaid_account_id": plaid_acc['account_id'],
+                    "name": plaid_acc['name'],
+                    "mask": plaid_acc.get('mask'),
+                    "type": plaid_acc['type'],
+                    "subtype": plaid_acc.get('subtype'),
+                })
 
         # Commit all changes
-        logger.info(f"Committing {len(created_accounts)} accounts to database")
+        total_accounts = len(created_accounts) + len(updated_accounts)
+        logger.info(f"Committing {len(created_accounts)} new and {len(updated_accounts)} updated accounts to database")
         db.commit()
         logger.info("Successfully committed all accounts")
     except Exception as e:
@@ -222,15 +302,20 @@ async def exchange_public_token(
         )
 
     logger.info(
-        f"Created Plaid item {plaid_item.id} with {len(created_accounts)} accounts "
-        f"for user {current_user.id}"
+        f"Created Plaid item {plaid_item.id} with {len(created_accounts)} new accounts "
+        f"and {len(updated_accounts)} updated accounts for user {current_user.id}"
     )
 
+    # Combine created and updated accounts for response
+    all_accounts = created_accounts + updated_accounts
+
     return {
-        "message": "Successfully linked accounts",
+        "message": f"Successfully linked accounts ({len(created_accounts)} new, {len(updated_accounts)} updated)",
         "plaid_item_id": plaid_item.id,
         "institution_name": institution_name,
-        "accounts": created_accounts,
+        "accounts": all_accounts,
+        "created_count": len(created_accounts),
+        "updated_count": len(updated_accounts)
     }
 
 

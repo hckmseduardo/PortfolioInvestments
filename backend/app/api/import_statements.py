@@ -665,13 +665,15 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
                                 balances = plaid_acc.get('balances', {})
                                 plaid_current_balance = balances.get('current')
 
-                                # For credit cards, Plaid returns positive balance = amount owed
+                                # For credit cards and loans, Plaid returns positive balance = amount owed
                                 # We need to negate it so owing money = negative balance in our system
                                 account_obj = db.find_one("accounts", {"id": account_id})
-                                if account_obj and account_obj.get('account_type') == 'credit_card':
+                                liability_account_types = ['credit_card', 'mortgage', 'auto_loan', 'student_loan',
+                                                          'home_equity', 'personal_loan', 'business_loan', 'line_of_credit']
+                                if account_obj and account_obj.get('account_type') in liability_account_types:
                                     plaid_current_balance = -plaid_current_balance
                                     logger.info(
-                                        f"Negated credit card balance for {account_obj.get('label')}: ${plaid_current_balance}"
+                                        f"Negated liability account balance for {account_obj.get('label')} ({account_obj.get('account_type')}): ${plaid_current_balance}"
                                     )
 
                                 logger.info(
@@ -1043,12 +1045,14 @@ async def cleanup_duplicate_transactions(
                             balances = plaid_acc.get('balances', {})
                             plaid_current_balance = balances.get('current')
 
-                            # For credit cards, Plaid returns positive balance = amount owed
+                            # For credit cards and loans, Plaid returns positive balance = amount owed
                             # We need to negate it so owing money = negative balance in our system
-                            if account.get('account_type') == 'credit_card':
+                            liability_account_types = ['credit_card', 'mortgage', 'auto_loan', 'student_loan',
+                                                      'home_equity', 'personal_loan', 'business_loan', 'line_of_credit']
+                            if account.get('account_type') in liability_account_types:
                                 plaid_current_balance = -plaid_current_balance
                                 logger.info(
-                                    f"Negated credit card balance for {account.get('label')}: ${plaid_current_balance}"
+                                    f"Negated liability account balance for {account.get('label')} ({account.get('account_type')}): ${plaid_current_balance}"
                                 )
 
                             if plaid_current_balance is not None:

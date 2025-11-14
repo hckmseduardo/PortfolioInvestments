@@ -6,7 +6,9 @@ Handles asynchronous transaction syncing from Plaid.
 import logging
 from typing import Optional
 from datetime import datetime, timedelta
+from pathlib import Path
 import uuid
+import json
 
 from rq import get_current_job
 
@@ -16,6 +18,10 @@ from app.services.plaid_client import plaid_client
 from app.services.plaid_transaction_mapper import create_mapper
 
 logger = logging.getLogger(__name__)
+
+# Create debug directory for Plaid payloads
+PLAID_DEBUG_DIR = Path("/app/logs/plaid_debug")
+PLAID_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = False):
@@ -124,6 +130,30 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
 
                 logger.info(f"[FULL RESYNC] Fetched {len(sync_result['added'])} historical transactions")
 
+                # Save Plaid full sync payload for debugging
+                try:
+                    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                    debug_file = PLAID_DEBUG_DIR / f"full_sync_{user_id}_{plaid_item_id}_{timestamp}.json"
+                    debug_data = {
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "user_id": user_id,
+                        "plaid_item_id": plaid_item_id,
+                        "institution_name": plaid_item.institution_name,
+                        "sync_type": "full_resync",
+                        "date_range": {
+                            "start": start_date.isoformat(),
+                            "end": end_date.isoformat()
+                        },
+                        "transaction_count": len(sync_result['added']),
+                        "transactions": sync_result['added'][:10],  # Save only first 10 for brevity
+                        "total_transactions": len(sync_result['added'])
+                    }
+                    with open(debug_file, 'w') as f:
+                        json.dump(debug_data, f, indent=2, default=str)
+                    logger.info(f"Saved Plaid full sync payload to {debug_file}")
+                except Exception as debug_error:
+                    logger.warning(f"Failed to save debug payload: {debug_error}")
+
                 # Delete existing transactions and expenses for this Plaid item's accounts
                 plaid_accounts = db.query(PlaidAccount).filter(
                     PlaidAccount.plaid_item_id == plaid_item_id
@@ -175,6 +205,31 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
 
                 if not sync_result:
                     raise Exception("Failed to sync transactions from Plaid")
+
+                # Save Plaid incremental sync payload for debugging
+                try:
+                    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                    debug_file = PLAID_DEBUG_DIR / f"incremental_sync_{user_id}_{plaid_item_id}_{timestamp}.json"
+                    debug_data = {
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "user_id": user_id,
+                        "plaid_item_id": plaid_item_id,
+                        "institution_name": plaid_item.institution_name,
+                        "sync_type": sync_type,
+                        "had_cursor": cursor is not None,
+                        "added_count": len(sync_result.get('added', [])),
+                        "modified_count": len(sync_result.get('modified', [])),
+                        "removed_count": len(sync_result.get('removed', [])),
+                        "added_sample": sync_result.get('added', [])[:5],  # First 5 for sample
+                        "modified_sample": sync_result.get('modified', [])[:5],
+                        "removed_sample": sync_result.get('removed', [])[:5],
+                        "has_more": sync_result.get('has_more', False)
+                    }
+                    with open(debug_file, 'w') as f:
+                        json.dump(debug_data, f, indent=2, default=str)
+                    logger.info(f"Saved Plaid incremental sync payload to {debug_file}")
+                except Exception as debug_error:
+                    logger.warning(f"Failed to save debug payload: {debug_error}")
 
             # Get PlaidAccount mappings
             plaid_accounts = db.query(PlaidAccount).filter(
@@ -769,9 +824,11 @@ def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account
             # Get current balance from Plaid
             current_plaid_balance = plaid_balances.get(plaid_account.plaid_account_id, 0.0)
 
-            # For credit cards, Plaid returns positive balance = amount owed
+            # For credit cards and loans, Plaid returns positive balance = amount owed
             # We need to negate it so owing money = negative balance in our system
-            if account.account_type.value == 'credit_card':
+            liability_account_types = ['credit_card', 'mortgage', 'auto_loan', 'student_loan',
+                                      'home_equity', 'personal_loan', 'business_loan', 'line_of_credit']
+            if account.account_type.value in liability_account_types:
                 current_plaid_balance = -current_plaid_balance
 
             # Compare final calculated balance with Plaid current balance
@@ -869,10 +926,12 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
             # Get current balance from Plaid
             current_plaid_balance = plaid_balances.get(plaid_account.plaid_account_id, 0.0)
 
-            # For credit cards, Plaid returns positive balance = amount owed
+            # For credit cards and loans, Plaid returns positive balance = amount owed
             # We need to negate it so owing money = negative balance in our system
-            if account.account_type.value == 'credit_card':
-                logger.info(f"Credit card {account.label}: negating Plaid balance ${current_plaid_balance:.2f} -> ${-current_plaid_balance:.2f}")
+            liability_account_types = ['credit_card', 'mortgage', 'auto_loan', 'student_loan',
+                                      'home_equity', 'personal_loan', 'business_loan', 'line_of_credit']
+            if account.account_type.value in liability_account_types:
+                logger.info(f"Liability account {account.label} ({account.account_type.value}): negating Plaid balance ${current_plaid_balance:.2f} -> ${-current_plaid_balance:.2f}")
                 current_plaid_balance = -current_plaid_balance
 
             # Calculate sum of all transactions
