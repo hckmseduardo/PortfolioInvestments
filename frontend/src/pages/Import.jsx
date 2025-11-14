@@ -934,7 +934,9 @@ const Import = () => {
             </MenuItem>
             {accounts.map((account) => (
               <MenuItem key={account.id} value={account.id}>
-                {account.label || `${account.institution} - ${account.account_number}`} ({account.account_type})
+                {account.institution && `${account.institution} - `}
+                {account.label}
+                {account.account_type && ` (${account.account_type.replace(/_/g, ' ')})`}
               </MenuItem>
             ))}
           </TextField>
@@ -1180,7 +1182,9 @@ const Import = () => {
                             </MenuItem>
                             {accounts.map((account) => (
                               <MenuItem key={account.id} value={account.id}>
-                                {account.label || `${account.institution || ''} ${account.account_number || ''}`.trim()}
+                                {account.institution && `${account.institution} - `}
+                                {account.label}
+                                {account.account_type && ` (${account.account_type.replace(/_/g, ' ')})`}
                               </MenuItem>
                             ))}
                           </Select>
@@ -1338,7 +1342,9 @@ const Import = () => {
                                   </MenuItem>
                                   {accounts.map((account) => (
                                     <MenuItem key={account.id} value={account.id}>
-                                      {account.label || `${account.institution || ''} ${account.account_number || ''}`.trim()}
+                                      {account.institution && `${account.institution} - `}
+                                      {account.label}
+                                      {account.account_type && ` (${account.account_type.replace(/_/g, ' ')})`}
                                     </MenuItem>
                                   ))}
                                 </Select>

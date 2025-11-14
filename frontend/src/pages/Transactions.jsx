@@ -498,7 +498,9 @@ const Transactions = () => {
                   <MenuItem value="">All Accounts</MenuItem>
                   {accounts.map((account) => (
                     <MenuItem key={account.id} value={account.id}>
-                      {account.institution} - {account.account_number}
+                      {account.institution && `${account.institution} - `}
+                      {account.label}
+                      {account.account_type && ` (${account.account_type.replace(/_/g, ' ')})`}
                     </MenuItem>
                   ))}
                 </Select>
