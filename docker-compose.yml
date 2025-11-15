@@ -53,6 +53,7 @@ services:
       - ./backend/logs:/app/logs  # Persist logs on host
     environment:
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-portfolio_user}:${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}@postgres:5432/${POSTGRES_DB:-portfolio}
       - LEGACY_DATA_PATH=/app/data  # Path to legacy JSON files for migration
       - UPLOAD_PATH=/app/uploads
@@ -84,6 +85,9 @@ services:
     container_name: portfolio-frontend
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - ./frontend/ssl:/etc/nginx/ssl:ro
     depends_on:
       backend:
         condition: service_healthy
@@ -117,6 +121,7 @@ services:
       - ./backend/logs:/app/logs  # Persist logs on host
     environment:
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-portfolio_user}:${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}@postgres:5432/${POSTGRES_DB:-portfolio}
       - LEGACY_DATA_PATH=/app/data
       - UPLOAD_PATH=/app/uploads
@@ -149,6 +154,7 @@ services:
       - ./backend/logs:/app/logs  # Persist logs on host
     environment:
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-portfolio_user}:${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}@postgres:5432/${POSTGRES_DB:-portfolio}
       - LEGACY_DATA_PATH=/app/data
       - UPLOAD_PATH=/app/uploads
@@ -172,6 +178,7 @@ services:
       - ./backend/logs:/app/logs  # Persist logs on host
     environment:
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-portfolio_user}:${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}@postgres:5432/${POSTGRES_DB:-portfolio}
       - LEGACY_DATA_PATH=/app/data
       - UPLOAD_PATH=/app/uploads
@@ -195,6 +202,7 @@ services:
       - ./backend/logs:/app/logs  # Persist logs on host
     environment:
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-portfolio_user}:${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}@postgres:5432/${POSTGRES_DB:-portfolio}
       - LEGACY_DATA_PATH=/app/data
       - UPLOAD_PATH=/app/uploads
@@ -221,6 +229,7 @@ services:
       - ./backend/logs:/app/logs  # Persist logs on host
     environment:
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-portfolio_user}:${POSTGRES_PASSWORD:-portfolio_pass_change_in_production}@postgres:5432/${POSTGRES_DB:-portfolio}
       - LEGACY_DATA_PATH=/app/data
       - UPLOAD_PATH=/app/uploads

@@ -21,6 +21,7 @@ from plaid.model.accounts_get_request import AccountsGetRequest
 from plaid.model.item_get_request import ItemGetRequest
 from plaid.model.item_remove_request import ItemRemoveRequest
 from plaid.model.investments_transactions_get_request import InvestmentsTransactionsGetRequest
+from plaid.model.investments_holdings_get_request import InvestmentsHoldingsGetRequest
 from plaid.exceptions import ApiException
 
 from app.config import settings
@@ -94,6 +95,7 @@ class PlaidClient:
                 "products": [Products("transactions"), Products("investments")],  # Request both transactions and investments
                 "country_codes": [CountryCode("US"), CountryCode("CA")],
                 "language": "en",
+                "redirect_uri": "https://app.home/",  # Required for OAuth institutions like Wealthsimple
             }
 
             # If access_token provided, create in update mode to add products
@@ -238,7 +240,7 @@ class PlaidClient:
                 request_args["cursor"] = cursor
 
             logger.info(f"[PLAID DEBUG] Syncing regular transactions:")
-            logger.info(f"  Access token: {access_token[:20]}...")
+            # Security: Access token removed from logs
             logger.info(f"  Cursor: {cursor[:50] if cursor else 'None (initial sync)'}...")
             logger.info(f"  Count: {min(count, 500)}")
 
@@ -304,7 +306,7 @@ class PlaidClient:
             end_date_obj = dt.strptime(end_date, '%Y-%m-%d').date()
 
             logger.info(f"[PLAID DEBUG - HISTORICAL] Fetching historical transactions:")
-            logger.info(f"  Access token: {access_token[:20]}...")
+            # Security: Access token removed from logs
             logger.info(f"  Start date: {start_date_obj}")
             logger.info(f"  End date: {end_date_obj}")
             logger.info(f"  Count: {count}, Offset: {offset}")
@@ -377,7 +379,7 @@ class PlaidClient:
             end_date_obj = dt.strptime(end_date, '%Y-%m-%d').date()
 
             logger.info(f"[PLAID DEBUG] Fetching investment transactions:")
-            logger.info(f"  Access token: {access_token[:20]}...")
+            # Security: Access token removed from logs
             logger.info(f"  Start date: {start_date_obj} (type: {type(start_date_obj).__name__})")
             logger.info(f"  End date: {end_date_obj} (type: {type(end_date_obj).__name__})")
 
@@ -411,6 +413,112 @@ class PlaidClient:
             return None
         except Exception as e:
             logger.error(f"[PLAID DEBUG] Unexpected error getting investment transactions: {e}")
+            logger.exception("Full traceback:")
+            return None
+
+    def get_investment_holdings(self, access_token: str) -> Optional[Dict[str, Any]]:
+        """
+        Get current investment holdings including cash positions
+
+        Args:
+            access_token: Plaid access token
+
+        Returns:
+            Dictionary with holdings, securities, and accounts.
+            Cash positions have is_cash_equivalent=True
+        """
+        if not self._is_enabled():
+            logger.error("Plaid is not configured")
+            return None
+
+        try:
+            logger.info(f"[PLAID HOLDINGS] Fetching investment holdings")
+
+            request = InvestmentsHoldingsGetRequest(
+                access_token=access_token
+            )
+
+            response = self.client.investments_holdings_get(request)
+
+            # Convert Plaid response to dictionary
+            response_dict = response.to_dict()
+            holdings = response_dict.get('holdings', [])
+            securities = response_dict.get('securities', [])
+            accounts = response_dict.get('accounts', [])
+
+            logger.info(f"[PLAID HOLDINGS] Retrieved {len(holdings)} holdings, {len(securities)} securities, {len(accounts)} accounts")
+
+            # Save holdings debug data
+            try:
+                from pathlib import Path
+                debug_dir = Path("/app/logs/plaid_debug")
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                debug_file = debug_dir / f"holdings_{timestamp}.json"
+
+                import json
+                debug_data = {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "holdings_count": len(holdings),
+                    "securities_count": len(securities),
+                    "accounts_count": len(accounts),
+                    "holdings": holdings,
+                    "securities": securities,
+                    "accounts": accounts
+                }
+                with open(debug_file, 'w') as f:
+                    json.dump(debug_data, f, indent=2, default=str)
+                logger.info(f"[PLAID HOLDINGS] Saved full holdings data to {debug_file}")
+            except Exception as e:
+                logger.warning(f"[PLAID HOLDINGS] Failed to save holdings debug data: {e}")
+
+            # Calculate cash balances by subtracting holdings value from total account value
+            # Cash = Total Account Value - Sum(Holding Values)
+            account_cash_balances = {}
+
+            for account in accounts:
+                if account.get('type') == 'investment':
+                    account_id = account.get('account_id')
+                    # Get total account value from current balance
+                    total_value = account.get('balances', {}).get('current', 0) or 0
+
+                    # Calculate total value of holdings for this account
+                    holdings_value = 0
+                    for holding in holdings:
+                        if holding.get('account_id') == account_id:
+                            # Get security info to find current price
+                            security_id = holding.get('security_id')
+                            security = next((s for s in securities if s.get('security_id') == security_id), None)
+
+                            if security:
+                                # Use close_price from security, fall back to institution_price
+                                price = security.get('close_price') or holding.get('institution_price', 0)
+                                quantity = holding.get('quantity', 0)
+                                holdings_value += (price * quantity)
+
+                    # Cash = Total - Holdings
+                    cash_balance = total_value - holdings_value
+                    account_cash_balances[account_id] = cash_balance
+
+                    account_name = account.get('name', 'Unknown')
+                    logger.info(f"[PLAID HOLDINGS] {account_name}: Total=${total_value:.2f}, Holdings=${holdings_value:.2f}, Cash=${cash_balance:.2f}")
+
+            logger.info(f"[PLAID HOLDINGS] Calculated cash for {len(account_cash_balances)} investment accounts")
+
+            return {
+                "holdings": holdings,
+                "securities": securities,
+                "accounts": accounts,
+                "cash_balances": account_cash_balances
+            }
+        except ApiException as e:
+            logger.error(f"[PLAID HOLDINGS] Plaid API exception getting investment holdings:")
+            logger.error(f"  Status: {e.status if hasattr(e, 'status') else 'N/A'}")
+            logger.error(f"  Message: {e}")
+            logger.error(f"  Body: {e.body if hasattr(e, 'body') else 'N/A'}")
+            return None
+        except Exception as e:
+            logger.error(f"[PLAID HOLDINGS] Unexpected error getting investment holdings: {e}")
             logger.exception("Full traceback:")
             return None
 

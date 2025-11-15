@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import timedelta
 from sqlalchemy.orm import Session
@@ -8,10 +8,15 @@ from app.services.two_factor import TwoFactorService
 from app.database.postgres_db import get_db as get_session
 from app.database.db_service import get_db_service
 from app.config import settings
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 import secrets
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
+
+# Security: Initialize rate limiter to prevent brute force attacks
+limiter = Limiter(key_func=get_remote_address)
 
 async def get_current_user(token: str = Depends(oauth2_scheme), session: Session = Depends(get_session)) -> User:
     credentials_exception = HTTPException(
@@ -33,7 +38,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme), session: Session
     return User(**user_doc)
 
 @router.post("/register", response_model=User)
-async def register(user: UserCreate, session: Session = Depends(get_session)):
+@limiter.limit("3/hour")
+async def register(request: Request, user: UserCreate, session: Session = Depends(get_session)):
     db = get_db_service(session)
 
     existing_user = db.find_one("users", {"email": user.email})
@@ -56,7 +62,8 @@ async def register(user: UserCreate, session: Session = Depends(get_session)):
     return User(**created_user)
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), session: Session = Depends(get_session)):
+@limiter.limit("5/15minutes")
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), session: Session = Depends(get_session)):
     db = get_db_service(session)
 
     user_doc = db.find_one("users", {"email": form_data.username})
@@ -158,7 +165,8 @@ async def enable_2fa(verify_data: TwoFactorVerify, current_user: User = Depends(
     return {"message": "2FA enabled successfully"}
 
 @router.post("/2fa/verify", response_model=Token)
-async def verify_2fa(verify_data: TwoFactorVerify, temp_token: str, session: Session = Depends(get_session)):
+@limiter.limit("5/15minutes")
+async def verify_2fa(request: Request, verify_data: TwoFactorVerify, temp_token: str, session: Session = Depends(get_session)):
     """Verify 2FA code during login"""
     db = get_db_service(session)
 

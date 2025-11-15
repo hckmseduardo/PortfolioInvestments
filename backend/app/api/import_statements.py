@@ -4,6 +4,7 @@ import os
 import aiofiles
 from pathlib import Path
 import logging
+import re
 from datetime import datetime, date
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -38,7 +39,19 @@ def _get_date_only(txn: Dict) -> date:
             return date.min
     return date.min
 
+# Security: File upload restrictions
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB in bytes
 ALLOWED_EXTENSIONS = {'.pdf', '.csv', '.xlsx', '.xls', '.qfx', '.ofx'}
+ALLOWED_MIME_TYPES = {
+    'application/pdf',
+    'text/csv',
+    'text/plain',  # CSV files may be detected as plain text
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/x-ofx',
+    'application/vnd.intu.qfx',
+    'application/octet-stream'  # Some file types may be detected as this
+}
 
 
 class StatementAccountChangeRequest(BaseModel):
@@ -49,8 +62,81 @@ class ReprocessAllRequest(BaseModel):
     account_id: Optional[str] = None
 
 
+def sanitize_filename(filename: str) -> str:
+    """
+    Sanitize filename to prevent path traversal and other security issues.
+
+    - Removes directory traversal characters (../, ..\\, etc.)
+    - Removes path separators
+    - Removes control characters and special characters
+    - Limits filename length
+    - Preserves extension
+    """
+    # Remove any path components
+    filename = os.path.basename(filename)
+
+    # Remove directory traversal attempts
+    filename = filename.replace('..', '').replace('/', '').replace('\\', '')
+
+    # Split into name and extension
+    name, ext = os.path.splitext(filename)
+
+    # Remove control characters and special characters, keep only alphanumeric, dash, underscore, space
+    name = re.sub(r'[^\w\s\-.]', '', name)
+
+    # Remove any remaining dots from name (except the one before extension)
+    name = name.replace('.', '_')
+
+    # Limit name length (200 chars max)
+    if len(name) > 200:
+        name = name[:200]
+
+    # Reconstruct filename
+    sanitized = f"{name}{ext.lower()}"
+
+    # Final safety check - ensure no path components
+    if '/' in sanitized or '\\' in sanitized or '..' in sanitized:
+        raise ValueError("Invalid filename after sanitization")
+
+    return sanitized
+
+
 def allowed_file(filename: str) -> bool:
+    """
+    Check if file extension is allowed.
+    Note: Content-type validation is also performed separately.
+    """
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
+
+
+async def validate_file_content_type(file: UploadFile) -> bool:
+    """
+    Validate file content type by checking the actual file content.
+    This provides additional security beyond extension checking.
+    """
+    # Read first 2KB to detect file type
+    content_sample = await file.read(2048)
+    await file.seek(0)  # Reset file pointer
+
+    # Check file signature (magic bytes)
+    if content_sample.startswith(b'%PDF'):
+        return True  # PDF file
+    elif content_sample.startswith(b'PK'):
+        return True  # ZIP-based files (xlsx, xls)
+    elif len(content_sample) > 0:
+        # For CSV/text files, check if it's valid text
+        try:
+            content_sample.decode('utf-8')
+            return True
+        except UnicodeDecodeError:
+            # Try other encodings
+            try:
+                content_sample.decode('latin-1')
+                return True
+            except:
+                return False
+
+    return False
 
 
 def _coerce_datetime(value):
@@ -658,16 +744,39 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
                 if plaid_item and plaid_item.access_token:
                     # Fetch current balance from Plaid
                     accounts_response = plaid_client.get_accounts(plaid_item.access_token)
+
+                    # Fetch investment holdings to get cash balances
+                    holdings_response = plaid_client.get_investment_holdings(plaid_item.access_token)
+                    investment_cash_map = {}
+
+                    if holdings_response:
+                        # Use calculated cash balances (Total Account Value - Holdings Value)
+                        investment_cash_map = holdings_response.get('cash_balances', {})
+
                     if accounts_response and accounts_response.get('accounts'):
                         for plaid_acc in accounts_response['accounts']:
                             if plaid_acc['account_id'] == plaid_account.plaid_account_id:
-                                # Get current balance from Plaid
+                                # Get balance from Plaid
+                                # For investment accounts, use cash balance from holdings
+                                # For other accounts, use current balance
+                                account_obj = db.find_one("accounts", {"id": account_id})
                                 balances = plaid_acc.get('balances', {})
-                                plaid_current_balance = balances.get('current')
+                                acc_type = plaid_acc.get('type')
+                                if acc_type and hasattr(acc_type, 'value'):
+                                    acc_type = acc_type.value
+                                elif acc_type:
+                                    acc_type = str(acc_type)
+
+                                if acc_type == 'investment':
+                                    plaid_current_balance = investment_cash_map.get(plaid_account.plaid_account_id, 0.0)
+                                    logger.info(
+                                        f"Using cash from holdings for investment account {account_obj.get('label') if account_obj else 'Unknown'}: ${plaid_current_balance}"
+                                    )
+                                else:
+                                    plaid_current_balance = balances.get('current')
 
                                 # For credit cards and loans, Plaid returns positive balance = amount owed
                                 # We need to negate it so owing money = negative balance in our system
-                                account_obj = db.find_one("accounts", {"id": account_id})
                                 liability_account_types = ['credit_card', 'mortgage', 'auto_loan', 'student_loan',
                                                           'home_equity', 'personal_loan', 'business_loan', 'line_of_credit']
                                 if account_obj and account_obj.get('account_type') in liability_account_types:
@@ -731,10 +840,18 @@ async def import_statement(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
+    # Security: Validate file extension
     if not allowed_file(file.filename):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+
+    # Security: Validate content type by checking file content
+    if not await validate_file_content_type(file):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File content type validation failed. File may be corrupted or have incorrect extension."
         )
 
     db = get_db_service(session)
@@ -747,16 +864,45 @@ async def import_statement(
                 detail="Account not found"
             )
 
-    logger.info(f"Starting file upload for: {file.filename}")
+    logger.info(f"Starting file upload (filename will be sanitized)")
 
     upload_dir = Path(settings.UPLOAD_PATH)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
+    # Security: Sanitize filename to prevent path traversal
+    try:
+        sanitized_name = sanitize_filename(file.filename)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid filename: {str(e)}"
+        )
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_filename = f"{current_user.id}_{timestamp}_{file.filename}"
+    safe_filename = f"{current_user.id}_{timestamp}_{sanitized_name}"
     file_path = upload_dir / safe_filename
 
+    # Security: Verify the final path is within the upload directory
+    if not file_path.resolve().is_relative_to(upload_dir.resolve()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file path detected"
+        )
+
+    # Security: Read file content and validate size
     content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File size exceeds maximum allowed size of {MAX_FILE_SIZE / 1024 / 1024}MB"
+        )
+
+    if len(content) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File is empty"
+        )
+
     logger.info(f"File content length: {len(content)} bytes")
 
     async with aiofiles.open(file_path, 'wb') as out_file:
@@ -1039,11 +1185,34 @@ async def cleanup_duplicate_transactions(
 
             if plaid_item and plaid_item.access_token:
                 accounts_response = plaid_client.get_accounts(plaid_item.access_token)
+
+                # Fetch investment holdings to get cash balances
+                holdings_response = plaid_client.get_investment_holdings(plaid_item.access_token)
+                investment_cash_map = {}
+
+                if holdings_response:
+                    # Use calculated cash balances (Total Account Value - Holdings Value)
+                    investment_cash_map = holdings_response.get('cash_balances', {})
+
                 if accounts_response and accounts_response.get('accounts'):
                     for plaid_acc in accounts_response['accounts']:
                         if plaid_acc['account_id'] == plaid_account.plaid_account_id:
                             balances = plaid_acc.get('balances', {})
-                            plaid_current_balance = balances.get('current')
+                            acc_type = plaid_acc.get('type')
+                            if acc_type and hasattr(acc_type, 'value'):
+                                acc_type = acc_type.value
+                            elif acc_type:
+                                acc_type = str(acc_type)
+
+                            # For investment accounts, use cash balance from holdings
+                            # For other accounts, use current balance
+                            if acc_type == 'investment':
+                                plaid_current_balance = investment_cash_map.get(plaid_account.plaid_account_id, 0.0)
+                                logger.info(
+                                    f"Using cash from holdings for investment account {account.get('label') if account else 'Unknown'}: ${plaid_current_balance}"
+                                )
+                            else:
+                                plaid_current_balance = balances.get('current')
 
                             # For credit cards and loans, Plaid returns positive balance = amount owed
                             # We need to negate it so owing money = negative balance in our system

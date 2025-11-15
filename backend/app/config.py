@@ -4,9 +4,11 @@ from typing import List, Optional
 
 
 class Settings(BaseSettings):
-    SECRET_KEY: str = "your-secret-key-change-this-in-production"
+    # Security: SECRET_KEY must be provided via environment variable
+    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+    SECRET_KEY: str  # REQUIRED - no default for security
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 120  # Increased to 2 hours to accommodate OAuth flows
 
     # Microsoft Entra ID Configuration
     ENTRA_CLIENT_ID: Optional[str] = None
@@ -32,7 +34,8 @@ class Settings(BaseSettings):
     # PostgreSQL-specific settings (with defaults for docker-compose)
     POSTGRES_DB: str = "portfolio"
     POSTGRES_USER: str = "portfolio_user"
-    POSTGRES_PASSWORD: str = "portfolio_pass_change_in_production"
+    # Security: Use strong passwords in production
+    POSTGRES_PASSWORD: str  # REQUIRED - no default for security
 
     # Background job / Redis configuration
     REDIS_URL: str = "redis://redis:6379/0"
@@ -63,10 +66,70 @@ class Settings(BaseSettings):
     PLAID_ENVIRONMENT: str = "production"  # sandbox, development, or production
     PLAID_QUEUE_NAME: str = "plaid_sync"
     PLAID_JOB_TIMEOUT: int = 1800  # 30 minutes
+    PLAID_DEBUG_MODE: bool = False  # Enable debug file writing (disable in production)
 
     # Ticker mapping configuration
     TICKER_MAPPING_QUEUE_NAME: str = "ticker_mapping"
     TICKER_MAPPING_JOB_TIMEOUT: int = 3600  # 60 minutes (can be slow with Ollama)
+
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def _validate_secret_key(cls, value):
+        """
+        Validate SECRET_KEY for security best practices.
+        """
+        if not value or len(value) < 32:
+            raise ValueError(
+                "SECRET_KEY must be at least 32 characters long. "
+                "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+
+        # Prevent use of obvious insecure values
+        insecure_values = [
+            "your-secret-key",
+            "change-this",
+            "secret",
+            "password",
+            "123456",
+            "changeme"
+        ]
+        value_lower = value.lower()
+        for insecure in insecure_values:
+            if insecure in value_lower:
+                raise ValueError(
+                    f"SECRET_KEY contains insecure pattern '{insecure}'. "
+                    "Please generate a secure random key."
+                )
+
+        return value
+
+    @field_validator("POSTGRES_PASSWORD")
+    @classmethod
+    def _validate_postgres_password(cls, value):
+        """
+        Validate PostgreSQL password for security best practices.
+        """
+        if not value or len(value) < 12:
+            raise ValueError("POSTGRES_PASSWORD must be at least 12 characters long")
+
+        # Prevent use of obvious insecure values
+        insecure_values = [
+            "change-in-production",
+            "password",
+            "123456",
+            "changeme",
+            "postgres",
+            "admin"
+        ]
+        value_lower = value.lower()
+        for insecure in insecure_values:
+            if insecure in value_lower:
+                raise ValueError(
+                    f"POSTGRES_PASSWORD contains insecure pattern '{insecure}'. "
+                    "Please use a secure random password."
+                )
+
+        return value
 
     @field_validator("PRICE_SOURCE_PRIORITY", mode="before")
     @classmethod

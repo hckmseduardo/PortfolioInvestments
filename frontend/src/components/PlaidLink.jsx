@@ -67,11 +67,16 @@ const PlaidLinkButton = ({ onSuccess, onError, buttonText = "Connect Bank Accoun
   }, []);
 
   // Configure Plaid Link
+  // Check if we're returning from an OAuth redirect
+  const isOAuthRedirect = window.location.href.includes('oauth_state_id');
+
   const config = {
     token: linkToken,
     onSuccess: handleSuccess,
     onExit: handleExit,
     onEvent: handleEvent,
+    // Only pass receivedRedirectUri if we're actually in an OAuth redirect
+    ...(isOAuthRedirect && { receivedRedirectUri: window.location.href }),
   };
 
   const { open, ready, error: plaidError } = usePlaidLink(config);
@@ -83,6 +88,14 @@ const PlaidLinkButton = ({ onSuccess, onError, buttonText = "Connect Bank Accoun
       setError('Failed to initialize Plaid Link');
     }
   }, [plaidError]);
+
+  // Automatically resume OAuth flow after redirect
+  useEffect(() => {
+    if (isOAuthRedirect && ready && linkToken) {
+      console.log('OAuth redirect detected, automatically opening Plaid Link to resume flow');
+      open();
+    }
+  }, [isOAuthRedirect, ready, linkToken, open]);
 
   if (loading) {
     return (

@@ -20,6 +20,7 @@ psycopg2-binary==2.9.9
 alembic==1.13.0
 redis==5.0.1
 rq==1.15.1
+slowapi==0.1.9
 pyotp==2.9.0
 qrcode[pil]==8.2
 plaid-python==20.0.0

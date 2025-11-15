@@ -16,6 +16,8 @@ from app.database.postgres_db import get_db_context
 from app.database.models import PlaidItem, PlaidAccount, PlaidSyncCursor, Transaction, Expense, Account
 from app.services.plaid_client import plaid_client
 from app.services.plaid_transaction_mapper import create_mapper
+from app.services.encryption import encryption_service
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,8 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
             if not plaid_item:
                 raise ValueError(f"Plaid item {plaid_item_id} not found for user {user_id}")
 
-            access_token = plaid_item.access_token
+            # Security: Decrypt access token before using
+            access_token = encryption_service.decrypt(plaid_item.access_token)
 
             # Handle full resync vs incremental sync
             if full_resync:
@@ -130,29 +133,30 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
 
                 logger.info(f"[FULL RESYNC] Fetched {len(sync_result['added'])} historical transactions")
 
-                # Save Plaid full sync payload for debugging
-                try:
-                    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-                    debug_file = PLAID_DEBUG_DIR / f"full_sync_{user_id}_{plaid_item_id}_{timestamp}.json"
-                    debug_data = {
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "user_id": user_id,
-                        "plaid_item_id": plaid_item_id,
-                        "institution_name": plaid_item.institution_name,
-                        "sync_type": "full_resync",
-                        "date_range": {
-                            "start": start_date.isoformat(),
-                            "end": end_date.isoformat()
-                        },
-                        "transaction_count": len(sync_result['added']),
-                        "transactions": sync_result['added'][:10],  # Save only first 10 for brevity
-                        "total_transactions": len(sync_result['added'])
-                    }
-                    with open(debug_file, 'w') as f:
-                        json.dump(debug_data, f, indent=2, default=str)
-                    logger.info(f"Saved Plaid full sync payload to {debug_file}")
-                except Exception as debug_error:
-                    logger.warning(f"Failed to save debug payload: {debug_error}")
+                # Security: Save Plaid full sync payload for debugging only if debug mode is enabled
+                if settings.PLAID_DEBUG_MODE:
+                    try:
+                        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                        debug_file = PLAID_DEBUG_DIR / f"full_sync_{user_id}_{plaid_item_id}_{timestamp}.json"
+                        debug_data = {
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "user_id": user_id,
+                            "plaid_item_id": plaid_item_id,
+                            "institution_name": plaid_item.institution_name,
+                            "sync_type": "full_resync",
+                            "date_range": {
+                                "start": start_date.isoformat(),
+                                "end": end_date.isoformat()
+                            },
+                            "transaction_count": len(sync_result['added']),
+                            "transactions": sync_result['added'][:10],  # Save only first 10 for brevity
+                            "total_transactions": len(sync_result['added'])
+                        }
+                        with open(debug_file, 'w') as f:
+                            json.dump(debug_data, f, indent=2, default=str)
+                        logger.info(f"Saved Plaid full sync payload to {debug_file}")
+                    except Exception as debug_error:
+                        logger.warning(f"Failed to save debug payload: {debug_error}")
 
                 # Delete existing transactions and expenses for this Plaid item's accounts
                 plaid_accounts = db.query(PlaidAccount).filter(
@@ -206,30 +210,31 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 if not sync_result:
                     raise Exception("Failed to sync transactions from Plaid")
 
-                # Save Plaid incremental sync payload for debugging
-                try:
-                    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-                    debug_file = PLAID_DEBUG_DIR / f"incremental_sync_{user_id}_{plaid_item_id}_{timestamp}.json"
-                    debug_data = {
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "user_id": user_id,
-                        "plaid_item_id": plaid_item_id,
-                        "institution_name": plaid_item.institution_name,
-                        "sync_type": sync_type,
-                        "had_cursor": cursor is not None,
-                        "added_count": len(sync_result.get('added', [])),
-                        "modified_count": len(sync_result.get('modified', [])),
-                        "removed_count": len(sync_result.get('removed', [])),
-                        "added_sample": sync_result.get('added', [])[:5],  # First 5 for sample
-                        "modified_sample": sync_result.get('modified', [])[:5],
-                        "removed_sample": sync_result.get('removed', [])[:5],
-                        "has_more": sync_result.get('has_more', False)
-                    }
-                    with open(debug_file, 'w') as f:
-                        json.dump(debug_data, f, indent=2, default=str)
-                    logger.info(f"Saved Plaid incremental sync payload to {debug_file}")
-                except Exception as debug_error:
-                    logger.warning(f"Failed to save debug payload: {debug_error}")
+                # Security: Save Plaid incremental sync payload for debugging only if debug mode is enabled
+                if settings.PLAID_DEBUG_MODE:
+                    try:
+                        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                        debug_file = PLAID_DEBUG_DIR / f"incremental_sync_{user_id}_{plaid_item_id}_{timestamp}.json"
+                        debug_data = {
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "user_id": user_id,
+                            "plaid_item_id": plaid_item_id,
+                            "institution_name": plaid_item.institution_name,
+                            "sync_type": sync_type,
+                            "had_cursor": cursor is not None,
+                            "added_count": len(sync_result.get('added', [])),
+                            "modified_count": len(sync_result.get('modified', [])),
+                            "removed_count": len(sync_result.get('removed', [])),
+                            "added_sample": sync_result.get('added', [])[:5],  # First 5 for sample
+                            "modified_sample": sync_result.get('modified', [])[:5],
+                            "removed_sample": sync_result.get('removed', [])[:5],
+                            "has_more": sync_result.get('has_more', False)
+                        }
+                        with open(debug_file, 'w') as f:
+                            json.dump(debug_data, f, indent=2, default=str)
+                        logger.info(f"Saved Plaid incremental sync payload to {debug_file}")
+                    except Exception as debug_error:
+                        logger.warning(f"Failed to save debug payload: {debug_error}")
 
             # Get PlaidAccount mappings
             plaid_accounts = db.query(PlaidAccount).filter(
@@ -634,9 +639,11 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
     for inv_acc in investment_accounts:
         logger.info(f"  - {inv_acc.name} ({inv_acc.type}/{inv_acc.subtype})")
 
-    # Get investment transactions for the last 5 years (maximum history available)
+    # Get investment transactions for the last 90 days
+    # Note: Requesting too much historical data can cause Plaid API timeouts
+    # TODO: Implement pagination for fetching historical data beyond 90 days
     end_date = datetime.now().date()
-    start_date = end_date - timedelta(days=1825)  # 5 years
+    start_date = end_date - timedelta(days=90)  # 90 days
 
     start_date_str = start_date.strftime('%Y-%m-%d')
     end_date_str = end_date.strftime('%Y-%m-%d')
@@ -645,8 +652,10 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
     logger.info(f"[INVESTMENT SYNC] Calling plaid_client.get_investment_transactions()...")
 
     # Fetch investment transactions
+    # Security: Decrypt access token before using
+    access_token = encryption_service.decrypt(plaid_item.access_token)
     investment_result = plaid_client.get_investment_transactions(
-        access_token=plaid_item.access_token,
+        access_token=access_token,
         start_date=start_date_str,
         end_date=end_date_str
     )
@@ -660,34 +669,44 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
 
     transactions = investment_result.get('transactions', [])
     securities = {sec['security_id']: sec for sec in investment_result.get('securities', [])}
+    investment_accounts = investment_result.get('accounts', [])
 
     logger.info(f"[INVESTMENT SYNC DEBUG] Retrieved {len(transactions)} investment transactions")
     logger.info(f"[INVESTMENT SYNC DEBUG] Retrieved {len(securities)} securities")
+    logger.info(f"[INVESTMENT SYNC DEBUG] Retrieved {len(investment_accounts)} accounts from investment API")
 
-    # Save Plaid investment sync payload for debugging
-    try:
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        debug_file = PLAID_DEBUG_DIR / f"investment_sync_{plaid_item.user_id}_{plaid_item.id}_{timestamp}.json"
-        debug_data = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "user_id": plaid_item.user_id,
-            "plaid_item_id": plaid_item.id,
-            "institution_name": plaid_item.institution_name,
-            "sync_type": "investment",
-            "date_range": {
-                "start": start_date_str,
-                "end": end_date_str
-            },
-            "transaction_count": len(transactions),
-            "security_count": len(securities),
-            "transactions": transactions[:10],  # Save first 10 for sample
-            "securities": list(securities.values())[:10]  # First 10 securities
-        }
-        with open(debug_file, 'w') as f:
-            json.dump(debug_data, f, indent=2, default=str)
-        logger.info(f"Saved Plaid investment sync payload to {debug_file}")
-    except Exception as debug_error:
-        logger.warning(f"Failed to save investment sync debug payload: {debug_error}")
+    # Log account balances from investment API
+    for inv_acc in investment_accounts:
+        if inv_acc.get('type') in ['investment', 'brokerage']:
+            logger.info(f"[INVESTMENT API ACCOUNT] {inv_acc.get('name')}: balances = {inv_acc.get('balances')}")
+
+    # Security: Save Plaid investment sync payload for debugging only if debug mode is enabled
+    if settings.PLAID_DEBUG_MODE:
+        try:
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            debug_file = PLAID_DEBUG_DIR / f"investment_sync_{plaid_item.user_id}_{plaid_item.id}_{timestamp}.json"
+            debug_data = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "user_id": plaid_item.user_id,
+                "plaid_item_id": plaid_item.id,
+                "institution_name": plaid_item.institution_name,
+                "sync_type": "investment",
+                "date_range": {
+                    "start": start_date_str,
+                    "end": end_date_str
+                },
+                "transaction_count": len(transactions),
+                "security_count": len(securities),
+                "account_count": len(investment_accounts),
+                "transactions": transactions[:10],  # Save first 10 for sample
+                "securities": list(securities.values())[:10],  # First 10 securities
+                "accounts": investment_accounts[:10] if investment_accounts else []  # First 10 accounts
+            }
+            with open(debug_file, 'w') as f:
+                json.dump(debug_data, f, indent=2, default=str)
+            logger.info(f"Saved Plaid investment sync payload to {debug_file}")
+        except Exception as debug_error:
+            logger.warning(f"Failed to save investment sync debug payload: {debug_error}")
 
     # Log sample of transactions if any
     if transactions:
@@ -724,11 +743,19 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
         # Map investment transaction type to our transaction type
         txn_type = _map_investment_type(inv_txn['type'])
 
+        # Parse date - Plaid SDK may return string or date object
+        txn_date = inv_txn['date']
+        if isinstance(txn_date, str):
+            txn_date = datetime.strptime(txn_date, '%Y-%m-%d').date()
+        elif not isinstance(txn_date, type(datetime.now().date())):
+            # If it's some other type, convert to string first then parse
+            txn_date = datetime.strptime(str(txn_date), '%Y-%m-%d').date()
+
         # Create transaction
         transaction = Transaction(
             id=str(uuid.uuid4()),
             account_id=account_id,
-            date=datetime.strptime(inv_txn['date'], '%Y-%m-%d').date(),
+            date=txn_date,
             type=txn_type,
             ticker=ticker,
             quantity=abs(inv_txn.get('quantity', 0)),
@@ -756,27 +783,29 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
     return added_count
 
 
-def _map_investment_type(plaid_type: str) -> str:
+def _map_investment_type(plaid_type) -> str:
     """
     Map Plaid investment transaction type to our transaction type
 
     Args:
-        plaid_type: Plaid investment transaction type
+        plaid_type: Plaid investment transaction type (InvestmentTransactionType object or string)
 
     Returns:
-        Our transaction type
+        Our transaction type (uppercase to match database enum)
     """
     type_mapping = {
-        'buy': 'buy',
-        'sell': 'sell',
-        'cash': 'deposit',
-        'fee': 'fee',
-        'transfer': 'transfer',
-        'dividend': 'dividend',
-        'interest': 'deposit',
+        'buy': 'BUY',
+        'sell': 'SELL',
+        'cash': 'DEPOSIT',
+        'fee': 'FEE',
+        'transfer': 'TRANSFER',
+        'dividend': 'DIVIDEND',
+        'interest': 'INTEREST',
     }
 
-    return type_mapping.get(plaid_type.lower(), 'other')
+    # Convert Plaid SDK type object to string before processing
+    type_str = str(plaid_type).lower() if plaid_type else 'other'
+    return type_mapping.get(type_str, 'TRANSFER')  # Default to TRANSFER for unmapped types
 
 
 def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account_map, update_stage):
@@ -805,16 +834,43 @@ def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account
         })
 
         # Get fresh account data from Plaid
-        accounts_data = plaid_client.get_accounts(plaid_item.access_token)
+        # Security: Decrypt access token before using
+        access_token = encryption_service.decrypt(plaid_item.access_token)
+        accounts_data = plaid_client.get_accounts(access_token)
         if not accounts_data:
             logger.warning("Could not fetch account data for balance validation")
             return
 
-        # Create mapping of plaid_account_id to current balance
-        plaid_balances = {
-            acc['account_id']: acc['balances'].get('current', 0.0) or 0.0
-            for acc in accounts_data['accounts']
-        }
+        # Get investment holdings to extract cash balances
+        # Security: Use already-decrypted access token
+        holdings_data = plaid_client.get_investment_holdings(access_token)
+        investment_cash_balances = {}
+
+        if holdings_data:
+            # Use calculated cash balances (Total Account Value - Holdings Value)
+            investment_cash_balances = holdings_data.get('cash_balances', {})
+
+        # Create mapping of plaid_account_id to balance
+        # For investment accounts, use cash balance from holdings
+        # For other accounts, use current balance from accounts API
+        plaid_balances = {}
+        for acc in accounts_data['accounts']:
+            acc_type = acc.get('type')
+            # Extract string value from enum-like objects
+            if acc_type and hasattr(acc_type, 'value'):
+                acc_type = acc_type.value
+            elif acc_type:
+                acc_type = str(acc_type)
+
+            # For investment accounts, use cash from holdings
+            if acc_type == 'investment':
+                account_id = acc.get('account_id')
+                balance = investment_cash_balances.get(account_id, 0.0)
+                logger.info(f"[BALANCE] Investment account {acc.get('name')}: Cash balance = ${balance:.2f}")
+            else:
+                balance = acc['balances'].get('current', 0.0) or 0.0
+
+            plaid_balances[acc['account_id']] = balance
 
         TOLERANCE = 1.00  # $1.00 tolerance for balance inconsistencies
 
@@ -920,17 +976,44 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
         plaid_account_map: Mapping of plaid_account_id to account_id
     """
     try:
+        # Security: Decrypt access token before using
+        access_token = encryption_service.decrypt(plaid_item.access_token)
+
         # Get fresh account data from Plaid
-        accounts_data = plaid_client.get_accounts(plaid_item.access_token)
+        accounts_data = plaid_client.get_accounts(access_token)
         if not accounts_data:
             logger.warning("Could not fetch account data for opening balance update")
             return
 
-        # Create mapping of plaid_account_id to current balance
-        plaid_balances = {
-            acc['account_id']: acc['balances'].get('current', 0.0) or 0.0
-            for acc in accounts_data['accounts']
-        }
+        # Get investment holdings to extract cash balances
+        holdings_data = plaid_client.get_investment_holdings(access_token)
+        investment_cash_balances = {}
+
+        if holdings_data:
+            # Use calculated cash balances (Total Account Value - Holdings Value)
+            investment_cash_balances = holdings_data.get('cash_balances', {})
+
+        # Create mapping of plaid_account_id to balance
+        # For investment accounts, use cash balance from holdings
+        # For other accounts, use current balance from accounts API
+        plaid_balances = {}
+        for acc in accounts_data['accounts']:
+            acc_type = acc.get('type')
+            # Extract string value from enum-like objects
+            if acc_type and hasattr(acc_type, 'value'):
+                acc_type = acc_type.value
+            elif acc_type:
+                acc_type = str(acc_type)
+
+            # For investment accounts, use cash from holdings
+            if acc_type == 'investment':
+                account_id = acc.get('account_id')
+                balance = investment_cash_balances.get(account_id, 0.0)
+                logger.info(f"[BALANCE] Investment account {acc.get('name')}: Cash balance = ${balance:.2f}")
+            else:
+                balance = acc['balances'].get('current', 0.0) or 0.0
+
+            plaid_balances[acc['account_id']] = balance
 
         # Update each account
         for plaid_account in plaid_accounts:

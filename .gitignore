@@ -27,3 +27,7 @@ backend/logs/
 
 # Other files
 frontend/nginx - test.conf
+
+# SSL certificates
+frontend/ssl/*.key
+frontend/ssl/*.crt

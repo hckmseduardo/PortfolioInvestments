@@ -19,6 +19,8 @@ from app.database.postgres_db import get_db
 from app.database.models import PlaidItem, PlaidAccount, Account, AccountTypeEnum
 from app.services.plaid_client import plaid_client
 from app.services.job_queue import enqueue_plaid_sync_job, get_job_info
+from app.services.encryption import encryption_service
+from app.config import settings
 
 router = APIRouter(prefix="/plaid", tags=["plaid"])
 logger = logging.getLogger(__name__)
@@ -117,11 +119,14 @@ async def create_update_link_token(
             detail=f"Plaid connection not found"
         )
 
+    # Security: Decrypt access token before using
+    decrypted_access_token = encryption_service.decrypt(plaid_item.access_token)
+
     # Create link token in update mode with the existing access token
     result = plaid_client.create_link_token(
         user_id=current_user.id,
         client_name="Portfolio Investments",
-        access_token=plaid_item.access_token
+        access_token=decrypted_access_token
     )
 
     if not result:
@@ -175,23 +180,31 @@ async def exchange_public_token(
 
         logger.info(f"Retrieved {len(accounts_result['accounts'])} accounts from Plaid")
 
-        # Save Plaid account creation payload for debugging
-        try:
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            debug_file = PLAID_DEBUG_DIR / f"account_creation_{current_user.id}_{timestamp}.json"
-            debug_data = {
-                "timestamp": datetime.utcnow().isoformat(),
-                "user_id": current_user.id,
-                "institution_id": institution_id,
-                "institution_name": institution_name,
-                "item_id": item_id,
-                "accounts": accounts_result['accounts']
-            }
-            with open(debug_file, 'w') as f:
-                json.dump(debug_data, f, indent=2, default=str)
-            logger.info(f"Saved Plaid account creation payload to {debug_file}")
-        except Exception as debug_error:
-            logger.warning(f"Failed to save debug payload: {debug_error}")
+        # Security: Save Plaid account creation payload for debugging only if debug mode is enabled
+        if settings.PLAID_DEBUG_MODE:
+            try:
+                timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                debug_file = PLAID_DEBUG_DIR / f"account_creation_{current_user.id}_{timestamp}.json"
+                # Redact sensitive information
+                debug_data = {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "user_id": current_user.id,
+                    "institution_id": institution_id,
+                    "institution_name": institution_name,
+                    "item_id": item_id,
+                    "accounts": [{
+                        "account_id": acc.get("account_id", "REDACTED"),
+                        "name": acc.get("name", ""),
+                        "type": acc.get("type", ""),
+                        "subtype": acc.get("subtype", ""),
+                        "mask": acc.get("mask", "")
+                    } for acc in accounts_result['accounts']]
+                }
+                with open(debug_file, 'w') as f:
+                    json.dump(debug_data, f, indent=2, default=str)
+                logger.info(f"Saved Plaid account creation payload to {debug_file}")
+            except Exception as debug_error:
+                logger.warning(f"Failed to save debug payload: {debug_error}")
 
     except HTTPException:
         raise
@@ -203,10 +216,13 @@ async def exchange_public_token(
         )
 
     # Create PlaidItem record
+    # Security: Encrypt access token before storing
+    encrypted_access_token = encryption_service.encrypt(access_token)
+
     plaid_item = PlaidItem(
         id=str(uuid.uuid4()),
         user_id=current_user.id,
-        access_token=access_token,  # In production, encrypt this
+        access_token=encrypted_access_token,
         item_id=item_id,
         institution_id=institution_id,
         institution_name=institution_name,
@@ -537,6 +553,9 @@ async def test_sync_transactions(
             detail="Plaid item not found"
         )
 
+    # Security: Decrypt access token before using
+    decrypted_access_token = encryption_service.decrypt(plaid_item.access_token)
+
     # Get sync cursor
     from app.database.models import PlaidSyncCursor
     cursor_record = db.query(PlaidSyncCursor).filter(
@@ -545,7 +564,7 @@ async def test_sync_transactions(
 
     # Sync transactions from Plaid
     sync_result = plaid_client.sync_transactions(
-        access_token=plaid_item.access_token,
+        access_token=decrypted_access_token,
         cursor=cursor_record.cursor if cursor_record else None,
         count=500
     )
@@ -616,9 +635,11 @@ async def disconnect_plaid_item(
             detail="Plaid item not found"
         )
 
+    # Security: Decrypt access token before using
+    decrypted_access_token = encryption_service.decrypt(plaid_item.access_token)
+
     # Remove from Plaid
-    access_token = plaid_item.access_token
-    success = plaid_client.remove_item(access_token)
+    success = plaid_client.remove_item(decrypted_access_token)
 
     if not success:
         logger.warning(f"Failed to remove item from Plaid, continuing with local deletion")
