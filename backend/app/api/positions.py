@@ -104,6 +104,8 @@ def _compute_account_positions_from_transactions(
     transactions = sorted(transactions, key=lambda x: x.get('date', ''))
 
     positions_map: Dict[str, Dict[str, float]] = {}
+    # Use compound key for synthetic cash position to avoid overwriting Cash ETF
+    cash_key = "CASH::Cash"
     cash_position = {
         "ticker": "CASH",
         "name": "Cash",
@@ -145,19 +147,29 @@ def _compute_account_positions_from_transactions(
             continue
 
         name_fallback = name_lookup.get(ticker) if name_lookup else None
+        inferred_name = _infer_name(description, ticker, name_fallback)
+        # Use compound key to handle positions with same ticker but different names
+        position_key = f"{ticker}::{inferred_name}"
         position = positions_map.setdefault(
-            ticker,
+            position_key,
             {
                 "ticker": ticker,
-                "name": _infer_name(description, ticker, name_fallback),
+                "name": inferred_name,
                 "quantity": 0.0,
                 "book_value": 0.0,
                 "market_value": 0.0
             }
         )
 
+        # Update name if we have better information
         if (not position["name"] or position["name"] == ticker) and (name_fallback or description):
-            position["name"] = _infer_name(description, ticker, name_fallback)
+            new_name = _infer_name(description, ticker, name_fallback)
+            # Update the key if the name changed
+            if new_name != position["name"]:
+                positions_map.pop(position_key, None)
+                position_key = f"{ticker}::{new_name}"
+                position["name"] = new_name
+                positions_map[position_key] = position
 
         if txn_type == 'buy':
             if quantity == 0:
@@ -186,53 +198,80 @@ def _compute_account_positions_from_transactions(
         # Ignore other transaction types for position calculations
 
     cash_position['market_value'] = cash_position['quantity']
-    positions_map['CASH'] = cash_position
+    # Use compound key for synthetic cash to avoid overwriting Cash ETF
+    positions_map[cash_key] = cash_position
 
     for data in positions_map.values():
         data['quantity'] = float(data.get('quantity', 0.0))
         data['book_value'] = float(data.get('book_value', 0.0))
-        if data['ticker'] != 'CASH':
-            data['market_value'] = float(data.get('market_value', 0.0) or 0.0)
+        # Only synthetic cash (name="Cash") should have market_value = quantity
+        if data['ticker'] == 'CASH' and data.get('name') == 'Cash':
+            data['market_value'] = data['quantity']
         else:
-            data['market_value'] = float(data.get('market_value', 0.0))
+            data['market_value'] = float(data.get('market_value', 0.0) or 0.0)
 
     return positions_map
 
 def _aggregate_position_maps(position_maps: List[Dict[str, Dict[str, float]]]) -> List[Dict[str, float]]:
+    # Use compound key (ticker, name) to prevent merging different securities with same ticker
+    # e.g., synthetic "CASH" should not merge with Cash ETF that has ticker "CASH"
     aggregated: Dict[str, Dict[str, float]] = {}
 
     for position_map in position_maps:
-        for ticker, data in position_map.items():
+        # position_map keys are compound keys like "TICKER::Name"
+        for compound_key, data in position_map.items():
+            ticker = data.get('ticker')
+            name = data.get('name') or ticker
+
             entry = aggregated.setdefault(
-                ticker,
+                compound_key,
                 {
                     "ticker": ticker,
-                    "name": data.get('name') or ticker,
+                    "name": name,
                     "quantity": 0.0,
                     "book_value": 0.0,
-                    "market_value": 0.0
+                    "market_value": 0.0,
+                    "security_type": data.get('security_type'),
+                    "security_subtype": data.get('security_subtype'),
+                    "sector": data.get('sector'),
+                    "industry": data.get('industry')
                 }
             )
             entry['quantity'] += _safe_float(data.get('quantity'))
             entry['book_value'] += _safe_float(data.get('book_value'))
-            if entry['name'] == ticker and data.get('name'):
-                entry['name'] = data['name']
+            # Preserve metadata from first occurrence
+            if not entry.get('security_type') and data.get('security_type'):
+                entry['security_type'] = data.get('security_type')
+            if not entry.get('security_subtype') and data.get('security_subtype'):
+                entry['security_subtype'] = data.get('security_subtype')
+            if not entry.get('sector') and data.get('sector'):
+                entry['sector'] = data.get('sector')
+            if not entry.get('industry') and data.get('industry'):
+                entry['industry'] = data.get('industry')
 
     result = []
-    for ticker, entry in aggregated.items():
+    for compound_key, entry in aggregated.items():
+        ticker = entry.get('ticker')
+        name = entry.get('name')
+        # Skip positions with near-zero quantity (except cash which can have zero but non-zero book value)
         if ticker != 'CASH' and abs(entry['quantity']) < 1e-9:
             continue
-        if ticker == 'CASH' and abs(entry['quantity']) < 1e-9 and abs(entry['book_value']) < 1e-9:
+        if ticker == 'CASH' and name == 'Cash' and abs(entry['quantity']) < 1e-9 and abs(entry['book_value']) < 1e-9:
             continue
         result.append({
             "ticker": ticker,
             "name": entry.get('name') or ticker,
             "quantity": float(entry['quantity']),
             "book_value": float(entry['book_value']),
-            "market_value": float(entry['market_value'])
+            "market_value": float(entry['market_value']),
+            "security_type": entry.get('security_type'),
+            "security_subtype": entry.get('security_subtype'),
+            "sector": entry.get('sector'),
+            "industry": entry.get('industry')
         })
 
-    result.sort(key=lambda item: (item['ticker'] != 'CASH', item['ticker']))
+    # Sort: synthetic cash first, then by ticker and name
+    result.sort(key=lambda item: (item['ticker'] != 'CASH' or item['name'] != 'Cash', item['ticker'], item['name']))
     return result
 
 
@@ -265,12 +304,20 @@ def _build_aggregated_positions(
                 ticker = pos.get("ticker")
                 if not ticker:
                     continue
-                position_map[ticker] = {
+                name = pos.get("name", ticker)
+                # Use compound key (ticker, name) to handle positions with same ticker but different names
+                # e.g., synthetic "CASH" and Cash ETF with ticker "CASH"
+                compound_key = f"{ticker}::{name}"
+                position_map[compound_key] = {
                     "ticker": ticker,
-                    "name": pos.get("name", ticker),
+                    "name": name,
                     "quantity": _safe_float(pos.get("quantity")),
                     "book_value": _safe_float(pos.get("book_value")),
-                    "market_value": _safe_float(pos.get("market_value"))
+                    "market_value": _safe_float(pos.get("market_value")),
+                    "security_type": pos.get("security_type"),
+                    "security_subtype": pos.get("security_subtype"),
+                    "sector": pos.get("sector"),
+                    "industry": pos.get("industry")
                 }
             if position_map:
                 position_maps.append(position_map)
@@ -280,7 +327,12 @@ def _build_aggregated_positions(
 
     aggregated = _aggregate_position_maps(position_maps)
 
-    tickers_for_quote = [pos['ticker'] for pos in aggregated if pos['ticker'] != 'CASH']
+    # Exclude only the synthetic cash position (ticker="CASH" AND name="Cash") from price quotes
+    # Cash ETFs with ticker "CASH" should still get price quotes
+    tickers_for_quote = [
+        pos['ticker'] for pos in aggregated
+        if not (pos['ticker'] == 'CASH' and pos.get('name') == 'Cash')
+    ]
     quote_cache: Dict[str, PriceQuote] = {
         key.upper(): value for key, value in market_service.get_cached_quotes(tickers_for_quote, as_of).items()
     }
@@ -289,7 +341,9 @@ def _build_aggregated_positions(
 
     for position in aggregated:
         ticker = position['ticker']
-        if ticker == 'CASH':
+        # Only treat as cash if it's the synthetic cash position (ticker="CASH" AND name="Cash")
+        # Cash ETFs with ticker "CASH" should get their market price
+        if ticker == 'CASH' and position.get('name') == 'Cash':
             position['price'] = 1.0
             position['market_value'] = float(position['quantity'])
             position['price_source'] = 'cash'
@@ -801,3 +855,145 @@ async def recalculate_positions(
         "message": "Positions recalculated successfully",
         "positions_created": positions_created
     }
+
+
+@router.get("/snapshots/dates")
+async def get_snapshot_dates(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Get list of available position snapshot dates for the current user's accounts"""
+    db = get_db_service(session)
+
+    # Get all user's account IDs
+    accounts = db.find("accounts", {"user_id": current_user.id})
+    if not accounts:
+        return []
+
+    account_ids = [acc["id"] for acc in accounts]
+
+    # Query distinct snapshot dates for user's accounts
+    from sqlalchemy import select, func, and_
+    from app.database.models import PositionSnapshot as PositionSnapshotModel
+
+    query = (
+        select(
+            func.max(PositionSnapshotModel.snapshot_date).label('snapshot_date')
+        )
+        .where(PositionSnapshotModel.account_id.in_(account_ids))
+        .group_by(func.date_trunc('day', PositionSnapshotModel.snapshot_date))
+        .order_by(func.max(PositionSnapshotModel.snapshot_date).desc())
+    )
+
+    result = session.execute(query)
+    dates = [row[0].isoformat() for row in result]
+
+    return {"snapshot_dates": dates}
+
+
+@router.get("/snapshots/by-date")
+async def get_positions_by_snapshot(
+    snapshot_date: str,  # ISO format date: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Get positions from a specific snapshot date"""
+    db = get_db_service(session)
+
+    # Parse the snapshot date
+    target_date = _parse_iso_datetime(snapshot_date)
+    if not target_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid date format. Use ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS"
+        )
+
+    # Get all user's account IDs
+    accounts = db.find("accounts", {"user_id": current_user.id})
+    if not accounts:
+        return []
+
+    account_ids = [acc["id"] for acc in accounts]
+
+    # Query snapshots for the specified date
+    from sqlalchemy import select, and_, func
+    from app.database.models import PositionSnapshot as PositionSnapshotModel
+
+    # Find snapshots on the same day as target_date
+    date_start = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    date_end = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    query = (
+        select(PositionSnapshotModel)
+        .where(
+            and_(
+                PositionSnapshotModel.account_id.in_(account_ids),
+                PositionSnapshotModel.snapshot_date >= date_start,
+                PositionSnapshotModel.snapshot_date <= date_end
+            )
+        )
+        .order_by(PositionSnapshotModel.ticker)
+    )
+
+    result = session.execute(query)
+    snapshots = result.scalars().all()
+
+    # Load security metadata overrides for all tickers in the snapshots
+    from app.database.models import SecurityMetadataOverride
+    ticker_names = {(snap.ticker, snap.name or snap.ticker) for snap in snapshots}
+    overrides_query = session.query(SecurityMetadataOverride).filter(
+        and_(
+            SecurityMetadataOverride.ticker.in_([t[0] for t in ticker_names]),
+            SecurityMetadataOverride.security_name.in_([t[1] for t in ticker_names])
+        )
+    )
+    overrides = {(o.ticker, o.security_name): o for o in overrides_query.all()}
+
+    # Convert to position-like dict format for frontend compatibility
+    positions = []
+    for snap in snapshots:
+        # Get account info for display
+        account = next((acc for acc in accounts if acc["id"] == snap.account_id), None)
+
+        # Apply security metadata overrides if they exist
+        override_key = (snap.ticker, snap.name or snap.ticker)
+        override = overrides.get(override_key)
+
+        security_type = snap.security_type
+        security_subtype = snap.security_subtype
+        sector = snap.sector
+        industry = snap.industry
+
+        if override:
+            if override.custom_type:
+                security_type = override.custom_type
+            if override.custom_subtype:
+                security_subtype = override.custom_subtype
+            if override.custom_sector:
+                sector = override.custom_sector
+            if override.custom_industry:
+                industry = override.custom_industry
+
+        positions.append({
+            "id": snap.id,
+            "account_id": snap.account_id,
+            "account_name": account.get("label") or account.get("institution", "Unknown") if account else "Unknown",
+            "ticker": snap.ticker,
+            "name": snap.name,
+            "quantity": snap.quantity,
+            "book_value": snap.book_value,
+            "market_value": snap.market_value,
+            "price": snap.institution_price or (snap.market_value / snap.quantity if snap.quantity != 0 else 0),
+            "price_source": "plaid",
+            "price_as_of": snap.price_as_of.isoformat() if snap.price_as_of else None,
+            # Plaid metadata with overrides applied
+            "security_type": security_type,
+            "security_subtype": security_subtype,
+            "sector": sector,
+            "industry": industry,
+            # Snapshot metadata
+            "snapshot_date": snap.snapshot_date.isoformat(),
+            "is_snapshot": True
+        })
+
+    return positions

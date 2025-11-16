@@ -166,6 +166,11 @@ export const positionsAPI = {
         ...(params.instrument_type_id ? { instrument_type_id: params.instrument_type_id } : {}),
         ...(params.instrument_industry_id ? { instrument_industry_id: params.instrument_industry_id } : {})
       }
+    }),
+  getSnapshotDates: () => api.get('/positions/snapshots/dates'),
+  getBySnapshotDate: (snapshotDate) =>
+    api.get('/positions/snapshots/by-date', {
+      params: { snapshot_date: snapshotDate }
     })
 };
 
@@ -292,6 +297,36 @@ export const transactionsAPI = {
   create: (data) => api.post('/transactions', data),
   delete: (id) => api.delete(`/transactions/${id}`),
   fixBalance: (id, data) => api.patch(`/transactions/${id}/fix-balance`, data),
+};
+
+export const securityMetadataAPI = {
+  // Security Types
+  getTypes: () => api.get('/security-metadata/types'),
+  createType: (data) => api.post('/security-metadata/types', data),
+  updateType: (id, data) => api.put(`/security-metadata/types/${id}`, data),
+  deleteType: (id) => api.delete(`/security-metadata/types/${id}`),
+
+  // Security Subtypes
+  getSubtypes: () => api.get('/security-metadata/subtypes'),
+  createSubtype: (data) => api.post('/security-metadata/subtypes', data),
+  updateSubtype: (id, data) => api.put(`/security-metadata/subtypes/${id}`, data),
+  deleteSubtype: (id) => api.delete(`/security-metadata/subtypes/${id}`),
+
+  // Sectors
+  getSectors: () => api.get('/security-metadata/sectors'),
+  createSector: (data) => api.post('/security-metadata/sectors', data),
+  updateSector: (id, data) => api.put(`/security-metadata/sectors/${id}`, data),
+  deleteSector: (id) => api.delete(`/security-metadata/sectors/${id}`),
+
+  // Industries
+  getIndustries: () => api.get('/security-metadata/industries'),
+  createIndustry: (data) => api.post('/security-metadata/industries', data),
+  updateIndustry: (id, data) => api.put(`/security-metadata/industries/${id}`, data),
+  deleteIndustry: (id) => api.delete(`/security-metadata/industries/${id}`),
+
+  // Overrides
+  setOverride: (data) => api.post('/security-metadata/overrides', data),
+  getOverride: (ticker, securityName) => api.get(`/security-metadata/overrides/${encodeURIComponent(ticker)}/${encodeURIComponent(securityName)}`),
 };
 
 export const plaidAPI = {

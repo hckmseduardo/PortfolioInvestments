@@ -135,6 +135,15 @@ const Cashflow = () => {
   const [selectedExpenseIds, setSelectedExpenseIds] = useState([]);
   const [bulkCategory, setBulkCategory] = useState('');
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+  // State for Incomes List
+  const [selectedIncomeIds, setSelectedIncomeIds] = useState([]);
+  const [bulkIncomeCategory, setBulkIncomeCategory] = useState('');
+  // State for Investments List
+  const [selectedInvestmentIds, setSelectedInvestmentIds] = useState([]);
+  const [bulkInvestmentCategory, setBulkInvestmentCategory] = useState('');
+  // State for Transfers List
+  const [selectedTransferIds, setSelectedTransferIds] = useState([]);
+  const [bulkTransferCategory, setBulkTransferCategory] = useState('');
   const conversionPollRef = useRef(null);
   const conversionJobIdRef = useRef(null);
   const conversionNotificationIdRef = useRef(null);
@@ -327,6 +336,117 @@ const Cashflow = () => {
       showSuccess(`Updated ${selectedExpenseIds.length} expenses`);
       setSelectedExpenseIds([]);
       setBulkCategory('');
+      await fetchExpenses();
+      await fetchSummary();
+      await fetchMonthlyComparison();
+    } catch (error) {
+      console.error('Error applying bulk category:', error);
+      showError('Error applying bulk category');
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  // Income selection and bulk category functions
+  const toggleIncomeSelection = (incomeId) => {
+    setSelectedIncomeIds((prev) =>
+      prev.includes(incomeId) ? prev.filter((id) => id !== incomeId) : [...prev, incomeId]
+    );
+  };
+
+  const handleSelectAllIncomes = (checked, incomesSource) => {
+    if (!checked) {
+      setSelectedIncomeIds([]);
+      return;
+    }
+    const ids = incomesSource.map((income) => income.id);
+    setSelectedIncomeIds(ids);
+  };
+
+  const handleBulkIncomeCategoryApply = async () => {
+    if (!bulkIncomeCategory || selectedIncomeIds.length === 0) {
+      return;
+    }
+    setIsBulkUpdating(true);
+    try {
+      await Promise.all(selectedIncomeIds.map((incomeId) => expensesAPI.updateExpenseCategory(incomeId, bulkIncomeCategory)));
+      showSuccess(`Updated ${selectedIncomeIds.length} incomes`);
+      setSelectedIncomeIds([]);
+      setBulkIncomeCategory('');
+      await fetchExpenses();
+      await fetchSummary();
+      await fetchMonthlyComparison();
+    } catch (error) {
+      console.error('Error applying bulk category:', error);
+      showError('Error applying bulk category');
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  // Investment selection and bulk category functions
+  const toggleInvestmentSelection = (investmentId) => {
+    setSelectedInvestmentIds((prev) =>
+      prev.includes(investmentId) ? prev.filter((id) => id !== investmentId) : [...prev, investmentId]
+    );
+  };
+
+  const handleSelectAllInvestments = (checked, investmentsSource) => {
+    if (!checked) {
+      setSelectedInvestmentIds([]);
+      return;
+    }
+    const ids = investmentsSource.map((investment) => investment.id);
+    setSelectedInvestmentIds(ids);
+  };
+
+  const handleBulkInvestmentCategoryApply = async () => {
+    if (!bulkInvestmentCategory || selectedInvestmentIds.length === 0) {
+      return;
+    }
+    setIsBulkUpdating(true);
+    try {
+      await Promise.all(selectedInvestmentIds.map((investmentId) => expensesAPI.updateExpenseCategory(investmentId, bulkInvestmentCategory)));
+      showSuccess(`Updated ${selectedInvestmentIds.length} investments`);
+      setSelectedInvestmentIds([]);
+      setBulkInvestmentCategory('');
+      await fetchExpenses();
+      await fetchSummary();
+      await fetchMonthlyComparison();
+    } catch (error) {
+      console.error('Error applying bulk category:', error);
+      showError('Error applying bulk category');
+    } finally {
+      setIsBulkUpdating(false);
+    }
+  };
+
+  // Transfer selection and bulk category functions
+  const toggleTransferSelection = (transferId) => {
+    setSelectedTransferIds((prev) =>
+      prev.includes(transferId) ? prev.filter((id) => id !== transferId) : [...prev, transferId]
+    );
+  };
+
+  const handleSelectAllTransfers = (checked, transfersSource) => {
+    if (!checked) {
+      setSelectedTransferIds([]);
+      return;
+    }
+    const ids = transfersSource.map((transfer) => transfer.id);
+    setSelectedTransferIds(ids);
+  };
+
+  const handleBulkTransferCategoryApply = async () => {
+    if (!bulkTransferCategory || selectedTransferIds.length === 0) {
+      return;
+    }
+    setIsBulkUpdating(true);
+    try {
+      await Promise.all(selectedTransferIds.map((transferId) => expensesAPI.updateExpenseCategory(transferId, bulkTransferCategory)));
+      showSuccess(`Updated ${selectedTransferIds.length} transfers`);
+      setSelectedTransferIds([]);
+      setBulkTransferCategory('');
       await fetchExpenses();
       await fetchSummary();
       await fetchMonthlyComparison();
@@ -1918,7 +2038,7 @@ const Cashflow = () => {
 
       {/* Tab 2: Incomes List */}
       {tabValue === 2 && (
-        <Paper sx={{ p: 2 }}>
+        <Paper sx={{ p: 2, pb: selectedIncomeIds.length > 0 ? 10 : 2 }}>
           <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
             <ExportButtons
               data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'income').map(expense => ({
@@ -1935,6 +2055,15 @@ const Cashflow = () => {
             <Table stickyHeader>
               <TableHead sx={stickyTableHeadSx}>
                 <TableRow>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      color="primary"
+                      indeterminate={selectedIncomeIds.length > 0 && selectedIncomeIds.length < displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'income').length}
+                      checked={selectedIncomeIds.length > 0 && selectedIncomeIds.length === displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'income').length && displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'income').length > 0}
+                      onChange={(event) => handleSelectAllIncomes(event.target.checked, displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'income'))}
+                      inputProps={{ 'aria-label': 'Select all incomes' }}
+                    />
+                  </TableCell>
                   <TableCell sortDirection={tableSortConfig.field === 'date' ? tableSortConfig.direction : false}>
                     <TableSortLabel
                       active={tableSortConfig.field === 'date'}
@@ -1991,11 +2120,142 @@ const Cashflow = () => {
                   </TableCell>
                   <TableCell align="center">Actions</TableCell>
                 </TableRow>
+                <TableRow sx={stickyFilterRowSx}>
+                  <TableCell />
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        type="date"
+                        size="small"
+                        value={tableFilters.date}
+                        onChange={(e) => handleTableFilterChange('date', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.date && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('date')} title="Clear date filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search description"
+                        value={tableFilters.description}
+                        onChange={(e) => handleTableFilterChange('description', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.description && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('description')} title="Clear description filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search account"
+                        value={tableFilters.account}
+                        onChange={(e) => handleTableFilterChange('account', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.account && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('account')} title="Clear account filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <FormControl size="small" fullWidth>
+                        <Select
+                          value={selectedCategory}
+                          onChange={(e) => setSelectedCategory(e.target.value)}
+                          displayEmpty
+                          renderValue={(value) => renderCategoryLabel(value, 'All Categories')}
+                        >
+                          <MenuItem key="all-categories" value="">
+                            <em>All Categories</em>
+                          </MenuItem>
+                          {categories.filter(cat => cat.type === 'income').map((category) => (
+                            <MenuItem key={category.id} value={category.name}>
+                              {renderCategoryLabel(category.name, category.name)}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      {selectedCategory && (
+                        <IconButton size="small" onClick={() => setSelectedCategory('')} title="Clear category filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Min"
+                        value={tableFilters.amountMin}
+                        onChange={(e) => handleTableFilterChange('amountMin', e.target.value)}
+                        sx={{ width: 100 }}
+                      />
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Max"
+                        value={tableFilters.amountMax}
+                        onChange={(e) => handleTableFilterChange('amountMax', e.target.value)}
+                        sx={{ width: 100 }}
+                      />
+                      {(tableFilters.amountMin || tableFilters.amountMax) && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('amount')} title="Clear amount filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search notes"
+                        value={tableFilters.notes}
+                        onChange={(e) => handleTableFilterChange('notes', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.notes && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('notes')} title="Clear notes filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell align="center">
+                    <Button
+                      variant="text"
+                      size="small"
+                      startIcon={<ClearIcon />}
+                      onClick={() => {
+                        resetTableFilters();
+                        setSelectedCategory('');
+                      }}
+                    >
+                      Clear All
+                    </Button>
+                  </TableCell>
+                </TableRow>
               </TableHead>
               <TableBody>
                 {displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'income').length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
+                    <TableCell colSpan={8} align="center">
                       <Typography color="textSecondary" py={3}>
                         No income transactions found. Import transactions to see income data.
                       </Typography>
@@ -2004,8 +2264,16 @@ const Cashflow = () => {
                 ) : (
                   displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'income').map((expense) => {
                     const accountLabel = getAccountLabel(expense.account_id);
+                    const isSelected = selectedIncomeIds.includes(expense.id);
                     return (
-                      <TableRow key={expense.id}>
+                      <TableRow key={expense.id} selected={isSelected}>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            color="primary"
+                            checked={isSelected}
+                            onChange={() => toggleIncomeSelection(expense.id)}
+                          />
+                        </TableCell>
                         <TableCell>{formatDate(expense.date)}</TableCell>
                         <TableCell>
                           <Box display="flex" alignItems="center" gap={0.5}>
@@ -2079,12 +2347,79 @@ const Cashflow = () => {
               </TableBody>
             </Table>
           </TableContainer>
+
+          {/* Fixed Bottom Bar for Bulk Category Selection */}
+          {selectedIncomeIds.length > 0 && (
+            <Box
+              sx={{
+                position: 'fixed',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                bgcolor: 'primary.main',
+                color: 'white',
+                p: { xs: 1.5, md: 2 },
+                boxShadow: 3,
+                zIndex: 1000,
+                display: 'flex',
+                flexDirection: { xs: 'column', md: 'row' },
+                gap: { xs: 1, md: 2 },
+                alignItems: { xs: 'stretch', md: 'center' },
+                justifyContent: 'center'
+              }}
+            >
+              <Typography variant={isMobile ? 'body1' : 'h6'} sx={{ fontWeight: 600 }}>
+                {selectedIncomeIds.length} income{selectedIncomeIds.length !== 1 ? 's' : ''} selected
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: { xs: '100%', md: 250 }, bgcolor: 'white', borderRadius: 1 }}>
+                <InputLabel id="bulk-income-category-label">Category</InputLabel>
+                <Select
+                  labelId="bulk-income-category-label"
+                  value={bulkIncomeCategory}
+                  label="Category"
+                  onChange={(event) => setBulkIncomeCategory(event.target.value)}
+                  renderValue={(value) => renderCategoryLabel(value, 'Choose category')}
+                >
+                  <MenuItem value="">
+                    <em>Select category</em>
+                  </MenuItem>
+                  {categories.filter(cat => cat.type === 'income').map((category) => (
+                    <MenuItem key={category.id} value={category.name}>
+                      {renderCategoryLabel(category.name, category.name)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  size={isMobile ? 'medium' : 'large'}
+                  onClick={handleBulkIncomeCategoryApply}
+                  disabled={!bulkIncomeCategory || isBulkUpdating}
+                  sx={{ bgcolor: 'success.main', '&:hover': { bgcolor: 'success.dark' }, flex: 1 }}
+                >
+                  {isBulkUpdating ? 'Applying...' : isMobile ? 'Apply' : 'Apply Category'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  size={isMobile ? 'medium' : 'large'}
+                  onClick={() => {
+                    setSelectedIncomeIds([]);
+                    setBulkIncomeCategory('');
+                  }}
+                  sx={{ borderColor: 'white', color: 'white', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' }, flex: 1 }}
+                >
+                  {isMobile ? 'Clear' : 'Clear Selection'}
+                </Button>
+              </Stack>
+            </Box>
+          )}
         </Paper>
       )}
 
       {/* Tab 3: Investments List */}
       {tabValue === 3 && (
-        <Paper sx={{ p: 2 }}>
+        <Paper sx={{ p: 2, pb: selectedInvestmentIds.length > 0 ? 10 : 2 }}>
           <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
             <ExportButtons
               data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'investment').map(expense => {
@@ -2106,6 +2441,15 @@ const Cashflow = () => {
             <Table stickyHeader>
               <TableHead sx={stickyTableHeadSx}>
                 <TableRow>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      color="primary"
+                      indeterminate={selectedInvestmentIds.length > 0 && selectedInvestmentIds.length < displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'investment').length}
+                      checked={selectedInvestmentIds.length > 0 && selectedInvestmentIds.length === displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'investment').length && displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'investment').length > 0}
+                      onChange={(event) => handleSelectAllInvestments(event.target.checked, displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'investment'))}
+                      inputProps={{ 'aria-label': 'Select all investments' }}
+                    />
+                  </TableCell>
                   <TableCell sortDirection={tableSortConfig.field === 'date' ? tableSortConfig.direction : false}>
                     <TableSortLabel
                       active={tableSortConfig.field === 'date'}
@@ -2162,11 +2506,142 @@ const Cashflow = () => {
                   </TableCell>
                   <TableCell align="center">Actions</TableCell>
                 </TableRow>
+                <TableRow sx={stickyFilterRowSx}>
+                  <TableCell />
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        type="date"
+                        size="small"
+                        value={tableFilters.date}
+                        onChange={(e) => handleTableFilterChange('date', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.date && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('date')} title="Clear date filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search description"
+                        value={tableFilters.description}
+                        onChange={(e) => handleTableFilterChange('description', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.description && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('description')} title="Clear description filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search account"
+                        value={tableFilters.account}
+                        onChange={(e) => handleTableFilterChange('account', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.account && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('account')} title="Clear account filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <FormControl size="small" fullWidth>
+                        <Select
+                          value={selectedCategory}
+                          onChange={(e) => setSelectedCategory(e.target.value)}
+                          displayEmpty
+                          renderValue={(value) => renderCategoryLabel(value, 'All Categories')}
+                        >
+                          <MenuItem key="all-categories" value="">
+                            <em>All Categories</em>
+                          </MenuItem>
+                          {categories.filter(cat => cat.type === 'investment').map((category) => (
+                            <MenuItem key={category.id} value={category.name}>
+                              {renderCategoryLabel(category.name, category.name)}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      {selectedCategory && (
+                        <IconButton size="small" onClick={() => setSelectedCategory('')} title="Clear category filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Min"
+                        value={tableFilters.amountMin}
+                        onChange={(e) => handleTableFilterChange('amountMin', e.target.value)}
+                        sx={{ width: 100 }}
+                      />
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Max"
+                        value={tableFilters.amountMax}
+                        onChange={(e) => handleTableFilterChange('amountMax', e.target.value)}
+                        sx={{ width: 100 }}
+                      />
+                      {(tableFilters.amountMin || tableFilters.amountMax) && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('amount')} title="Clear amount filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search notes"
+                        value={tableFilters.notes}
+                        onChange={(e) => handleTableFilterChange('notes', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.notes && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('notes')} title="Clear notes filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell align="center">
+                    <Button
+                      variant="text"
+                      size="small"
+                      startIcon={<ClearIcon />}
+                      onClick={() => {
+                        resetTableFilters();
+                        setSelectedCategory('');
+                      }}
+                    >
+                      Clear All
+                    </Button>
+                  </TableCell>
+                </TableRow>
               </TableHead>
               <TableBody>
                 {displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'investment').length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
+                    <TableCell colSpan={8} align="center">
                       <Typography color="textSecondary" py={3}>
                         No investment movements found. Import transactions to see investment data.
                       </Typography>
@@ -2177,8 +2652,16 @@ const Cashflow = () => {
                     const sourceAccount = getAccountLabel(expense.account_id);
                     const targetAccount = expense.paired_account_id ? getAccountLabel(expense.paired_account_id) : null;
                     const transferRoute = targetAccount ? `${sourceAccount} → ${targetAccount}` : sourceAccount;
+                    const isSelected = selectedInvestmentIds.includes(expense.id);
                     return (
-                      <TableRow key={expense.id}>
+                      <TableRow key={expense.id} selected={isSelected}>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            color="primary"
+                            checked={isSelected}
+                            onChange={() => toggleInvestmentSelection(expense.id)}
+                          />
+                        </TableCell>
                         <TableCell>{formatDate(expense.date)}</TableCell>
                         <TableCell>
                           <Box display="flex" alignItems="center" gap={0.5}>
@@ -2252,12 +2735,79 @@ const Cashflow = () => {
               </TableBody>
             </Table>
           </TableContainer>
+
+          {/* Fixed Bottom Bar for Bulk Category Selection */}
+          {selectedInvestmentIds.length > 0 && (
+            <Box
+              sx={{
+                position: 'fixed',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                bgcolor: 'primary.main',
+                color: 'white',
+                p: { xs: 1.5, md: 2 },
+                boxShadow: 3,
+                zIndex: 1000,
+                display: 'flex',
+                flexDirection: { xs: 'column', md: 'row' },
+                gap: { xs: 1, md: 2 },
+                alignItems: { xs: 'stretch', md: 'center' },
+                justifyContent: 'center'
+              }}
+            >
+              <Typography variant={isMobile ? 'body1' : 'h6'} sx={{ fontWeight: 600 }}>
+                {selectedInvestmentIds.length} investment{selectedInvestmentIds.length !== 1 ? 's' : ''} selected
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: { xs: '100%', md: 250 }, bgcolor: 'white', borderRadius: 1 }}>
+                <InputLabel id="bulk-investment-category-label">Type</InputLabel>
+                <Select
+                  labelId="bulk-investment-category-label"
+                  value={bulkInvestmentCategory}
+                  label="Type"
+                  onChange={(event) => setBulkInvestmentCategory(event.target.value)}
+                  renderValue={(value) => renderCategoryLabel(value, 'Choose type')}
+                >
+                  <MenuItem value="">
+                    <em>Select type</em>
+                  </MenuItem>
+                  {categories.filter(cat => cat.type === 'investment').map((category) => (
+                    <MenuItem key={category.id} value={category.name}>
+                      {renderCategoryLabel(category.name, category.name)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  size={isMobile ? 'medium' : 'large'}
+                  onClick={handleBulkInvestmentCategoryApply}
+                  disabled={!bulkInvestmentCategory || isBulkUpdating}
+                  sx={{ bgcolor: 'success.main', '&:hover': { bgcolor: 'success.dark' }, flex: 1 }}
+                >
+                  {isBulkUpdating ? 'Applying...' : isMobile ? 'Apply' : 'Apply Type'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  size={isMobile ? 'medium' : 'large'}
+                  onClick={() => {
+                    setSelectedInvestmentIds([]);
+                    setBulkInvestmentCategory('');
+                  }}
+                  sx={{ borderColor: 'white', color: 'white', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' }, flex: 1 }}
+                >
+                  {isMobile ? 'Clear' : 'Clear Selection'}
+                </Button>
+              </Stack>
+            </Box>
+          )}
         </Paper>
       )}
 
       {/* Tab 4: Transfers List */}
       {tabValue === 4 && (
-        <Paper sx={{ p: 2 }}>
+        <Paper sx={{ p: 2, pb: selectedTransferIds.length > 0 ? 10 : 2 }}>
           <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
             <ExportButtons
               data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer').map(expense => {
@@ -2279,6 +2829,15 @@ const Cashflow = () => {
             <Table stickyHeader>
               <TableHead sx={stickyTableHeadSx}>
                 <TableRow>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      color="primary"
+                      indeterminate={selectedTransferIds.length > 0 && selectedTransferIds.length < displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer').length}
+                      checked={selectedTransferIds.length > 0 && selectedTransferIds.length === displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer').length && displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer').length > 0}
+                      onChange={(event) => handleSelectAllTransfers(event.target.checked, displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer'))}
+                      inputProps={{ 'aria-label': 'Select all transfers' }}
+                    />
+                  </TableCell>
                   <TableCell sortDirection={tableSortConfig.field === 'date' ? tableSortConfig.direction : false}>
                     <TableSortLabel
                       active={tableSortConfig.field === 'date'}
@@ -2324,14 +2883,153 @@ const Cashflow = () => {
                       Amount
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell>Notes</TableCell>
+                  <TableCell sortDirection={tableSortConfig.field === 'notes' ? tableSortConfig.direction : false}>
+                    <TableSortLabel
+                      active={tableSortConfig.field === 'notes'}
+                      direction={tableSortConfig.field === 'notes' ? tableSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('notes')}
+                    >
+                      Notes
+                    </TableSortLabel>
+                  </TableCell>
                   <TableCell align="center">Actions</TableCell>
+                </TableRow>
+                <TableRow sx={stickyFilterRowSx}>
+                  <TableCell />
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        type="date"
+                        size="small"
+                        value={tableFilters.date}
+                        onChange={(e) => handleTableFilterChange('date', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.date && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('date')} title="Clear date filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search description"
+                        value={tableFilters.description}
+                        onChange={(e) => handleTableFilterChange('description', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.description && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('description')} title="Clear description filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search account"
+                        value={tableFilters.account}
+                        onChange={(e) => handleTableFilterChange('account', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.account && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('account')} title="Clear account filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <FormControl size="small" fullWidth>
+                        <Select
+                          value={selectedCategory}
+                          onChange={(e) => setSelectedCategory(e.target.value)}
+                          displayEmpty
+                          renderValue={(value) => renderCategoryLabel(value, 'All Categories')}
+                        >
+                          <MenuItem key="all-categories" value="">
+                            <em>All Categories</em>
+                          </MenuItem>
+                          {categories.filter(cat => cat.type === 'transfer').map((category) => (
+                            <MenuItem key={category.id} value={category.name}>
+                              {renderCategoryLabel(category.name, category.name)}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      {selectedCategory && (
+                        <IconButton size="small" onClick={() => setSelectedCategory('')} title="Clear category filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Min"
+                        value={tableFilters.amountMin}
+                        onChange={(e) => handleTableFilterChange('amountMin', e.target.value)}
+                        sx={{ width: 100 }}
+                      />
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Max"
+                        value={tableFilters.amountMax}
+                        onChange={(e) => handleTableFilterChange('amountMax', e.target.value)}
+                        sx={{ width: 100 }}
+                      />
+                      {(tableFilters.amountMin || tableFilters.amountMax) && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('amount')} title="Clear amount filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search notes"
+                        value={tableFilters.notes}
+                        onChange={(e) => handleTableFilterChange('notes', e.target.value)}
+                        fullWidth
+                      />
+                      {tableFilters.notes && (
+                        <IconButton size="small" onClick={() => clearColumnFilter('notes')} title="Clear notes filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell align="center">
+                    <Button
+                      variant="text"
+                      size="small"
+                      startIcon={<ClearIcon />}
+                      onClick={() => {
+                        resetTableFilters();
+                        setSelectedCategory('');
+                      }}
+                    >
+                      Clear All
+                    </Button>
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'transfer').length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
+                    <TableCell colSpan={8} align="center">
                       <Typography color="textSecondary" py={3}>
                         No transfer transactions found. Import transactions to see transfer data.
                       </Typography>
@@ -2342,8 +3040,16 @@ const Cashflow = () => {
                     const sourceAccount = getAccountLabel(expense.account_id);
                     const targetAccount = expense.paired_account_id ? getAccountLabel(expense.paired_account_id) : null;
                     const transferRoute = targetAccount ? `${sourceAccount} → ${targetAccount}` : sourceAccount;
+                    const isSelected = selectedTransferIds.includes(expense.id);
                     return (
-                      <TableRow key={expense.id}>
+                      <TableRow key={expense.id} selected={isSelected}>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            color="primary"
+                            checked={isSelected}
+                            onChange={() => toggleTransferSelection(expense.id)}
+                          />
+                        </TableCell>
                         <TableCell>{formatDate(expense.date)}</TableCell>
                         <TableCell>
                           <Box display="flex" alignItems="center" gap={0.5}>
@@ -2417,6 +3123,73 @@ const Cashflow = () => {
               </TableBody>
             </Table>
           </TableContainer>
+
+          {/* Fixed Bottom Bar for Bulk Category Selection */}
+          {selectedTransferIds.length > 0 && (
+            <Box
+              sx={{
+                position: 'fixed',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                bgcolor: 'primary.main',
+                color: 'white',
+                p: { xs: 1.5, md: 2 },
+                boxShadow: 3,
+                zIndex: 1000,
+                display: 'flex',
+                flexDirection: { xs: 'column', md: 'row' },
+                gap: { xs: 1, md: 2 },
+                alignItems: { xs: 'stretch', md: 'center' },
+                justifyContent: 'center'
+              }}
+            >
+              <Typography variant={isMobile ? 'body1' : 'h6'} sx={{ fontWeight: 600 }}>
+                {selectedTransferIds.length} transfer{selectedTransferIds.length !== 1 ? 's' : ''} selected
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: { xs: '100%', md: 250 }, bgcolor: 'white', borderRadius: 1 }}>
+                <InputLabel id="bulk-transfer-category-label">Category</InputLabel>
+                <Select
+                  labelId="bulk-transfer-category-label"
+                  value={bulkTransferCategory}
+                  label="Category"
+                  onChange={(event) => setBulkTransferCategory(event.target.value)}
+                  renderValue={(value) => renderCategoryLabel(value, 'Choose category')}
+                >
+                  <MenuItem value="">
+                    <em>Select category</em>
+                  </MenuItem>
+                  {categories.filter(cat => cat.type === 'transfer').map((category) => (
+                    <MenuItem key={category.id} value={category.name}>
+                      {renderCategoryLabel(category.name, category.name)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  size={isMobile ? 'medium' : 'large'}
+                  onClick={handleBulkTransferCategoryApply}
+                  disabled={!bulkTransferCategory || isBulkUpdating}
+                  sx={{ bgcolor: 'success.main', '&:hover': { bgcolor: 'success.dark' }, flex: 1 }}
+                >
+                  {isBulkUpdating ? 'Applying...' : isMobile ? 'Apply' : 'Apply Category'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  size={isMobile ? 'medium' : 'large'}
+                  onClick={() => {
+                    setSelectedTransferIds([]);
+                    setBulkTransferCategory('');
+                  }}
+                  sx={{ borderColor: 'white', color: 'white', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' }, flex: 1 }}
+                >
+                  {isMobile ? 'Clear' : 'Clear Selection'}
+                </Button>
+              </Stack>
+            </Box>
+          )}
         </Paper>
       )}
 

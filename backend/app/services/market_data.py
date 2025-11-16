@@ -55,9 +55,8 @@ class MarketDataService:
         Returns:
             Current price or None if not available
         """
-        # CASH always has a price of 1.0 (CAD)
-        if ticker.upper() == 'CASH':
-            return PriceQuote(price=1.0, source='cash', fetched_at=datetime.utcnow(), is_live=True)
+        # NOTE: Synthetic cash (ticker="CASH", name="Cash") gets price=1.0 in positions.py
+        # Cash ETFs with ticker="CASH" should fetch real market prices here
 
         # Check cache first if use_cache is True
         if use_cache:
@@ -172,9 +171,8 @@ class MarketDataService:
         If the date is today or future, gets current price instead.
         Historical prices are cached permanently.
         """
-        # CASH always has a price of 1.0 (CAD)
-        if ticker.upper() == 'CASH':
-            return PriceQuote(price=1.0, source='cash', fetched_at=datetime.utcnow(), is_live=True)
+        # NOTE: Synthetic cash (ticker="CASH", name="Cash") gets price=1.0 in positions.py
+        # Cash ETFs with ticker="CASH" should fetch real market prices here
 
         target = target_date
         if target.tzinfo is None:

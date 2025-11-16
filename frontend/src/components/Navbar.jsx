@@ -30,7 +30,8 @@ import {
   Brightness4,
   Brightness7,
   Menu as MenuIcon,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Category as CategoryIcon
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -81,6 +82,7 @@ const Navbar = () => {
     { label: 'Accounts', path: '/accounts', icon: <AccountBalance /> },
     { label: 'Transactions', path: '/transactions', icon: <SwapHoriz /> },
     { label: 'Import', path: '/import', icon: <Upload /> },
+    { label: 'Security Metadata', path: '/security-metadata', icon: <CategoryIcon /> },
   ];
 
   return (

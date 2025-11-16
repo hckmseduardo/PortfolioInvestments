@@ -154,9 +154,113 @@ class Position(Base):
     market_value = Column(Float, nullable=False)
     last_updated = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+    # Plaid holdings metadata
+    security_type = Column(String(50), nullable=True)  # equity, etf, cryptocurrency, etc.
+    security_subtype = Column(String(50), nullable=True)  # common stock, preferred, etc.
+    sector = Column(String(100), nullable=True)  # Finance, Communications, Technology, etc.
+    industry = Column(String(100), nullable=True)  # Major Banks, Major Telecommunications, etc.
+    institution_price = Column(Float, nullable=True)  # Price from financial institution
+    price_as_of = Column(DateTime, nullable=True)  # Date when institution price was captured
+    sync_date = Column(DateTime, nullable=True)  # Date when position was last synced from Plaid
+
     # Relationships
     account = relationship("Account", back_populates="positions")
     statement = relationship("Statement", back_populates="positions")
+
+
+class PositionSnapshot(Base):
+    """Historical snapshots of positions for tracking portfolio changes over time"""
+    __tablename__ = "position_snapshots"
+
+    id = Column(String, primary_key=True)
+    position_id = Column(String, nullable=True)  # Reference to current position (can be NULL for deleted positions)
+    account_id = Column(String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    ticker = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    quantity = Column(Float, nullable=False)
+    book_value = Column(Float, nullable=False)
+    market_value = Column(Float, nullable=False)
+
+    # Plaid holdings metadata
+    security_type = Column(String(50), nullable=True)
+    security_subtype = Column(String(50), nullable=True)
+    sector = Column(String(100), nullable=True)
+    industry = Column(String(100), nullable=True)
+    institution_price = Column(Float, nullable=True)
+    price_as_of = Column(DateTime, nullable=True)
+
+    # Snapshot metadata
+    snapshot_date = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    account = relationship("Account")
+
+
+# Create composite index for querying snapshots by account and date
+Index('ix_position_snapshots_account_date', PositionSnapshot.account_id, PositionSnapshot.snapshot_date.desc())
+
+
+class SecurityType(Base):
+    """Security types (equity, etf, cryptocurrency, etc.) with customizable display"""
+    __tablename__ = "security_types"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    color = Column(String(7), default="#808080", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class SecuritySubtype(Base):
+    """Security subtypes (common stock, preferred, etc.) with customizable display"""
+    __tablename__ = "security_subtypes"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    color = Column(String(7), default="#808080", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class Sector(Base):
+    """Economic sectors (Finance, Technology, etc.) with customizable display"""
+    __tablename__ = "sectors"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    color = Column(String(7), default="#808080", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class Industry(Base):
+    """Industries (Major Banks, Software, etc.) with customizable display"""
+    __tablename__ = "industries"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    color = Column(String(7), default="#808080", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class SecurityMetadataOverride(Base):
+    """User-defined overrides for security metadata that persist across syncs"""
+    __tablename__ = "security_metadata_overrides"
+    __table_args__ = (
+        Index('ix_security_overrides_ticker', 'ticker'),
+    )
+
+    id = Column(String, primary_key=True)
+    ticker = Column(String, nullable=False)
+    security_name = Column(String, nullable=False)
+    custom_type = Column(String(50), nullable=True)
+    custom_subtype = Column(String(50), nullable=True)
+    custom_sector = Column(String(100), nullable=True)
+    custom_industry = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 class Transaction(Base):

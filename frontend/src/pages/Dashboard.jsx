@@ -91,7 +91,10 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 9, y: 0, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 1, w: 4, h: 1 },
     { i: 'total_value', x: 4, y: 1, w: 4, h: 1 },
-    { i: 'performance', x: 0, y: 2, w: 12, h: 4, minH: 4 }
+    { i: 'checking_balance', x: 0, y: 2, w: 4, h: 1 },
+    { i: 'mortgage_balance', x: 4, y: 2, w: 4, h: 1 },
+    { i: 'credit_card_balance', x: 8, y: 2, w: 4, h: 1 },
+    { i: 'performance', x: 0, y: 3, w: 12, h: 4, minH: 4 }
   ],
   tablet_landscape: [
     { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
@@ -100,7 +103,10 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 9, y: 0, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 1, w: 4, h: 1 },
     { i: 'total_value', x: 4, y: 1, w: 4, h: 1 },
-    { i: 'performance', x: 0, y: 2, w: 12, h: 4, minH: 4 }
+    { i: 'checking_balance', x: 0, y: 2, w: 4, h: 1 },
+    { i: 'mortgage_balance', x: 4, y: 2, w: 4, h: 1 },
+    { i: 'credit_card_balance', x: 8, y: 2, w: 4, h: 1 },
+    { i: 'performance', x: 0, y: 3, w: 12, h: 4, minH: 4 }
   ],
   tablet_portrait: [
     { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
@@ -109,7 +115,10 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 4, y: 1, w: 4, h: 1 },
     { i: 'accounts_summary', x: 0, y: 2, w: 4, h: 1 },
     { i: 'total_value', x: 4, y: 2, w: 4, h: 1 },
-    { i: 'performance', x: 0, y: 3, w: 8, h: 4, minH: 4 }
+    { i: 'checking_balance', x: 0, y: 3, w: 4, h: 1 },
+    { i: 'mortgage_balance', x: 4, y: 3, w: 4, h: 1 },
+    { i: 'credit_card_balance', x: 0, y: 4, w: 4, h: 1 },
+    { i: 'performance', x: 0, y: 5, w: 8, h: 4, minH: 4 }
   ],
   mobile_landscape: [
     { i: 'book_value', x: 0, y: 0, w: 3, h: 1 },
@@ -118,7 +127,10 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 3, y: 1, w: 3, h: 1 },
     { i: 'accounts_summary', x: 0, y: 2, w: 3, h: 1 },
     { i: 'total_value', x: 3, y: 2, w: 3, h: 1 },
-    { i: 'performance', x: 0, y: 3, w: 6, h: 4, minH: 4 }
+    { i: 'checking_balance', x: 0, y: 3, w: 3, h: 1 },
+    { i: 'mortgage_balance', x: 3, y: 3, w: 3, h: 1 },
+    { i: 'credit_card_balance', x: 0, y: 4, w: 3, h: 1 },
+    { i: 'performance', x: 0, y: 5, w: 6, h: 4, minH: 4 }
   ],
   mobile_portrait: [
     { i: 'book_value', x: 0, y: 0, w: 4, h: 1 },
@@ -127,7 +139,10 @@ const PROFILE_DEFAULT_LAYOUTS = {
     { i: 'total_gains', x: 0, y: 3, w: 4, h: 1 },
     { i: 'accounts_summary', x: 0, y: 4, w: 4, h: 1 },
     { i: 'total_value', x: 0, y: 5, w: 4, h: 1 },
-    { i: 'performance', x: 0, y: 6, w: 4, h: 5, minH: 5 }
+    { i: 'checking_balance', x: 0, y: 6, w: 4, h: 1 },
+    { i: 'mortgage_balance', x: 0, y: 7, w: 4, h: 1 },
+    { i: 'credit_card_balance', x: 0, y: 8, w: 4, h: 1 },
+    { i: 'performance', x: 0, y: 9, w: 4, h: 5, minH: 5 }
   ]
 };
 
@@ -471,6 +486,9 @@ const Dashboard = () => {
   const [summary, setSummary] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [accountBalances, setAccountBalances] = useState({});
+  const [checkingBalance, setCheckingBalance] = useState(0);
+  const [mortgageBalance, setMortgageBalance] = useState(0);
+  const [creditCardBalance, setCreditCardBalance] = useState(0);
   const [dividendSummary, setDividendSummary] = useState(null);
   const [industryBreakdown, setIndustryBreakdown] = useState([]);
   const [typeBreakdown, setTypeBreakdown] = useState([]);
@@ -723,6 +741,36 @@ const Dashboard = () => {
       isCancelled = true;
     };
   }, [accounts]);
+
+  // Calculate aggregated balances by account type
+  useEffect(() => {
+    if (accounts.length === 0 || Object.keys(accountBalances).length === 0) {
+      setCheckingBalance(0);
+      setMortgageBalance(0);
+      setCreditCardBalance(0);
+      return;
+    }
+
+    let totalChecking = 0;
+    let totalMortgage = 0;
+    let totalCreditCard = 0;
+
+    accounts.forEach((account) => {
+      const balance = accountBalances[account.id] || 0;
+
+      if (account.account_type === 'checking') {
+        totalChecking += balance;
+      } else if (account.account_type === 'mortgage') {
+        totalMortgage += balance;
+      } else if (account.account_type === 'credit_card') {
+        totalCreditCard += balance;
+      }
+    });
+
+    setCheckingBalance(totalChecking);
+    setMortgageBalance(totalMortgage);
+    setCreditCardBalance(totalCreditCard);
+  }, [accounts, accountBalances]);
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('en-CA', {
@@ -996,6 +1044,39 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
             icon={<TrendingUp fontSize="large" />}
             color={totalGains >= 0 ? 'success.main' : 'error.main'}
             subtitle="Capital gains + dividends"
+            sizeFactor={tileScale}
+          />
+        );
+      case 'checking_balance':
+        return (
+          <StatCard
+            title="Checking Accounts"
+            value={formatCurrency(checkingBalance)}
+            icon={<AccountBalance fontSize="large" />}
+            color={checkingBalance > 0 ? 'success.main' : checkingBalance < 0 ? 'error.main' : 'text.primary'}
+            subtitle="Total of all checking accounts"
+            sizeFactor={tileScale}
+          />
+        );
+      case 'mortgage_balance':
+        return (
+          <StatCard
+            title="Mortgage Balance"
+            value={formatCurrency(mortgageBalance)}
+            icon={<AccountBalance fontSize="large" />}
+            color="error.main"
+            subtitle="Total mortgage debt"
+            sizeFactor={tileScale}
+          />
+        );
+      case 'credit_card_balance':
+        return (
+          <StatCard
+            title="Credit Card Balance"
+            value={formatCurrency(creditCardBalance)}
+            icon={<AttachMoney fontSize="large" />}
+            color={creditCardBalance < 0 ? 'error.main' : 'success.main'}
+            subtitle="Total credit card debt"
             sizeFactor={tileScale}
           />
         );

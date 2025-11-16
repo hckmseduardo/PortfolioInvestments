@@ -48,12 +48,13 @@ import {
   Clear as ClearIcon
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
-import { positionsAPI, accountsAPI, instrumentsAPI } from '../services/api';
+import { positionsAPI, accountsAPI, instrumentsAPI, securityMetadataAPI } from '../services/api';
 import { alpha } from '@mui/material/styles';
 import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
 import { useMobileClick } from '../utils/useMobileClick';
 import PositionCard from '../components/PositionCard';
+import { useNavigate } from 'react-router-dom';
 
 const DATE_PRESETS = {
   CURRENT: 'current',
@@ -84,8 +85,10 @@ const COLOR_PALETTE = [
 const COLUMN_FILTER_DEFAULTS = {
   ticker: '',
   name: '',
-  instrument_type_name: '',
-  instrument_industry_name: '',
+  security_type: '',
+  security_subtype: '',
+  sector: '',
+  industry: '',
   price: '',
   quantity: '',
   book_value: '',
@@ -139,6 +142,7 @@ const computeValuationDate = (preset, specificMonthValue, endOfYearValue) => {
 const Portfolio = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const navigate = useNavigate();
   const [positions, setPositions] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
@@ -151,8 +155,12 @@ const Portfolio = () => {
   const [summary, setSummary] = useState(null);
   const [industrySlices, setIndustrySlices] = useState([]);
   const [typeSlices, setTypeSlices] = useState([]);
+  const [subtypeSlices, setSubtypeSlices] = useState([]);
+  const [sectorSlices, setSectorSlices] = useState([]);
   const [instrumentTypes, setInstrumentTypes] = useState([]);
   const [instrumentIndustries, setInstrumentIndustries] = useState([]);
+  const [breakdownType, setBreakdownType] = useState('type'); // 'type', 'subtype', 'sector', 'industry'
+  const [carouselEnabled, setCarouselEnabled] = useState(true);
   const [selectedTypeId, setSelectedTypeId] = useState('');
   const [selectedIndustryId, setSelectedIndustryId] = useState('');
   const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
@@ -166,13 +174,49 @@ const Portfolio = () => {
   const [orderBy, setOrderBy] = useState('ticker');
   const [order, setOrder] = useState('asc');
   const [columnFilters, setColumnFilters] = useState({ ...COLUMN_FILTER_DEFAULTS });
+  const [snapshotDates, setSnapshotDates] = useState([]);
+  const [selectedSnapshotDate, setSelectedSnapshotDate] = useState(null);
   const hasLoadedOnce = useRef(false);
   const priceRefreshTimer = useRef(null);
+
+  // Metadata editing dialog
+  const [editMetadataDialog, setEditMetadataDialog] = useState({
+    open: false,
+    position: null,
+    field: null // 'type', 'subtype', 'sector', or 'industry'
+  });
+  const [editMetadataValue, setEditMetadataValue] = useState('');
+  const [savingMetadata, setSavingMetadata] = useState(false);
+
+  // Security metadata with colors
+  const [securityTypes, setSecurityTypes] = useState([]);
+  const [securitySubtypes, setSecuritySubtypes] = useState([]);
+  const [sectors, setSectors] = useState([]);
+  const [industries, setIndustries] = useState([]);
 
   const valuationDate = useMemo(
     () => computeValuationDate(datePreset, specificMonth, endOfYear),
     [datePreset, specificMonth, endOfYear]
   );
+
+  // Load security metadata with colors
+  const loadSecurityMetadata = useCallback(async () => {
+    try {
+      const [typesRes, subtypesRes, sectorsRes, industriesRes] = await Promise.all([
+        securityMetadataAPI.getTypes(),
+        securityMetadataAPI.getSubtypes(),
+        securityMetadataAPI.getSectors(),
+        securityMetadataAPI.getIndustries()
+      ]);
+      setSecurityTypes(typesRes.data || []);
+      setSecuritySubtypes(subtypesRes.data || []);
+      setSectors(sectorsRes.data || []);
+      setIndustries(industriesRes.data || []);
+    } catch (error) {
+      console.error('Error loading security metadata:', error);
+    }
+  }, []);
+
   const loadInstrumentMetadata = useCallback(async () => {
     try {
       const [typesRes, industriesRes] = await Promise.all([
@@ -188,7 +232,90 @@ const Portfolio = () => {
 
   useEffect(() => {
     loadInstrumentMetadata();
-  }, [loadInstrumentMetadata]);
+    loadSecurityMetadata();
+  }, [loadInstrumentMetadata, loadSecurityMetadata]);
+
+  // Carousel auto-advance effect
+  useEffect(() => {
+    if (!carouselEnabled) return;
+
+    const breakdownTypes = ['type', 'subtype', 'sector', 'industry'];
+    const interval = setInterval(() => {
+      setBreakdownType(prev => {
+        const currentIndex = breakdownTypes.indexOf(prev);
+        const nextIndex = (currentIndex + 1) % breakdownTypes.length;
+        return breakdownTypes[nextIndex];
+      });
+    }, 5000); // Change every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [carouselEnabled]);
+
+  // Handler for tab change - stops carousel
+  const handleBreakdownTypeChange = (event, newValue) => {
+    setCarouselEnabled(false);
+    setBreakdownType(newValue);
+  };
+
+  // Get current breakdown data based on selected type
+  const getCurrentBreakdownData = () => {
+    const result = {
+      data: [],
+      label: 'Type',
+      colorMap: {}
+    };
+
+    switch (breakdownType) {
+      case 'type':
+        result.data = typeSlices || [];
+        result.label = 'Type';
+        result.colorMap = securityTypeColors || {};
+        break;
+      case 'subtype':
+        result.data = subtypeSlices || [];
+        result.label = 'Subtype';
+        result.colorMap = securitySubtypeColors || {};
+        break;
+      case 'sector':
+        result.data = sectorSlices || [];
+        result.label = 'Sector';
+        result.colorMap = sectorColors || {};
+        break;
+      case 'industry':
+        result.data = industrySlices || [];
+        result.label = 'Industry';
+        result.colorMap = industryColors || {};
+        break;
+      default:
+        result.data = typeSlices || [];
+        result.label = 'Type';
+        result.colorMap = securityTypeColors || {};
+    }
+
+    return result;
+  };
+
+  // Fetch available snapshot dates
+  useEffect(() => {
+    const fetchSnapshotDates = async () => {
+      try {
+        const response = await positionsAPI.getSnapshotDates();
+        const dates = response.data.snapshot_dates || [];
+        setSnapshotDates(dates);
+        // Default to the latest snapshot (first in the list)
+        if (dates.length > 0 && !selectedSnapshotDate) {
+          setSelectedSnapshotDate(dates[0]);
+        }
+        console.log('Loaded snapshot dates:', dates);
+      } catch (error) {
+        console.error('Error fetching snapshot dates:', error);
+        console.error('Error details:', error.response);
+        // If auth fails, snapshots just won't be available - that's ok
+        setSnapshotDates([]);
+      }
+    };
+    fetchSnapshotDates();
+  }, []);
 
   const typeLookup = useMemo(() => {
     const map = {};
@@ -206,6 +333,39 @@ const Portfolio = () => {
     return map;
   }, [instrumentIndustries]);
 
+  // Security metadata color lookups (indexed by name)
+  const securityTypeColors = useMemo(() => {
+    const map = {};
+    securityTypes.forEach((item) => {
+      map[item.name] = item.color;
+    });
+    return map;
+  }, [securityTypes]);
+
+  const securitySubtypeColors = useMemo(() => {
+    const map = {};
+    securitySubtypes.forEach((item) => {
+      map[item.name] = item.color;
+    });
+    return map;
+  }, [securitySubtypes]);
+
+  const sectorColors = useMemo(() => {
+    const map = {};
+    sectors.forEach((item) => {
+      map[item.name] = item.color;
+    });
+    return map;
+  }, [sectors]);
+
+  const industryColors = useMemo(() => {
+    const map = {};
+    industries.forEach((item) => {
+      map[item.name] = item.color;
+    });
+    return map;
+  }, [industries]);
+
   const fetchPositions = useCallback(async () => {
     if (!hasLoadedOnce.current) {
       setLoading(true);
@@ -213,48 +373,108 @@ const Portfolio = () => {
       setFetching(true);
     }
     try {
-      const classificationParams = {
-        instrument_type_id: selectedTypeId || undefined,
-        instrument_industry_id: selectedIndustryId || undefined
-      };
-      const [positionsRes, summaryRes, industryRes, typeRes] = await Promise.all([
-        positionsAPI.getAggregated(
-          selectedAccountId || undefined,
-          valuationDate || undefined,
-          classificationParams
-        ),
-        positionsAPI.getSummary(valuationDate || undefined, {
-          account_id: selectedAccountId || undefined,
-          ...classificationParams
-        }),
-        positionsAPI.getIndustryBreakdown({
-          account_id: selectedAccountId || undefined,
-          as_of_date: valuationDate || undefined,
-          ...classificationParams
-        }),
-        positionsAPI.getTypeBreakdown({
-          account_id: selectedAccountId || undefined,
-          as_of_date: valuationDate || undefined,
-          ...classificationParams
-        })
-      ]);
-      const data = positionsRes.data || [];
-      setPositions(data);
-      setSummary(summaryRes.data || null);
-      setIndustrySlices(industryRes.data || []);
-      setTypeSlices(typeRes.data || []);
+      // Always use snapshots API
+      if (selectedSnapshotDate) {
+        console.log('Fetching snapshot for date:', selectedSnapshotDate);
+        const positionsRes = await positionsAPI.getBySnapshotDate(selectedSnapshotDate);
+        const data = positionsRes.data || [];
+        console.log('Snapshot data received:', data.length, 'positions');
 
-      const hasPending = data.some((position) => position.price_pending);
-      if (hasPending) {
-        if (!priceRefreshTimer.current) {
-          priceRefreshTimer.current = setTimeout(() => {
-            priceRefreshTimer.current = null;
-            fetchPositions();
-          }, 5000);
-        }
-      } else if (priceRefreshTimer.current) {
-        clearTimeout(priceRefreshTimer.current);
-        priceRefreshTimer.current = null;
+        // Calculate summary from snapshot data
+        const totalMarketValue = data.reduce((sum, pos) => sum + (pos.market_value || 0), 0);
+        const totalBookValue = data.reduce((sum, pos) => sum + (pos.book_value || 0), 0);
+        const totalGainLoss = totalMarketValue - totalBookValue;
+        const totalGainLossPercent = totalBookValue !== 0 ? (totalGainLoss / totalBookValue) * 100 : 0;
+
+        setPositions(data);
+        setSummary({
+          total_market_value: totalMarketValue,
+          total_book_value: totalBookValue,
+          total_gain_loss: totalGainLoss,
+          total_gain_loss_percent: totalGainLossPercent,
+          position_count: data.length
+        });
+
+        // Calculate breakdowns for all metadata types from snapshot data
+        const industryMap = {};
+        const typeMap = {};
+        const subtypeMap = {};
+        const sectorMap = {};
+
+        data.forEach(pos => {
+          if (pos.industry) {
+            if (!industryMap[pos.industry]) {
+              industryMap[pos.industry] = {
+                name: pos.industry,
+                market_value: 0,
+                position_count: 0
+              };
+            }
+            industryMap[pos.industry].market_value += pos.market_value || 0;
+            industryMap[pos.industry].position_count += 1;
+          }
+
+          if (pos.security_type) {
+            if (!typeMap[pos.security_type]) {
+              typeMap[pos.security_type] = {
+                name: pos.security_type,
+                market_value: 0,
+                position_count: 0
+              };
+            }
+            typeMap[pos.security_type].market_value += pos.market_value || 0;
+            typeMap[pos.security_type].position_count += 1;
+          }
+
+          if (pos.security_subtype) {
+            if (!subtypeMap[pos.security_subtype]) {
+              subtypeMap[pos.security_subtype] = {
+                name: pos.security_subtype,
+                market_value: 0,
+                position_count: 0
+              };
+            }
+            subtypeMap[pos.security_subtype].market_value += pos.market_value || 0;
+            subtypeMap[pos.security_subtype].position_count += 1;
+          }
+
+          if (pos.sector) {
+            if (!sectorMap[pos.sector]) {
+              sectorMap[pos.sector] = {
+                name: pos.sector,
+                market_value: 0,
+                position_count: 0
+              };
+            }
+            sectorMap[pos.sector].market_value += pos.market_value || 0;
+            sectorMap[pos.sector].position_count += 1;
+          }
+        });
+
+        const industrySlicesData = Object.values(industryMap).map(item => ({
+          ...item,
+          percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+        }));
+
+        const typeSlicesData = Object.values(typeMap).map(item => ({
+          ...item,
+          percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+        }));
+
+        const subtypeSlicesData = Object.values(subtypeMap).map(item => ({
+          ...item,
+          percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+        }));
+
+        const sectorSlicesData = Object.values(sectorMap).map(item => ({
+          ...item,
+          percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+        }));
+
+        setIndustrySlices(industrySlicesData);
+        setTypeSlices(typeSlicesData);
+        setSubtypeSlices(subtypeSlicesData);
+        setSectorSlices(sectorSlicesData);
       }
     } catch (error) {
       console.error('Error fetching positions:', error);
@@ -262,12 +482,14 @@ const Portfolio = () => {
       setSummary(null);
       setIndustrySlices([]);
       setTypeSlices([]);
+      setSubtypeSlices([]);
+      setSectorSlices([]);
     } finally {
       hasLoadedOnce.current = true;
       setLoading(false);
       setFetching(false);
     }
-  }, [selectedAccountId, selectedTypeId, selectedIndustryId, valuationDate]);
+  }, [selectedAccountId, selectedTypeId, selectedIndustryId, valuationDate, selectedSnapshotDate]);
 
   useEffect(() => {
     fetchPositions();
@@ -810,6 +1032,67 @@ const Portfolio = () => {
     setColumnFilters({ ...COLUMN_FILTER_DEFAULTS });
   }, []);
 
+  // Metadata editing handlers
+  const handleOpenMetadataDialog = useCallback((position, field) => {
+    const currentValue = position[field] || '';
+    setEditMetadataDialog({
+      open: true,
+      position,
+      field
+    });
+    setEditMetadataValue(currentValue);
+  }, []);
+
+  const handleCloseMetadataDialog = useCallback(() => {
+    setEditMetadataDialog({
+      open: false,
+      position: null,
+      field: null
+    });
+    setEditMetadataValue('');
+  }, []);
+
+  const handleSaveMetadataOverride = useCallback(async () => {
+    const { position, field } = editMetadataDialog;
+    if (!position || !field) return;
+
+    setSavingMetadata(true);
+    try {
+      // Only send the field being edited; send undefined for others to avoid overwriting existing overrides
+      // Empty string means "clear this field", null/undefined means "don't change this field"
+      const overrideData = {
+        ticker: position.ticker,
+        security_name: position.name || position.ticker,
+        custom_type: field === 'security_type' ? editMetadataValue : undefined,
+        custom_subtype: field === 'security_subtype' ? editMetadataValue : undefined,
+        custom_sector: field === 'sector' ? editMetadataValue : undefined,
+        custom_industry: field === 'industry' ? editMetadataValue : undefined
+      };
+
+      // Remove undefined fields before sending
+      Object.keys(overrideData).forEach(key => {
+        if (overrideData[key] === undefined) {
+          delete overrideData[key];
+        }
+      });
+
+      console.log('Saving metadata override:', overrideData);
+      const response = await securityMetadataAPI.setOverride(overrideData);
+      console.log('Override saved successfully:', response.data);
+
+      // Refresh positions to show the updated metadata
+      await fetchPositions();
+
+      showSnackbar('Metadata updated successfully');
+      handleCloseMetadataDialog();
+    } catch (error) {
+      console.error('Error saving metadata override:', error);
+      showSnackbar('Failed to save metadata override', 'error');
+    } finally {
+      setSavingMetadata(false);
+    }
+  }, [editMetadataDialog, editMetadataValue, fetchPositions, showSnackbar, handleCloseMetadataDialog]);
+
   const handleRequestSort = useCallback((property) => {
     const isAsc = orderBy === property && order === 'asc';
     setOrder(isAsc ? 'desc' : 'asc');
@@ -977,22 +1260,13 @@ const Portfolio = () => {
         <Typography variant="h4">
           Portfolio
         </Typography>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+        <Box sx={{ display: 'flex', gap: 1 }}>
           <Button
-            variant="text"
-            size="small"
+            variant="outlined"
             startIcon={<CategoryIcon />}
-            onClick={() => openMetadataDialog('types')}
+            onClick={() => navigate('/security-metadata')}
           >
-            Manage types
-          </Button>
-          <Button
-            variant="text"
-            size="small"
-            startIcon={<BusinessIcon />}
-            onClick={() => openMetadataDialog('industries')}
-          >
-            Manage industries
+            Manage Metadata
           </Button>
           <Button
             variant="contained"
@@ -1002,7 +1276,7 @@ const Portfolio = () => {
           >
             {refreshing ? 'Refreshing...' : fetching ? 'Updating...' : 'Refresh Prices'}
           </Button>
-        </Stack>
+        </Box>
       </Box>
 
       <Paper sx={{ p: isMobile ? 2 : 2, mb: 3 }}>
@@ -1043,79 +1317,32 @@ const Portfolio = () => {
             </Select>
           </FormControl>
 
-          <FormControl size={isMobile ? 'medium' : 'small'} sx={{ minWidth: isMobile ? '100%' : 200 }}>
-            <InputLabel id="portfolio-date-select">Valuation</InputLabel>
+          <FormControl size={isMobile ? 'medium' : 'small'} sx={{ minWidth: isMobile ? '100%' : 250 }}>
+            <InputLabel id="portfolio-snapshot-select">Snapshot Date</InputLabel>
             <Select
-              labelId="portfolio-date-select"
-              value={datePreset}
-              label="Valuation"
-              onChange={(event) => setDatePreset(event.target.value)}
+              labelId="portfolio-snapshot-select"
+              value={selectedSnapshotDate}
+              label="Snapshot Date"
+              onChange={(event) => setSelectedSnapshotDate(event.target.value)}
               sx={isMobile ? {
                 '& .MuiInputBase-root': {
                   minHeight: 48
                 }
               } : {}}
             >
-              <MenuItem value={DATE_PRESETS.CURRENT}>Current Price</MenuItem>
-              <MenuItem value={DATE_PRESETS.LAST_MONTH}>Last Month</MenuItem>
-              <MenuItem value={DATE_PRESETS.SPECIFIC_MONTH}>Specific Month</MenuItem>
-              <MenuItem value={DATE_PRESETS.LAST_QUARTER}>Last Quarter</MenuItem>
-              <MenuItem value={DATE_PRESETS.LAST_YEAR}>Last Year</MenuItem>
-              <MenuItem value={DATE_PRESETS.END_OF_YEAR}>End of Year</MenuItem>
+              {snapshotDates.map((date) => (
+                <MenuItem key={date} value={date}>
+                  {new Date(date).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </MenuItem>
+              ))}
             </Select>
           </FormControl>
-
-          {datePreset === DATE_PRESETS.SPECIFIC_MONTH && (
-            <TextField
-              label="Month"
-              type="month"
-              size={isMobile ? 'medium' : 'small'}
-              value={specificMonth}
-              onChange={(event) => setSpecificMonth(event.target.value)}
-              InputLabelProps={{ shrink: true }}
-              fullWidth={isMobile}
-              sx={isMobile ? {
-                '& .MuiInputBase-root': {
-                  minHeight: 48
-                }
-              } : {}}
-            />
-          )}
-          {datePreset === DATE_PRESETS.END_OF_YEAR && (
-            <TextField
-              label="Year"
-              type="number"
-              size={isMobile ? 'medium' : 'small'}
-              value={endOfYear}
-              onChange={(event) => setEndOfYear(event.target.value)}
-              InputProps={{ inputProps: { min: 1900, max: 9999 } }}
-              fullWidth={isMobile}
-              sx={isMobile ? {
-                '& .MuiInputBase-root': {
-                  minHeight: 48
-                }
-              } : {}}
-            />
-          )}
-          {datePreset !== DATE_PRESETS.CURRENT && (
-            <Button
-              variant={isMobile ? 'outlined' : 'text'}
-              size={isMobile ? 'medium' : 'small'}
-              onClick={() => {
-                setDatePreset(DATE_PRESETS.CURRENT);
-                setSpecificMonth('');
-                setEndOfYear('');
-              }}
-              fullWidth={isMobile}
-              sx={isMobile ? {
-                minHeight: 48,
-                textTransform: 'none',
-                fontWeight: 500
-              } : {}}
-            >
-              Clear selection
-            </Button>
-          )}
 
           <FormControl size={isMobile ? 'medium' : 'small'} sx={{ minWidth: isMobile ? '100%' : 200 }}>
             <InputLabel id="portfolio-type-select">Type</InputLabel>
@@ -1242,134 +1469,134 @@ const Portfolio = () => {
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3, height: '100%' }}>
-            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
-              <Box>
-                <Typography variant="h6" gutterBottom>
-                  Industry Allocation
-                </Typography>
-                <Typography variant="body2" color="textSecondary">
-                  Market value distribution by industry
-                </Typography>
-              </Box>
-              {selectedIndustryId && (
-                <Tooltip title="Clear industry filter">
-                  <IconButton
-                    size="small"
-                    onClick={clearIndustryFilter}
-                    sx={{
-                      bgcolor: 'primary.main',
-                      color: 'white',
-                      '&:hover': { bgcolor: 'primary.dark' }
-                    }}
-                  >
-                    <FilterIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </Box>
-            {industrySlices.length === 0 ? (
-              <Typography color="textSecondary">
-                Classify your positions to see the breakdown by industry.
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="h6">
+                Portfolio Allocation
               </Typography>
-            ) : (
-              <Box sx={{ height: 320 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={industrySlices}
-                      dataKey="market_value"
-                      nameKey="industry_name"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius="45%"
-                      outerRadius="80%"
-                      paddingAngle={2}
-                      labelLine={false}
-                    >
-                      {industrySlices.map((slice) => (
-                        <Cell
-                          key={slice.industry_id || 'unclassified'}
-                          fill={slice.color || '#b0bec5'}
-                          onClick={() => handleIndustrySliceClick(slice)}
-                        />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip
-                      formatter={(value, name, payload) => [
-                        formatCurrency(value),
-                        payload?.payload?.industry_name || name
-                      ]}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </Box>
-            )}
+              <Chip
+                label={carouselEnabled ? 'Auto' : 'Manual'}
+                size="small"
+                color={carouselEnabled ? 'primary' : 'default'}
+                onClick={() => setCarouselEnabled(!carouselEnabled)}
+                sx={{ cursor: 'pointer' }}
+              />
+            </Box>
+            <Tabs
+              value={breakdownType}
+              onChange={handleBreakdownTypeChange}
+              variant="fullWidth"
+              sx={{ mb: 2, minHeight: 36 }}
+            >
+              <Tab label="Type" value="type" sx={{ minHeight: 36, py: 1 }} />
+              <Tab label="Subtype" value="subtype" sx={{ minHeight: 36, py: 1 }} />
+              <Tab label="Sector" value="sector" sx={{ minHeight: 36, py: 1 }} />
+              <Tab label="Industry" value="industry" sx={{ minHeight: 36, py: 1 }} />
+            </Tabs>
+            {(() => {
+              const breakdownData = getCurrentBreakdownData();
+              return breakdownData.data.length === 0 ? (
+                <Typography color="textSecondary" sx={{ textAlign: 'center', py: 4 }}>
+                  No {breakdownData.label.toLowerCase()} data available. Sync from Plaid to see breakdown.
+                </Typography>
+              ) : (
+                <Box sx={{ height: 320 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={breakdownData.data}
+                        dataKey="market_value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius="45%"
+                        outerRadius="80%"
+                        paddingAngle={2}
+                        labelLine={false}
+                      >
+                        {breakdownData.data.map((slice, index) => (
+                          <Cell
+                            key={slice.name || `slice-${index}`}
+                            fill={breakdownData.colorMap[slice.name] || COLOR_PALETTE[index % COLOR_PALETTE.length]}
+                          />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip
+                        formatter={(value, name, payload) => [
+                          formatCurrency(value),
+                          payload?.payload?.name || name
+                        ]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+              );
+            })()}
           </Paper>
         </Grid>
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3, height: '100%' }}>
-            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
-              <Box>
-                <Typography variant="h6" gutterBottom>
-                  Asset Type Allocation
-                </Typography>
-                <Typography variant="body2" color="textSecondary">
-                  Market value distribution by asset type
-                </Typography>
-              </Box>
-              {selectedTypeId && (
-                <Tooltip title="Clear type filter">
-                  <IconButton
-                    size="small"
-                    onClick={clearTypeFilter}
-                    sx={{
-                      bgcolor: 'primary.main',
-                      color: 'white',
-                      '&:hover': { bgcolor: 'primary.dark' }
-                    }}
-                  >
-                    <FilterIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </Box>
-            {typeSlices.length === 0 ? (
-              <Typography color="textSecondary">
-                Assign instrument types to see this breakdown.
-              </Typography>
-            ) : (
-              <Box sx={{ height: 320 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={typeSlices}
-                      dataKey="market_value"
-                      nameKey="type_name"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius="45%"
-                      outerRadius="80%"
-                      paddingAngle={2}
-                      labelLine={false}
-                    >
-                      {typeSlices.map((slice) => (
-                        <Cell
-                          key={slice.type_id || 'unclassified_type'}
-                          fill={slice.color || '#b0bec5'}
-                          onClick={() => handleTypeSliceClick(slice)}
-                        />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip
-                      formatter={(value, name, payload) => [
-                        formatCurrency(value),
-                        payload?.payload?.type_name || name
-                      ]}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </Box>
-            )}
+            {(() => {
+              const breakdownData = getCurrentBreakdownData();
+              return (
+                <>
+                  <Typography variant="h6" gutterBottom>
+                    {breakdownData.label} Breakdown
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                    Market value distribution by {breakdownData.label.toLowerCase()}
+                  </Typography>
+                  {breakdownData.data.length === 0 ? (
+                    <Typography color="textSecondary" sx={{ textAlign: 'center', py: 4 }}>
+                      No data available
+                    </Typography>
+                  ) : (
+                    <TableContainer sx={{ maxHeight: 360 }}>
+                      <Table size="small" stickyHeader>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell><strong>{breakdownData.label}</strong></TableCell>
+                            <TableCell align="right"><strong>Market Value</strong></TableCell>
+                            <TableCell align="right"><strong>Percentage</strong></TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {breakdownData.data
+                            .sort((a, b) => b.market_value - a.market_value)
+                            .map((item, index) => (
+                              <TableRow key={item.name || `row-${index}`}>
+                                <TableCell>
+                                  <Box display="flex" alignItems="center" gap={1}>
+                                    <Box
+                                      sx={{
+                                        width: 12,
+                                        height: 12,
+                                        borderRadius: '50%',
+                                        bgcolor: breakdownData.colorMap[item.name] || COLOR_PALETTE[index % COLOR_PALETTE.length],
+                                        border: '1px solid rgba(0,0,0,0.12)'
+                                      }}
+                                    />
+                                    <Typography variant="body2">{item.name}</Typography>
+                                  </Box>
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography variant="body2" fontWeight={500}>
+                                    {formatCurrency(item.market_value)}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography variant="body2" color="textSecondary">
+                                    {item.percentage.toFixed(2)}%
+                                  </Typography>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </>
+              );
+            })()}
           </Paper>
         </Grid>
       </Grid>
@@ -1437,8 +1664,14 @@ const Portfolio = () => {
                     formatPercentage={formatPercentage}
                     getAccountLabel={getAccountLabel}
                     formatDate={(date) => new Date(date).toLocaleDateString()}
-                    typeColor={position.instrument_type_id ? typeLookup[position.instrument_type_id]?.color : null}
-                    industryColor={position.instrument_industry_id ? industryLookup[position.instrument_industry_id]?.color : null}
+                    securityTypeColors={securityTypeColors}
+                    securitySubtypeColors={securitySubtypeColors}
+                    sectorColors={sectorColors}
+                    industryColors={industryColors}
+                    onTypeClick={() => handleOpenMetadataDialog(position, 'security_type')}
+                    onSubtypeClick={() => handleOpenMetadataDialog(position, 'security_subtype')}
+                    onSectorClick={() => handleOpenMetadataDialog(position, 'sector')}
+                    onIndustryClick={() => handleOpenMetadataDialog(position, 'industry')}
                   />
                 ))
               )}
@@ -1468,20 +1701,38 @@ const Portfolio = () => {
                       <strong>Name</strong>
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell sortDirection={orderBy === 'instrument_type_name' ? order : false}>
+                  <TableCell sortDirection={orderBy === 'security_type' ? order : false}>
                     <TableSortLabel
-                      active={orderBy === 'instrument_type_name'}
-                      direction={orderBy === 'instrument_type_name' ? order : 'asc'}
-                      onClick={() => handleRequestSort('instrument_type_name')}
+                      active={orderBy === 'security_type'}
+                      direction={orderBy === 'security_type' ? order : 'asc'}
+                      onClick={() => handleRequestSort('security_type')}
                     >
                       <strong>Type</strong>
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell sortDirection={orderBy === 'instrument_industry_name' ? order : false}>
+                  <TableCell sortDirection={orderBy === 'security_subtype' ? order : false}>
                     <TableSortLabel
-                      active={orderBy === 'instrument_industry_name'}
-                      direction={orderBy === 'instrument_industry_name' ? order : 'asc'}
-                      onClick={() => handleRequestSort('instrument_industry_name')}
+                      active={orderBy === 'security_subtype'}
+                      direction={orderBy === 'security_subtype' ? order : 'asc'}
+                      onClick={() => handleRequestSort('security_subtype')}
+                    >
+                      <strong>Subtype</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={orderBy === 'sector' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'sector'}
+                      direction={orderBy === 'sector' ? order : 'asc'}
+                      onClick={() => handleRequestSort('sector')}
+                    >
+                      <strong>Sector</strong>
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell sortDirection={orderBy === 'industry' ? order : false}>
+                    <TableSortLabel
+                      active={orderBy === 'industry'}
+                      direction={orderBy === 'industry' ? order : 'asc'}
+                      onClick={() => handleRequestSort('industry')}
                     >
                       <strong>Industry</strong>
                     </TableSortLabel>
@@ -1544,8 +1795,10 @@ const Portfolio = () => {
                 <TableRow sx={stickyFilterRowSx}>
                   <TableCell>{renderFilterField('ticker', 'Ticker')}</TableCell>
                   <TableCell>{renderFilterField('name', 'Name')}</TableCell>
-                  <TableCell>{renderFilterField('instrument_type_name', 'Type')}</TableCell>
-                  <TableCell>{renderFilterField('instrument_industry_name', 'Industry')}</TableCell>
+                  <TableCell>{renderFilterField('security_type', 'Type')}</TableCell>
+                  <TableCell>{renderFilterField('security_subtype', 'Subtype')}</TableCell>
+                  <TableCell>{renderFilterField('sector', 'Sector')}</TableCell>
+                  <TableCell>{renderFilterField('industry', 'Industry')}</TableCell>
                   <TableCell align="right">{renderFilterField('price', 'Price')}</TableCell>
                   <TableCell align="right">{renderFilterField('quantity', 'Qty')}</TableCell>
                   <TableCell align="right">{renderFilterField('book_value', 'Book')}</TableCell>
@@ -1587,33 +1840,118 @@ const Portfolio = () => {
                     </TableCell>
                     <TableCell>{position.name}</TableCell>
                     <TableCell>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <ClassificationTag
-                          value={position.instrument_type_id}
-                          options={instrumentTypes}
-                          disabled={classificationSaving[position.ticker]}
-                          onChange={(nextValue) =>
-                            handleClassificationUpdate(position, {
-                              instrument_type_id: nextValue
-                            })
-                          }
+                      {position.security_type ? (
+                        <Chip
+                          label={position.security_type}
+                          size="small"
+                          clickable
+                          onClick={() => handleOpenMetadataDialog(position, 'security_type')}
+                          sx={{
+                            textTransform: 'capitalize',
+                            bgcolor: securityTypeColors[position.security_type] || '#808080',
+                            color: '#fff',
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            '&:hover': {
+                              opacity: 0.8
+                            }
+                          }}
                         />
-                        {classificationSaving[position.ticker] && <CircularProgress size={16} />}
-                      </Stack>
+                      ) : (
+                        <Chip
+                          label="Set Type"
+                          size="small"
+                          clickable
+                          onClick={() => handleOpenMetadataDialog(position, 'security_type')}
+                          variant="outlined"
+                          sx={{ cursor: 'pointer' }}
+                        />
+                      )}
                     </TableCell>
                     <TableCell>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <ClassificationTag
-                          value={position.instrument_industry_id}
-                          options={instrumentIndustries}
-                          disabled={classificationSaving[position.ticker]}
-                          onChange={(nextValue) =>
-                            handleClassificationUpdate(position, {
-                              instrument_industry_id: nextValue
-                            })
-                          }
+                      {position.security_subtype ? (
+                        <Chip
+                          label={position.security_subtype}
+                          size="small"
+                          clickable
+                          onClick={() => handleOpenMetadataDialog(position, 'security_subtype')}
+                          sx={{
+                            textTransform: 'capitalize',
+                            bgcolor: securitySubtypeColors[position.security_subtype] || '#808080',
+                            color: '#fff',
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            '&:hover': {
+                              opacity: 0.8
+                            }
+                          }}
                         />
-                      </Stack>
+                      ) : (
+                        <Chip
+                          label="Set Subtype"
+                          size="small"
+                          clickable
+                          onClick={() => handleOpenMetadataDialog(position, 'security_subtype')}
+                          variant="outlined"
+                          sx={{ cursor: 'pointer' }}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {position.sector ? (
+                        <Chip
+                          label={position.sector}
+                          size="small"
+                          clickable
+                          onClick={() => handleOpenMetadataDialog(position, 'sector')}
+                          sx={{
+                            bgcolor: sectorColors[position.sector] || '#808080',
+                            color: '#fff',
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            '&:hover': {
+                              opacity: 0.8
+                            }
+                          }}
+                        />
+                      ) : (
+                        <Chip
+                          label="Set Sector"
+                          size="small"
+                          clickable
+                          onClick={() => handleOpenMetadataDialog(position, 'sector')}
+                          variant="outlined"
+                          sx={{ cursor: 'pointer' }}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {position.industry ? (
+                        <Chip
+                          label={position.industry}
+                          size="small"
+                          clickable
+                          onClick={() => handleOpenMetadataDialog(position, 'industry')}
+                          sx={{
+                            bgcolor: industryColors[position.industry] || '#808080',
+                            color: '#fff',
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            '&:hover': {
+                              opacity: 0.8
+                            }
+                          }}
+                        />
+                      ) : (
+                        <Chip
+                          label="Set Industry"
+                          size="small"
+                          clickable
+                          onClick={() => handleOpenMetadataDialog(position, 'industry')}
+                          variant="outlined"
+                          sx={{ cursor: 'pointer' }}
+                        />
+                      )}
                     </TableCell>
                     <TableCell align="right">
                       {livePrice ? (
@@ -1682,6 +2020,124 @@ const Portfolio = () => {
           )}
         </>
       )}
+
+      {/* Security Metadata Editing Dialog */}
+      <Dialog
+        open={editMetadataDialog.open}
+        onClose={handleCloseMetadataDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Edit {editMetadataDialog.field === 'security_type' ? 'Type' :
+                editMetadataDialog.field === 'security_subtype' ? 'Subtype' :
+                editMetadataDialog.field === 'sector' ? 'Sector' : 'Industry'}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Typography variant="body2" color="textSecondary" gutterBottom>
+              Security: <strong>{editMetadataDialog.position?.ticker}</strong> - {editMetadataDialog.position?.name}
+            </Typography>
+            <FormControl fullWidth sx={{ mt: 2 }}>
+              <InputLabel>
+                {editMetadataDialog.field === 'security_type' ? 'Type' :
+                 editMetadataDialog.field === 'security_subtype' ? 'Subtype' :
+                 editMetadataDialog.field === 'sector' ? 'Sector' : 'Industry'}
+              </InputLabel>
+              <Select
+                value={editMetadataValue}
+                label={editMetadataDialog.field === 'security_type' ? 'Type' :
+                       editMetadataDialog.field === 'security_subtype' ? 'Subtype' :
+                       editMetadataDialog.field === 'sector' ? 'Sector' : 'Industry'}
+                onChange={(e) => setEditMetadataValue(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>None</em>
+                </MenuItem>
+                {editMetadataDialog.field === 'security_type' && securityTypes.map((type) => (
+                  <MenuItem key={type.id} value={type.name}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Box
+                        sx={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: '50%',
+                          bgcolor: type.color,
+                          border: '1px solid rgba(0,0,0,0.12)'
+                        }}
+                      />
+                      {type.name}
+                    </Box>
+                  </MenuItem>
+                ))}
+                {editMetadataDialog.field === 'security_subtype' && securitySubtypes.map((subtype) => (
+                  <MenuItem key={subtype.id} value={subtype.name}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Box
+                        sx={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: '50%',
+                          bgcolor: subtype.color,
+                          border: '1px solid rgba(0,0,0,0.12)'
+                        }}
+                      />
+                      {subtype.name}
+                    </Box>
+                  </MenuItem>
+                ))}
+                {editMetadataDialog.field === 'sector' && sectors.map((sector) => (
+                  <MenuItem key={sector.id} value={sector.name}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Box
+                        sx={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: '50%',
+                          bgcolor: sector.color,
+                          border: '1px solid rgba(0,0,0,0.12)'
+                        }}
+                      />
+                      {sector.name}
+                    </Box>
+                  </MenuItem>
+                ))}
+                {editMetadataDialog.field === 'industry' && industries.map((industry) => (
+                  <MenuItem key={industry.id} value={industry.name}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Box
+                        sx={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: '50%',
+                          bgcolor: industry.color,
+                          border: '1px solid rgba(0,0,0,0.12)'
+                        }}
+                      />
+                      {industry.name}
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 2 }}>
+              This change will persist across syncs and apply to all positions with this ticker.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseMetadataDialog} disabled={savingMetadata}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveMetadataOverride}
+            variant="contained"
+            disabled={savingMetadata}
+          >
+            {savingMetadata ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={metadataDialogOpen} onClose={handleMetadataDialogClose} maxWidth="md" fullWidth>
         <DialogTitle>Manage Instrument Metadata</DialogTitle>

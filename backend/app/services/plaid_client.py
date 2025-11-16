@@ -267,6 +267,25 @@ class PlaidClient:
                 "has_more": response['has_more'],
             }
         except ApiException as e:
+            error_body = e.body if hasattr(e, 'body') else ''
+
+            # Check for mutation during pagination - requires cursor reset
+            if 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION' in str(error_body):
+                logger.warning(f"[PLAID SYNC] Transaction data changed during pagination - cursor reset required")
+                return {
+                    "cursor_reset_required": True,
+                    "error": "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION"
+                }
+
+            # Check for login required - user needs to re-authenticate
+            if 'ITEM_LOGIN_REQUIRED' in str(error_body):
+                logger.error(f"[PLAID SYNC] Login required - user must re-authenticate via Plaid Link update mode")
+                return {
+                    "login_required": True,
+                    "error": "ITEM_LOGIN_REQUIRED",
+                    "error_message": "Login credentials have changed or expired. Please re-link your account."
+                }
+
             logger.error(f"Failed to sync transactions: {e}")
             return None
         except Exception as e:
@@ -406,6 +425,13 @@ class PlaidClient:
                 "total_transactions": response.get('total_investment_transactions', 0)
             }
         except ApiException as e:
+            # Check if this is a "products not supported" error
+            error_body = e.body if hasattr(e, 'body') else ''
+            if 'PRODUCTS_NOT_SUPPORTED' in str(error_body) and 'investments' in str(error_body):
+                logger.info(f"[PLAID DEBUG] Institution does not support investments product - this is expected for non-investment accounts")
+                return None
+
+            # For other errors, log as error
             logger.error(f"[PLAID DEBUG] Plaid API exception getting investment transactions:")
             logger.error(f"  Status: {e.status if hasattr(e, 'status') else 'N/A'}")
             logger.error(f"  Message: {e}")
@@ -512,6 +538,13 @@ class PlaidClient:
                 "cash_balances": account_cash_balances
             }
         except ApiException as e:
+            # Check if this is a "products not supported" error
+            error_body = e.body if hasattr(e, 'body') else ''
+            if 'PRODUCTS_NOT_SUPPORTED' in str(error_body) and 'investments' in str(error_body):
+                logger.info(f"[PLAID HOLDINGS] Institution does not support investments product - this is expected for non-investment accounts")
+                return None
+
+            # For other errors, log as error
             logger.error(f"[PLAID HOLDINGS] Plaid API exception getting investment holdings:")
             logger.error(f"  Status: {e.status if hasattr(e, 'status') else 'N/A'}")
             logger.error(f"  Message: {e}")

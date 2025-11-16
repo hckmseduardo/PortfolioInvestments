@@ -84,9 +84,6 @@ const Transactions = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [balance, setBalance] = useState(null);
-  const [checkingBalance, setCheckingBalance] = useState(null);
-  const [mortgageBalance, setMortgageBalance] = useState(null);
-  const [creditCardBalance, setCreditCardBalance] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sortConfig, setSortConfig] = useState({ field: 'date', direction: 'desc' });
@@ -102,12 +99,6 @@ const Transactions = () => {
     fetchTransactions();
     fetchBalance();
   }, [selectedAccount, startDate, endDate]);
-
-  useEffect(() => {
-    if (accounts.length > 0) {
-      fetchAggregatedBalances();
-    }
-  }, [accounts, startDate, endDate]);
 
   const fetchAccounts = async () => {
     try {
@@ -226,47 +217,6 @@ const Transactions = () => {
       setBalance(response.data);
     } catch (err) {
       console.error('Error fetching balance:', err);
-    }
-  };
-
-  const fetchAggregatedBalances = async () => {
-    try {
-      const end = endDate ? new Date(endDate).toISOString() : null;
-
-      // Get all checking accounts balances
-      const checkingAccounts = accounts.filter(acc => acc.account_type === 'checking');
-      let totalChecking = 0;
-      for (const account of checkingAccounts) {
-        const response = await transactionsAPI.getBalance(account.id, end);
-        if (response.data && response.data.balance !== null) {
-          totalChecking += response.data.balance;
-        }
-      }
-      setCheckingBalance(totalChecking);
-
-      // Get all mortgage accounts balances
-      const mortgageAccounts = accounts.filter(acc => acc.account_type === 'mortgage');
-      let totalMortgage = 0;
-      for (const account of mortgageAccounts) {
-        const response = await transactionsAPI.getBalance(account.id, end);
-        if (response.data && response.data.balance !== null) {
-          totalMortgage += response.data.balance;
-        }
-      }
-      setMortgageBalance(totalMortgage);
-
-      // Get all credit card accounts balances
-      const creditCardAccounts = accounts.filter(acc => acc.account_type === 'credit_card');
-      let totalCreditCard = 0;
-      for (const account of creditCardAccounts) {
-        const response = await transactionsAPI.getBalance(account.id, end);
-        if (response.data && response.data.balance !== null) {
-          totalCreditCard += response.data.balance;
-        }
-      }
-      setCreditCardBalance(totalCreditCard);
-    } catch (err) {
-      console.error('Error fetching aggregated balances:', err);
     }
   };
 
@@ -533,7 +483,7 @@ const Transactions = () => {
       </Typography>
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={3}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
@@ -562,7 +512,7 @@ const Transactions = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
+        <Grid item xs={12} md={3}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
@@ -574,7 +524,7 @@ const Transactions = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
+        <Grid item xs={12} md={3}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
@@ -586,47 +536,27 @@ const Transactions = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={4}>
+        <Grid item xs={12} md={3}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
-                Checking Accounts
+                Account Balance
               </Typography>
-              <Typography variant="h4" sx={{ color: checkingBalance > 0 ? 'success.main' : checkingBalance < 0 ? 'error.main' : 'text.primary' }}>
-                {formatCurrency(checkingBalance || 0)}
-              </Typography>
-              <Typography variant="caption" color="textSecondary">
-                Total of all checking accounts
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Mortgage Balance
-              </Typography>
-              <Typography variant="h4" sx={{ color: 'error.main' }}>
-                {formatCurrency(mortgageBalance || 0)}
+              <Typography variant="h4" sx={{
+                color: balance?.balance > 0
+                  ? 'success.main'
+                  : balance?.balance < 0
+                    ? 'error.main'
+                    : 'text.primary'
+              }}>
+                {balance?.balance !== null && balance?.balance !== undefined
+                  ? formatCurrency(balance.balance)
+                  : '-'}
               </Typography>
               <Typography variant="caption" color="textSecondary">
-                Total mortgage debt
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Credit Card Balance
-              </Typography>
-              <Typography variant="h4" sx={{ color: creditCardBalance < 0 ? 'error.main' : 'success.main' }}>
-                {formatCurrency(creditCardBalance || 0)}
-              </Typography>
-              <Typography variant="caption" color="textSecondary">
-                Total credit card debt
+                {selectedAccount
+                  ? `Balance for selected account`
+                  : 'Select an account to view balance'}
               </Typography>
             </CardContent>
           </Card>

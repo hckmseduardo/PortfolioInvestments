@@ -20,6 +20,7 @@ from app.api import (
     instruments,
     plaid,
     ticker_mappings,
+    security_metadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ api_router.include_router(dashboard.router)
 api_router.include_router(instruments.router)
 api_router.include_router(plaid.router)
 api_router.include_router(ticker_mappings.router)
+api_router.include_router(security_metadata.router, prefix="/security-metadata", tags=["security-metadata"])
 
 app.include_router(api_router)
 

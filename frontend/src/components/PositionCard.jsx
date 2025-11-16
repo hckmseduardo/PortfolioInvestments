@@ -27,8 +27,14 @@ const PositionCard = ({
   formatPercentage,
   getAccountLabel,
   formatDate,
-  typeColor,
-  industryColor
+  securityTypeColors = {},
+  securitySubtypeColors = {},
+  sectorColors = {},
+  industryColors = {},
+  onTypeClick,
+  onSubtypeClick,
+  onSectorClick,
+  onIndustryClick
 }) => {
   const isGain = position.gain_loss >= 0;
   const gainLossColor = isGain ? '#4caf50' : '#f44336';
@@ -188,55 +194,139 @@ const PositionCard = ({
           </Typography>
         </Box>
 
-        {/* Chips Row: Type + Industry */}
-        <Stack direction="row" spacing={1} mb={1} flexWrap="wrap" useFlexGap>
-          {position.instrument_type_name && (
+        {/* Chips Row: Security Metadata */}
+        <Stack direction="row" spacing={0.75} mb={1} flexWrap="wrap" useFlexGap>
+          {position.security_type ? (
             <Chip
-              icon={<CategoryIcon sx={{ fontSize: 14, color: typeColor || undefined }} />}
-              label={position.instrument_type_name}
+              label={position.security_type}
               size="small"
-              variant="outlined"
+              clickable
+              onClick={onTypeClick}
               sx={{
                 height: 24,
-                fontSize: '0.75rem',
+                fontSize: '0.7rem',
                 fontWeight: 500,
                 borderRadius: 1.5,
-                ...(typeColor && {
-                  borderColor: typeColor,
-                  color: typeColor,
-                  bgcolor: alpha(typeColor, 0.08),
-                  '&:hover': {
-                    bgcolor: alpha(typeColor, 0.12)
-                  }
-                }),
-                '& .MuiChip-icon': {
-                  marginLeft: 0.5
+                textTransform: 'capitalize',
+                bgcolor: securityTypeColors[position.security_type] || '#808080',
+                color: '#fff',
+                cursor: 'pointer',
+                '&:hover': {
+                  opacity: 0.8
                 }
               }}
             />
-          )}
-          {position.instrument_industry_name && (
+          ) : (
             <Chip
-              icon={<BusinessIcon sx={{ fontSize: 14, color: industryColor || undefined }} />}
-              label={position.instrument_industry_name}
+              label="Set Type"
               size="small"
+              clickable
+              onClick={onTypeClick}
               variant="outlined"
               sx={{
                 height: 24,
-                fontSize: '0.75rem',
+                fontSize: '0.7rem',
+                cursor: 'pointer'
+              }}
+            />
+          )}
+          {position.security_subtype ? (
+            <Chip
+              label={position.security_subtype}
+              size="small"
+              clickable
+              onClick={onSubtypeClick}
+              sx={{
+                height: 24,
+                fontSize: '0.7rem',
                 fontWeight: 500,
                 borderRadius: 1.5,
-                ...(industryColor && {
-                  borderColor: industryColor,
-                  color: industryColor,
-                  bgcolor: alpha(industryColor, 0.08),
-                  '&:hover': {
-                    bgcolor: alpha(industryColor, 0.12)
-                  }
-                }),
-                '& .MuiChip-icon': {
-                  marginLeft: 0.5
+                textTransform: 'capitalize',
+                bgcolor: securitySubtypeColors[position.security_subtype] || '#808080',
+                color: '#fff',
+                cursor: 'pointer',
+                '&:hover': {
+                  opacity: 0.8
                 }
+              }}
+            />
+          ) : (
+            <Chip
+              label="Set Subtype"
+              size="small"
+              clickable
+              onClick={onSubtypeClick}
+              variant="outlined"
+              sx={{
+                height: 24,
+                fontSize: '0.7rem',
+                cursor: 'pointer'
+              }}
+            />
+          )}
+          {position.sector ? (
+            <Chip
+              label={position.sector}
+              size="small"
+              clickable
+              onClick={onSectorClick}
+              sx={{
+                height: 24,
+                fontSize: '0.7rem',
+                fontWeight: 500,
+                borderRadius: 1.5,
+                bgcolor: sectorColors[position.sector] || '#808080',
+                color: '#fff',
+                cursor: 'pointer',
+                '&:hover': {
+                  opacity: 0.8
+                }
+              }}
+            />
+          ) : (
+            <Chip
+              label="Set Sector"
+              size="small"
+              clickable
+              onClick={onSectorClick}
+              variant="outlined"
+              sx={{
+                height: 24,
+                fontSize: '0.7rem',
+                cursor: 'pointer'
+              }}
+            />
+          )}
+          {position.industry ? (
+            <Chip
+              label={position.industry}
+              size="small"
+              clickable
+              onClick={onIndustryClick}
+              sx={{
+                height: 24,
+                fontSize: '0.7rem',
+                fontWeight: 500,
+                borderRadius: 1.5,
+                bgcolor: industryColors[position.industry] || '#808080',
+                color: '#fff',
+                cursor: 'pointer',
+                '&:hover': {
+                  opacity: 0.8
+                }
+              }}
+            />
+          ) : (
+            <Chip
+              label="Set Industry"
+              size="small"
+              clickable
+              onClick={onIndustryClick}
+              variant="outlined"
+              sx={{
+                height: 24,
+                fontSize: '0.7rem',
+                cursor: 'pointer'
               }}
             />
           )}

@@ -835,17 +835,6 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
             # If it's some other type, convert to string first then parse
             txn_date = datetime.strptime(str(txn_date), '%Y-%m-%d').date()
 
-        # Get the raw amount from Plaid
-        raw_amount = inv_txn.get('amount', 0)
-
-        # Plaid returns dividends, interest, and cash distributions as negative amounts (institution's perspective)
-        # We need to negate them to show as positive income to the user
-        # Note: DEPOSIT with ticker = dividend/distribution (cash without ticker is skipped above)
-        if txn_type in ['DIVIDEND', 'INTEREST', 'DEPOSIT']:
-            transaction_amount = -raw_amount  # Negate to make income positive
-        else:
-            transaction_amount = raw_amount
-
         # Create transaction
         transaction = Transaction(
             id=str(uuid.uuid4()),
@@ -856,7 +845,7 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
             quantity=abs(inv_txn.get('quantity', 0)),
             price=inv_txn.get('price', 0),
             fees=inv_txn.get('fees', 0),
-            total=transaction_amount,
+            total=inv_txn.get('amount', 0),
             description=inv_txn.get('name'),
             source='plaid',
             plaid_transaction_id=inv_txn['transaction_id'],
@@ -865,16 +854,15 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
         db.add(transaction)
         added_count += 1
 
-        # If this is a dividend or cash distribution, also create a record in the dividends table
-        # DEPOSIT with ticker = dividend/cash distribution from ETFs/stocks
-        if txn_type in ['DIVIDEND', 'DEPOSIT'] and ticker:
+        # If this is a dividend, also create a record in the dividends table
+        if txn_type == 'DIVIDEND' and ticker:
             # Check if dividend already exists (by plaid_transaction_id or unique combination)
             # We use ticker+date+amount+account_id as a unique identifier since dividends don't have plaid_transaction_id field
             existing_dividend = db.query(Dividend).filter(
                 Dividend.account_id == account_id,
                 Dividend.ticker == ticker,
                 Dividend.date == datetime.combine(txn_date, datetime.min.time()),
-                Dividend.amount == transaction_amount
+                Dividend.amount == inv_txn.get('amount', 0)
             ).first()
 
             if not existing_dividend:
@@ -883,12 +871,12 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
                     account_id=account_id,
                     ticker=ticker,
                     date=datetime.combine(txn_date, datetime.min.time()),
-                    amount=transaction_amount,  # Use the corrected (positive) amount
+                    amount=inv_txn.get('amount', 0),
                     currency='CAD',  # Default to CAD, could be extracted from security if available
                     statement_id=None  # Plaid imports don't have statements
                 )
                 db.add(dividend)
-                logger.debug(f"Created dividend record for {ticker}: ${transaction_amount:.2f} on {txn_date}")
+                logger.debug(f"Created dividend record for {ticker}: ${inv_txn.get('amount', 0):.2f} on {txn_date}")
 
         # Update progress every 10 transactions
         if idx % 10 == 0 or idx == len(transactions):
@@ -1028,9 +1016,7 @@ def _sync_investment_holdings(db, plaid_item, plaid_accounts, plaid_account_map,
         # Get prices
         institution_price = holding.get('institution_price', 0) or 0
         close_price = security.get('close_price') or institution_price
-        # Use institution_price first to respect the holding's currency
-        # close_price from security metadata may be in a different currency
-        price = institution_price or close_price
+        price = close_price or institution_price
 
         # Calculate values
         cost_basis = holding.get('cost_basis') or (quantity * price)
@@ -1284,7 +1270,7 @@ def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account
             investment_cash_balances = holdings_data.get('cash_balances', {})
 
         # Create mapping of plaid_account_id to balance
-        # For investment accounts, use available balance (cash only, since holdings are shown in portfolio)
+        # For investment accounts, use cash balance from holdings
         # For other accounts, use current balance from accounts API
         plaid_balances = {}
         for acc in accounts_data['accounts']:
@@ -1295,15 +1281,11 @@ def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account
             elif acc_type:
                 acc_type = str(acc_type)
 
-            # For investment accounts, use available balance (cash only)
-            # This avoids double-counting holdings which are already shown in portfolio
+            # For investment accounts, use cash from holdings
             if acc_type == 'investment':
-                balance = acc['balances'].get('available', 0.0) or 0.0
-                total_value = acc['balances'].get('current', 0.0) or 0.0
-                logger.info(
-                    f"[BALANCE] Investment account {acc.get('name')}: "
-                    f"Available (Cash)=${balance:.2f}, Total=${total_value:.2f}"
-                )
+                account_id = acc.get('account_id')
+                balance = investment_cash_balances.get(account_id, 0.0)
+                logger.info(f"[BALANCE] Investment account {acc.get('name')}: Cash balance = ${balance:.2f}")
             else:
                 balance = acc['balances'].get('current', 0.0) or 0.0
 
@@ -1431,7 +1413,7 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
             investment_cash_balances = holdings_data.get('cash_balances', {})
 
         # Create mapping of plaid_account_id to balance
-        # For investment accounts, use available balance (cash only, since holdings are shown in portfolio)
+        # For investment accounts, use cash balance from holdings
         # For other accounts, use current balance from accounts API
         plaid_balances = {}
         for acc in accounts_data['accounts']:
@@ -1442,15 +1424,11 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
             elif acc_type:
                 acc_type = str(acc_type)
 
-            # For investment accounts, use available balance (cash only)
-            # This avoids double-counting holdings which are already shown in portfolio
+            # For investment accounts, use cash from holdings
             if acc_type == 'investment':
-                balance = acc['balances'].get('available', 0.0) or 0.0
-                total_value = acc['balances'].get('current', 0.0) or 0.0
-                logger.info(
-                    f"[BALANCE] Investment account {acc.get('name')}: "
-                    f"Available (Cash)=${balance:.2f}, Total=${total_value:.2f}"
-                )
+                account_id = acc.get('account_id')
+                balance = investment_cash_balances.get(account_id, 0.0)
+                logger.info(f"[BALANCE] Investment account {acc.get('name')}: Cash balance = ${balance:.2f}")
             else:
                 balance = acc['balances'].get('current', 0.0) or 0.0
 
