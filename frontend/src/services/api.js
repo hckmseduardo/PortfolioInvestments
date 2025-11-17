@@ -213,8 +213,15 @@ export const dividendsAPI = {
 };
 
 export const expensesAPI = {
-  getAll: (accountId, category) =>
-    api.get('/expenses', { params: { account_id: accountId, category } }),
+  getAll: (accountId, category, startDate, endDate) =>
+    api.get('/expenses', {
+      params: {
+        ...(accountId ? { account_id: accountId } : {}),
+        ...(category ? { category } : {}),
+        ...(startDate ? { start_date: startDate } : {}),
+        ...(endDate ? { end_date: endDate } : {})
+      }
+    }),
   getSummary: (accountId) =>
     api.get('/expenses/summary', { params: accountId ? { account_id: accountId } : {} }),
   getMonthlyComparison: (months = 6, accountId = null) =>

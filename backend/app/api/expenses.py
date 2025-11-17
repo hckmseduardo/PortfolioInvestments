@@ -491,6 +491,8 @@ async def create_expense(
 async def get_expenses(
     account_id: str = None,
     category: str = None,
+    start_date: str = None,
+    end_date: str = None,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
@@ -527,6 +529,32 @@ async def get_expenses(
             if category:
                 query["category"] = category
             expenses.extend(db.find("expenses", query))
+
+    # Filter by date range if provided
+    if start_date or end_date:
+        filtered_expenses = []
+        for exp in expenses:
+            try:
+                exp_date = datetime.fromisoformat(exp.get("date", "").replace('Z', '+00:00'))
+                include = True
+
+                if start_date:
+                    start_dt = datetime.fromisoformat(start_date + "T00:00:00")
+                    if exp_date < start_dt:
+                        include = False
+
+                if end_date and include:
+                    end_dt = datetime.fromisoformat(end_date + "T23:59:59")
+                    if exp_date > end_dt:
+                        include = False
+
+                if include:
+                    filtered_expenses.append(exp)
+            except:
+                # Include expenses with invalid dates
+                filtered_expenses.append(exp)
+
+        expenses = filtered_expenses
 
     return [Expense(**exp) for exp in expenses]
 

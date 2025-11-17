@@ -136,6 +136,11 @@ const Cashflow = () => {
   // State for Incomes List
   const [selectedIncomeIds, setSelectedIncomeIds] = useState([]);
   const [bulkIncomeCategory, setBulkIncomeCategory] = useState('');
+
+  // Separate filter states for Transfers tab
+  const [transfersSortConfig, setTransfersSortConfig] = useState({ field: 'date', direction: 'desc' });
+  const [transfersFilters, setTransfersFilters] = useState(() => ({ ...TABLE_FILTER_DEFAULTS }));
+
   // State for Investments List
   const [selectedInvestmentIds, setSelectedInvestmentIds] = useState([]);
   const [bulkInvestmentCategory, setBulkInvestmentCategory] = useState('');
@@ -238,6 +243,15 @@ const Cashflow = () => {
         return { field, direction: 'asc' };
       });
     }
+    // Sort for Transfers tab (tabValue === 3)
+    else if (tabValue === 3) {
+      setTransfersSortConfig((prev) => {
+        if (prev.field === field) {
+          return { field, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+        }
+        return { field, direction: 'asc' };
+      });
+    }
   };
 
   const handleTableFilterChange = (field, value) => {
@@ -255,6 +269,13 @@ const Cashflow = () => {
         [field]: value
       }));
     }
+    // Filter for Transfers tab (tabValue === 3)
+    else if (tabValue === 3) {
+      setTransfersFilters((prev) => ({
+        ...prev,
+        [field]: value
+      }));
+    }
   };
 
   const resetTableFilters = () => {
@@ -265,6 +286,10 @@ const Cashflow = () => {
     // Reset for Money In tab (tabValue === 2)
     else if (tabValue === 2) {
       setMoneyInFilters({ ...TABLE_FILTER_DEFAULTS });
+    }
+    // Reset for Transfers tab (tabValue === 3)
+    else if (tabValue === 3) {
+      setTransfersFilters({ ...TABLE_FILTER_DEFAULTS });
     }
   };
 
@@ -627,22 +652,20 @@ const Cashflow = () => {
 
   const fetchExpenses = async () => {
     try {
-      // Fetch all expenses (filtered only by account) - category filtering is done client-side
-      const response = await expensesAPI.getAll(selectedAccount || null, null);
+      // Get date range filter for backend
       const { startDate: filterStart, endDate: filterEnd } = getDateRangeFilter();
+      const startDateStr = filterStart ? formatDateToInput(filterStart) : null;
+      const endDateStr = filterEnd ? formatDateToInput(filterEnd) : null;
 
-      // Filter expenses by date range
-      let filteredExpenses = response.data;
-      if (filterStart || filterEnd) {
-        filteredExpenses = response.data.filter(expense => {
-          const expenseDate = new Date(expense.date);
-          const isAfterStart = filterStart ? expenseDate >= filterStart : true;
-          const isBeforeEnd = filterEnd ? expenseDate <= filterEnd : true;
-          return isAfterStart && isBeforeEnd;
-        });
-      }
+      // Fetch expenses with date filtering done on backend for performance
+      const response = await expensesAPI.getAll(
+        selectedAccount || null,
+        null,
+        startDateStr,
+        endDateStr
+      );
 
-      setExpenses(filteredExpenses);
+      setExpenses(response.data);
     } catch (error) {
       console.error('Error fetching expenses:', error);
     }
@@ -2443,13 +2466,147 @@ const Cashflow = () => {
           <TableContainer>
             <Table size="small">
               <TableHead>
+                {/* Header Row with Sorting */}
                 <TableRow>
-                  <TableCell>Date</TableCell>
-                  <TableCell>Description</TableCell>
-                  <TableCell>From Account</TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={transfersSortConfig.field === 'date'}
+                      direction={transfersSortConfig.field === 'date' ? transfersSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('date')}
+                    >
+                      Date
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={transfersSortConfig.field === 'description'}
+                      direction={transfersSortConfig.field === 'description' ? transfersSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('description')}
+                    >
+                      Description
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={transfersSortConfig.field === 'account'}
+                      direction={transfersSortConfig.field === 'account' ? transfersSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('account')}
+                    >
+                      From Account
+                    </TableSortLabel>
+                  </TableCell>
                   <TableCell>To Account</TableCell>
-                  <TableCell align="right">Amount</TableCell>
+                  <TableCell align="right">
+                    <TableSortLabel
+                      active={transfersSortConfig.field === 'amount'}
+                      direction={transfersSortConfig.field === 'amount' ? transfersSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('amount')}
+                    >
+                      Amount
+                    </TableSortLabel>
+                  </TableCell>
                   <TableCell>Notes</TableCell>
+                  <TableCell align="center">Actions</TableCell>
+                </TableRow>
+
+                {/* Filter Row */}
+                <TableRow sx={{ bgcolor: 'action.hover' }}>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        type="date"
+                        size="small"
+                        value={transfersFilters.date}
+                        onChange={(e) => handleTableFilterChange('date', e.target.value)}
+                        fullWidth
+                        InputLabelProps={{ shrink: true }}
+                      />
+                      {transfersFilters.date && (
+                        <IconButton size="small" onClick={() => handleTableFilterChange('date', '')} title="Clear date filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search description"
+                        value={transfersFilters.description}
+                        onChange={(e) => handleTableFilterChange('description', e.target.value)}
+                        fullWidth
+                      />
+                      {transfersFilters.description && (
+                        <IconButton size="small" onClick={() => handleTableFilterChange('description', '')} title="Clear description filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search account"
+                        value={transfersFilters.account}
+                        onChange={(e) => handleTableFilterChange('account', e.target.value)}
+                        fullWidth
+                      />
+                      {transfersFilters.account && (
+                        <IconButton size="small" onClick={() => handleTableFilterChange('account', '')} title="Clear account filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell />
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Min"
+                        value={transfersFilters.amountMin}
+                        onChange={(e) => handleTableFilterChange('amountMin', e.target.value)}
+                        sx={{ width: 80 }}
+                      />
+                      <TextField
+                        size="small"
+                        type="number"
+                        placeholder="Max"
+                        value={transfersFilters.amountMax}
+                        onChange={(e) => handleTableFilterChange('amountMax', e.target.value)}
+                        sx={{ width: 80 }}
+                      />
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search notes"
+                        value={transfersFilters.notes}
+                        onChange={(e) => handleTableFilterChange('notes', e.target.value)}
+                        fullWidth
+                      />
+                      {transfersFilters.notes && (
+                        <IconButton size="small" onClick={() => handleTableFilterChange('notes', '')} title="Clear notes filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
+                  <TableCell align="center">
+                    <Button
+                      variant="text"
+                      size="small"
+                      startIcon={<ClearIcon />}
+                      onClick={resetTableFilters}
+                    >
+                      Clear All
+                    </Button>
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -2459,7 +2616,7 @@ const Cashflow = () => {
                   const transferTransactions = expenses.filter(exp => transferCategories.includes(exp.category));
 
                   // Map to display format
-                  const displayTransfers = transferTransactions.map(t => ({
+                  let displayTransfers = transferTransactions.map(t => ({
                     date: t.date,
                     description: t.description,
                     fromAccount: t.amount < 0 ? t.account_id : null,
@@ -2469,17 +2626,91 @@ const Cashflow = () => {
                     id: t.id
                   }));
 
-                  // Sort by date descending, then by amount
+                  // Apply filters
+                  const normalizedFilters = {
+                    description: transfersFilters.description.trim().toLowerCase(),
+                    account: transfersFilters.account.trim().toLowerCase(),
+                    notes: transfersFilters.notes.trim().toLowerCase()
+                  };
+
+                  displayTransfers = displayTransfers.filter((transfer) => {
+                    const transferDate = formatDateToInput(new Date(transfer.date));
+
+                    if (transfersFilters.date && transferDate !== transfersFilters.date) {
+                      return false;
+                    }
+
+                    if (normalizedFilters.description) {
+                      const description = String(transfer.description || '').toLowerCase();
+                      if (!description.includes(normalizedFilters.description)) {
+                        return false;
+                      }
+                    }
+
+                    if (normalizedFilters.account) {
+                      const fromAccountLabel = transfer.fromAccount ? getAccountLabel(transfer.fromAccount).toLowerCase() : '';
+                      const toAccountLabel = transfer.toAccount ? getAccountLabel(transfer.toAccount).toLowerCase() : '';
+                      if (!fromAccountLabel.includes(normalizedFilters.account) && !toAccountLabel.includes(normalizedFilters.account)) {
+                        return false;
+                      }
+                    }
+
+                    if (transfersFilters.amountMin && Number(transfer.amount) < Number(transfersFilters.amountMin)) {
+                      return false;
+                    }
+
+                    if (transfersFilters.amountMax && Number(transfer.amount) > Number(transfersFilters.amountMax)) {
+                      return false;
+                    }
+
+                    if (normalizedFilters.notes) {
+                      const notes = String(transfer.notes || '').toLowerCase();
+                      if (!notes.includes(normalizedFilters.notes)) {
+                        return false;
+                      }
+                    }
+
+                    return true;
+                  });
+
+                  // Apply sorting
                   displayTransfers.sort((a, b) => {
-                    const dateCompare = new Date(b.date) - new Date(a.date);
-                    if (dateCompare !== 0) return dateCompare;
-                    return a.amount - b.amount; // Negative amounts first
+                    let valueA, valueB;
+
+                    switch (transfersSortConfig.field) {
+                      case 'date':
+                        valueA = new Date(a.date);
+                        valueB = new Date(b.date);
+                        break;
+                      case 'description':
+                        valueA = String(a.description || '').toLowerCase();
+                        valueB = String(b.description || '').toLowerCase();
+                        break;
+                      case 'account':
+                        valueA = a.fromAccount ? getAccountLabel(a.fromAccount).toLowerCase() : (a.toAccount ? getAccountLabel(a.toAccount).toLowerCase() : '');
+                        valueB = b.fromAccount ? getAccountLabel(b.fromAccount).toLowerCase() : (b.toAccount ? getAccountLabel(b.toAccount).toLowerCase() : '');
+                        break;
+                      case 'amount':
+                        valueA = Number(a.amount);
+                        valueB = Number(b.amount);
+                        break;
+                      default:
+                        return 0;
+                    }
+
+                    if (valueA < valueB) {
+                      return transfersSortConfig.direction === 'asc' ? -1 : 1;
+                    }
+                    if (valueA > valueB) {
+                      return transfersSortConfig.direction === 'asc' ? 1 : -1;
+                    }
+                    return 0;
                   });
 
                   if (displayTransfers.length === 0) {
                     return (
                       <TableRow>
-                        <TableCell colSpan={6} align="center">
+                        <TableCell colSpan={7} align="center">
                           <Typography color="textSecondary" py={3}>
                             No transfer or payment transactions found. Transfers, credit card payments, and other payments between accounts will appear here.
                           </Typography>
@@ -2502,6 +2733,7 @@ const Cashflow = () => {
                         {formatCurrency(transfer.amount)}
                       </TableCell>
                       <TableCell>{transfer.notes}</TableCell>
+                      <TableCell />
                     </TableRow>
                   ));
                 })()}
