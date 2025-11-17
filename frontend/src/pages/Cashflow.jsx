@@ -107,7 +107,6 @@ const Cashflow = () => {
   const [categories, setCategories] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedPreset, setSelectedPreset] = useState(DEFAULT_PRESET);
@@ -121,11 +120,19 @@ const Cashflow = () => {
   const [conversionJobStatus, setConversionJobStatus] = useState(null);
   const [conversionStage, setConversionStage] = useState(null);
   const [isConversionRunning, setIsConversionRunning] = useState(false);
-  const [tableSortConfig, setTableSortConfig] = useState({ field: 'date', direction: 'desc' });
-  const [tableFilters, setTableFilters] = useState(() => ({ ...TABLE_FILTER_DEFAULTS }));
+
+  // Separate filter states for Money Out tab
+  const [moneyOutCategory, setMoneyOutCategory] = useState('');
+  const [moneyOutSortConfig, setMoneyOutSortConfig] = useState({ field: 'date', direction: 'desc' });
+  const [moneyOutFilters, setMoneyOutFilters] = useState(() => ({ ...TABLE_FILTER_DEFAULTS }));
   const [selectedExpenseIds, setSelectedExpenseIds] = useState([]);
   const [bulkCategory, setBulkCategory] = useState('');
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+
+  // Separate filter states for Money In tab
+  const [moneyInCategory, setMoneyInCategory] = useState('');
+  const [moneyInSortConfig, setMoneyInSortConfig] = useState({ field: 'date', direction: 'desc' });
+  const [moneyInFilters, setMoneyInFilters] = useState(() => ({ ...TABLE_FILTER_DEFAULTS }));
   // State for Incomes List
   const [selectedIncomeIds, setSelectedIncomeIds] = useState([]);
   const [bulkIncomeCategory, setBulkIncomeCategory] = useState('');
@@ -213,23 +220,52 @@ const Cashflow = () => {
   };
 
   const handleTableSort = (field) => {
-    setTableSortConfig((prev) => {
-      if (prev.field === field) {
-        return { field, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
-      }
-      return { field, direction: 'asc' };
-    });
+    // Sort for Money Out tab (tabValue === 1)
+    if (tabValue === 1) {
+      setMoneyOutSortConfig((prev) => {
+        if (prev.field === field) {
+          return { field, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+        }
+        return { field, direction: 'asc' };
+      });
+    }
+    // Sort for Money In tab (tabValue === 2)
+    else if (tabValue === 2) {
+      setMoneyInSortConfig((prev) => {
+        if (prev.field === field) {
+          return { field, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+        }
+        return { field, direction: 'asc' };
+      });
+    }
   };
 
   const handleTableFilterChange = (field, value) => {
-    setTableFilters((prev) => ({
-      ...prev,
-      [field]: value
-    }));
+    // Filter for Money Out tab (tabValue === 1)
+    if (tabValue === 1) {
+      setMoneyOutFilters((prev) => ({
+        ...prev,
+        [field]: value
+      }));
+    }
+    // Filter for Money In tab (tabValue === 2)
+    else if (tabValue === 2) {
+      setMoneyInFilters((prev) => ({
+        ...prev,
+        [field]: value
+      }));
+    }
   };
 
   const resetTableFilters = () => {
-    setTableFilters({ ...TABLE_FILTER_DEFAULTS });
+    // Reset for Money Out tab (tabValue === 1)
+    if (tabValue === 1) {
+      setMoneyOutFilters({ ...TABLE_FILTER_DEFAULTS });
+    }
+    // Reset for Money In tab (tabValue === 2)
+    else if (tabValue === 2) {
+      setMoneyInFilters({ ...TABLE_FILTER_DEFAULTS });
+    }
   };
 
   const handleFilterByDescription = (description) => {
@@ -263,43 +299,93 @@ const Cashflow = () => {
   };
 
   const clearColumnFilter = (column) => {
-    const updates = { ...tableFilters };
-    switch (column) {
-      case 'date':
-        updates.date = '';
-        break;
-      case 'description':
-        updates.description = '';
-        break;
-      case 'account':
-        updates.account = '';
-        break;
-      case 'amount':
-        updates.amountMin = '';
-        updates.amountMax = '';
-        break;
-      case 'notes':
-        updates.notes = '';
-        break;
-      default:
-        break;
+    // Clear filter for Money Out tab (tabValue === 1)
+    if (tabValue === 1) {
+      const updates = { ...moneyOutFilters };
+      switch (column) {
+        case 'date':
+          updates.date = '';
+          break;
+        case 'description':
+          updates.description = '';
+          break;
+        case 'account':
+          updates.account = '';
+          break;
+        case 'amount':
+          updates.amountMin = '';
+          updates.amountMax = '';
+          break;
+        case 'notes':
+          updates.notes = '';
+          break;
+        default:
+          break;
+      }
+      setMoneyOutFilters(updates);
     }
-    setTableFilters(updates);
+    // Clear filter for Money In tab (tabValue === 2)
+    else if (tabValue === 2) {
+      const updates = { ...moneyInFilters };
+      switch (column) {
+        case 'date':
+          updates.date = '';
+          break;
+        case 'description':
+          updates.description = '';
+          break;
+        case 'account':
+          updates.account = '';
+          break;
+        case 'amount':
+          updates.amountMin = '';
+          updates.amountMax = '';
+          break;
+        case 'notes':
+          updates.notes = '';
+          break;
+        default:
+          break;
+      }
+      setMoneyInFilters(updates);
+    }
   };
 
   const hasActiveFilters = () => {
-    return selectedCategory ||
-           tableFilters.date ||
-           tableFilters.description ||
-           tableFilters.account ||
-           tableFilters.amountMin ||
-           tableFilters.amountMax ||
-           tableFilters.notes;
+    // Check filters for Money Out tab (tabValue === 1)
+    if (tabValue === 1) {
+      return moneyOutCategory ||
+             moneyOutFilters.date ||
+             moneyOutFilters.description ||
+             moneyOutFilters.account ||
+             moneyOutFilters.amountMin ||
+             moneyOutFilters.amountMax ||
+             moneyOutFilters.notes;
+    }
+    // Check filters for Money In tab (tabValue === 2)
+    else if (tabValue === 2) {
+      return moneyInCategory ||
+             moneyInFilters.date ||
+             moneyInFilters.description ||
+             moneyInFilters.account ||
+             moneyInFilters.amountMin ||
+             moneyInFilters.amountMax ||
+             moneyInFilters.notes;
+    }
+    return false;
   };
 
   const clearAllFilters = () => {
-    setSelectedCategory('');
-    setTableFilters({ ...TABLE_FILTER_DEFAULTS });
+    // Clear filters for Money Out tab (tabValue === 1)
+    if (tabValue === 1) {
+      setMoneyOutCategory('');
+      setMoneyOutFilters({ ...TABLE_FILTER_DEFAULTS });
+    }
+    // Clear filters for Money In tab (tabValue === 2)
+    else if (tabValue === 2) {
+      setMoneyInCategory('');
+      setMoneyInFilters({ ...TABLE_FILTER_DEFAULTS });
+    }
   };
 
   const toggleExpenseSelection = (expenseId) => {
@@ -949,8 +1035,10 @@ const Cashflow = () => {
     return category?.type || 'money_out';
   };
 
-  const moneyInData = categoryData.filter(item => getCategoryType(item.name) === 'money_in');
-  const moneyOutData = categoryData.filter(item => getCategoryType(item.name) === 'money_out');
+  // Filter out transfer-related categories from Money In/Out graphs
+  const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
+  const moneyInData = categoryData.filter(item => getCategoryType(item.name) === 'money_in' && !transferCategories.includes(item.name));
+  const moneyOutData = categoryData.filter(item => getCategoryType(item.name) === 'money_out' && !transferCategories.includes(item.name));
 
   const totalMoneyIn = moneyInData.reduce((sum, item) => sum + item.value, 0);
   const totalMoneyOut = moneyOutData.reduce((sum, item) => sum + item.value, 0);
@@ -959,12 +1047,23 @@ const Cashflow = () => {
   const handleMoneyOutPieClickBase = useCallback((_, index) => {
     const selected = moneyOutData[index];
     if (selected) {
-      setSelectedCategory(selected.name);
-      setTabValue(0);
+      setMoneyOutCategory(selected.name);
+      setTabValue(1); // Money Out tab is now at index 1
     }
-  }, [moneyOutData, setSelectedCategory, setTabValue]);
+  }, [moneyOutData, setMoneyOutCategory, setTabValue]);
 
   const handleMoneyOutPieClick = useMobileClick(handleMoneyOutPieClickBase);
+
+  // Mobile-aware click handler for money in pie chart (double-click on mobile, single-click on desktop)
+  const handleMoneyInPieClickBase = useCallback((_, index) => {
+    const selected = moneyInData[index];
+    if (selected) {
+      setMoneyInCategory(selected.name);
+      setTabValue(2); // Money In tab is at index 2
+    }
+  }, [moneyInData, setMoneyInCategory, setTabValue]);
+
+  const handleMoneyInPieClick = useMobileClick(handleMoneyInPieClickBase);
 
   const monthlyTrendData = monthlyComparison?.months || [];
 
@@ -985,21 +1084,26 @@ const Cashflow = () => {
   const allCategories = [...new Set(monthlyByCategoryData.flatMap(m => Object.keys(m).filter(k => k !== 'month')))];
 
   const displayedExpenses = useMemo(() => {
+    // Determine which filters and sort config to use based on active tab
+    const activeFilters = tabValue === 1 ? moneyOutFilters : moneyInFilters;
+    const activeSortConfig = tabValue === 1 ? moneyOutSortConfig : moneyInSortConfig;
+    const activeCategory = tabValue === 1 ? moneyOutCategory : moneyInCategory;
+
     const normalizedFilters = {
-      description: tableFilters.description.trim().toLowerCase(),
-      account: tableFilters.account.trim().toLowerCase(),
-      notes: tableFilters.notes.trim().toLowerCase()
+      description: activeFilters.description.trim().toLowerCase(),
+      account: activeFilters.account.trim().toLowerCase(),
+      notes: activeFilters.notes.trim().toLowerCase()
     };
 
     const filtered = expenses.filter((expense) => {
       const expenseDate = formatDateToInput(new Date(expense.date));
 
       // Filter by selected category (if any)
-      if (selectedCategory && (expense.category || 'Uncategorized') !== selectedCategory) {
+      if (activeCategory && (expense.category || 'Uncategorized') !== activeCategory) {
         return false;
       }
 
-      if (tableFilters.date && expenseDate !== tableFilters.date) {
+      if (activeFilters.date && expenseDate !== activeFilters.date) {
         return false;
       }
 
@@ -1017,11 +1121,11 @@ const Cashflow = () => {
         }
       }
 
-      if (tableFilters.amountMin && Number(expense.amount) < Number(tableFilters.amountMin)) {
+      if (activeFilters.amountMin && Number(expense.amount) < Number(activeFilters.amountMin)) {
         return false;
       }
 
-      if (tableFilters.amountMax && Number(expense.amount) > Number(tableFilters.amountMax)) {
+      if (activeFilters.amountMax && Number(expense.amount) > Number(activeFilters.amountMax)) {
         return false;
       }
 
@@ -1036,22 +1140,22 @@ const Cashflow = () => {
     });
 
     const sorted = [...filtered].sort((a, b) => {
-      const valueA = getSortableValue(a, tableSortConfig.field);
-      const valueB = getSortableValue(b, tableSortConfig.field);
+      const valueA = getSortableValue(a, activeSortConfig.field);
+      const valueB = getSortableValue(b, activeSortConfig.field);
 
       if (valueA < valueB) {
-        return tableSortConfig.direction === 'asc' ? -1 : 1;
+        return activeSortConfig.direction === 'asc' ? -1 : 1;
       }
 
       if (valueA > valueB) {
-        return tableSortConfig.direction === 'asc' ? 1 : -1;
+        return activeSortConfig.direction === 'asc' ? 1 : -1;
       }
 
       return 0;
     });
 
     return sorted;
-  }, [expenses, tableFilters, tableSortConfig, accounts, selectedCategory]);
+  }, [expenses, moneyOutFilters, moneyInFilters, moneyOutSortConfig, moneyInSortConfig, moneyOutCategory, moneyInCategory, accounts, tabValue]);
 
   useEffect(() => {
     setSelectedExpenseIds((prev) =>
@@ -1263,12 +1367,142 @@ const Cashflow = () => {
       </Paper>
 
       <Tabs value={tabValue} onChange={(e, newValue) => setTabValue(newValue)} sx={{ mb: 3 }}>
+        <Tab label="Overview" />
         <Tab label="Money Out" />
         <Tab label="Money In" />
+        <Tab label="Transfers" />
       </Tabs>
 
-      {/* Tab 0: Money Out List */}
+      {/* Tab 0: Overview */}
       {tabValue === 0 && (
+        <Grid container spacing={3}>
+          {/* Money Out Breakdown */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Money Out by Category
+              </Typography>
+              {moneyOutData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={moneyOutData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={100}
+                      label={(entry) => `${entry.name}: ${formatCurrency(entry.value)}`}
+                      onClick={handleMoneyOutPieClick}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {moneyOutData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value) => formatCurrency(value)} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Typography color="textSecondary">No money out data available</Typography>
+                </Box>
+              )}
+              <Box sx={{ mt: 2, textAlign: 'center' }}>
+                <Typography variant="h5" color="error">
+                  Total: {formatCurrency(totalMoneyOut)}
+                </Typography>
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* Money In Breakdown */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Money In by Category
+              </Typography>
+              {moneyInData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={moneyInData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={100}
+                      label={(entry) => `${entry.name}: ${formatCurrency(entry.value)}`}
+                      onClick={handleMoneyInPieClick}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {moneyInData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value) => formatCurrency(value)} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Typography color="textSecondary">No money in data available</Typography>
+                </Box>
+              )}
+              <Box sx={{ mt: 2, textAlign: 'center' }}>
+                <Typography variant="h5" color="success.main">
+                  Total: {formatCurrency(totalMoneyIn)}
+                </Typography>
+              </Box>
+            </Paper>
+          </Grid>
+
+          {/* 6 Month Evolution */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Last 6 Months Evolution
+              </Typography>
+              {monthlyTrendData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={monthlyTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" />
+                    <YAxis tickFormatter={(value) => formatCurrency(value)} />
+                    <Tooltip formatter={(value) => formatCurrency(value)} />
+                    <Legend />
+                    <Bar dataKey="money_in" name="Money In" fill="#4CAF50" />
+                    <Bar dataKey="money_out" name="Money Out" fill="#F44336" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Typography color="textSecondary">No monthly data available</Typography>
+                </Box>
+              )}
+            </Paper>
+          </Grid>
+
+          {/* Net Cash Flow */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Net Cash Flow
+              </Typography>
+              <Box sx={{ textAlign: 'center', py: 2 }}>
+                <Typography variant="h4" color={totalMoneyIn - totalMoneyOut >= 0 ? 'success.main' : 'error'}>
+                  {formatCurrency(totalMoneyIn - totalMoneyOut)}
+                </Typography>
+                <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                  {totalMoneyIn - totalMoneyOut >= 0 ? 'Positive' : 'Negative'} cash flow for selected period
+                </Typography>
+              </Box>
+            </Paper>
+          </Grid>
+        </Grid>
+      )}
+
+      {/* Tab 1: Money Out List */}
+      {tabValue === 1 && (
         <Paper sx={{ p: isMobile ? 1 : 2, pb: selectedExpenseIds.length > 0 ? 10 : 2 }}>
           {/* Export and Filter Controls */}
           <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
@@ -1277,9 +1511,9 @@ const Cashflow = () => {
                 variant="outlined"
                 size="small"
                 startIcon={<FilterAltIcon />}
-                onClick={() => setSelectedCategory('')}
+                onClick={() => setMoneyOutCategory('')}
               >
-                {selectedCategory || 'All Categories'}
+                {moneyOutCategory || 'All Categories'}
               </Button>
             )}
             <ExportButtons
@@ -1337,49 +1571,49 @@ const Cashflow = () => {
                   }}
                 >
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    {selectedCategory && (
+                    {moneyOutCategory && (
                       <Chip
-                        label={`Category: ${selectedCategory}`}
-                        onDelete={() => setSelectedCategory('')}
+                        label={`Category: ${moneyOutCategory}`}
+                        onDelete={() => setMoneyOutCategory('')}
                         color="primary"
                         size="small"
                       />
                     )}
-                    {tableFilters.date && (
+                    {moneyOutFilters.date && (
                       <Chip
-                        label={`Date: ${tableFilters.date}`}
+                        label={`Date: ${moneyOutFilters.date}`}
                         onDelete={() => clearColumnFilter('date')}
                         color="primary"
                         size="small"
                       />
                     )}
-                    {tableFilters.description && (
+                    {moneyOutFilters.description && (
                       <Chip
-                        label={`Description: ${tableFilters.description}`}
+                        label={`Description: ${moneyOutFilters.description}`}
                         onDelete={() => clearColumnFilter('description')}
                         color="primary"
                         size="small"
                       />
                     )}
-                    {tableFilters.account && (
+                    {moneyOutFilters.account && (
                       <Chip
-                        label={`Account: ${tableFilters.account}`}
+                        label={`Account: ${moneyOutFilters.account}`}
                         onDelete={() => clearColumnFilter('account')}
                         color="primary"
                         size="small"
                       />
                     )}
-                    {(tableFilters.amountMin || tableFilters.amountMax) && (
+                    {(moneyOutFilters.amountMin || moneyOutFilters.amountMax) && (
                       <Chip
-                        label={`Amount: ${tableFilters.amountMin || '0'} - ${tableFilters.amountMax || '∞'}`}
+                        label={`Amount: ${moneyOutFilters.amountMin || '0'} - ${moneyOutFilters.amountMax || '∞'}`}
                         onDelete={() => clearColumnFilter('amount')}
                         color="primary"
                         size="small"
                       />
                     )}
-                    {tableFilters.notes && (
+                    {moneyOutFilters.notes && (
                       <Chip
-                        label={`Notes: ${tableFilters.notes}`}
+                        label={`Notes: ${moneyOutFilters.notes}`}
                         onDelete={() => clearColumnFilter('notes')}
                         color="primary"
                         size="small"
@@ -1439,55 +1673,55 @@ const Cashflow = () => {
                       inputProps={{ 'aria-label': 'Select all expenses' }}
                     />
                   </TableCell>
-                  <TableCell sortDirection={tableSortConfig.field === 'date' ? tableSortConfig.direction : false}>
+                  <TableCell sortDirection={moneyOutSortConfig.field === 'date' ? moneyOutSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'date'}
-                      direction={tableSortConfig.field === 'date' ? tableSortConfig.direction : 'asc'}
+                      active={moneyOutSortConfig.field === 'date'}
+                      direction={moneyOutSortConfig.field === 'date' ? moneyOutSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('date')}
                     >
                       Date
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell sortDirection={tableSortConfig.field === 'description' ? tableSortConfig.direction : false}>
+                  <TableCell sortDirection={moneyOutSortConfig.field === 'description' ? moneyOutSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'description'}
-                      direction={tableSortConfig.field === 'description' ? tableSortConfig.direction : 'asc'}
+                      active={moneyOutSortConfig.field === 'description'}
+                      direction={moneyOutSortConfig.field === 'description' ? moneyOutSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('description')}
                     >
                       Description
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell sortDirection={tableSortConfig.field === 'account' ? tableSortConfig.direction : false}>
+                  <TableCell sortDirection={moneyOutSortConfig.field === 'account' ? moneyOutSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'account'}
-                      direction={tableSortConfig.field === 'account' ? tableSortConfig.direction : 'asc'}
+                      active={moneyOutSortConfig.field === 'account'}
+                      direction={moneyOutSortConfig.field === 'account' ? moneyOutSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('account')}
                     >
                       Account
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell sortDirection={tableSortConfig.field === 'category' ? tableSortConfig.direction : false}>
+                  <TableCell sortDirection={moneyOutSortConfig.field === 'category' ? moneyOutSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'category'}
-                      direction={tableSortConfig.field === 'category' ? tableSortConfig.direction : 'asc'}
+                      active={moneyOutSortConfig.field === 'category'}
+                      direction={moneyOutSortConfig.field === 'category' ? moneyOutSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('category')}
                     >
                       Category
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell align="right" sortDirection={tableSortConfig.field === 'amount' ? tableSortConfig.direction : false}>
+                  <TableCell align="right" sortDirection={moneyOutSortConfig.field === 'amount' ? moneyOutSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'amount'}
-                      direction={tableSortConfig.field === 'amount' ? tableSortConfig.direction : 'asc'}
+                      active={moneyOutSortConfig.field === 'amount'}
+                      direction={moneyOutSortConfig.field === 'amount' ? moneyOutSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('amount')}
                     >
                       Amount
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell sortDirection={tableSortConfig.field === 'notes' ? tableSortConfig.direction : false}>
+                  <TableCell sortDirection={moneyOutSortConfig.field === 'notes' ? moneyOutSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'notes'}
-                      direction={tableSortConfig.field === 'notes' ? tableSortConfig.direction : 'asc'}
+                      active={moneyOutSortConfig.field === 'notes'}
+                      direction={moneyOutSortConfig.field === 'notes' ? moneyOutSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('notes')}
                     >
                       Notes
@@ -1502,11 +1736,11 @@ const Cashflow = () => {
                       <TextField
                         type="date"
                         size="small"
-                        value={tableFilters.date}
+                        value={moneyOutFilters.date}
                         onChange={(e) => handleTableFilterChange('date', e.target.value)}
                         fullWidth
                       />
-                      {tableFilters.date && (
+                      {moneyOutFilters.date && (
                         <IconButton size="small" onClick={() => clearColumnFilter('date')} title="Clear date filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
@@ -1518,11 +1752,11 @@ const Cashflow = () => {
                       <TextField
                         size="small"
                         placeholder="Search description"
-                        value={tableFilters.description}
+                        value={moneyOutFilters.description}
                         onChange={(e) => handleTableFilterChange('description', e.target.value)}
                         fullWidth
                       />
-                      {tableFilters.description && (
+                      {moneyOutFilters.description && (
                         <IconButton size="small" onClick={() => clearColumnFilter('description')} title="Clear description filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
@@ -1534,11 +1768,11 @@ const Cashflow = () => {
                       <TextField
                         size="small"
                         placeholder="Search account"
-                        value={tableFilters.account}
+                        value={moneyOutFilters.account}
                         onChange={(e) => handleTableFilterChange('account', e.target.value)}
                         fullWidth
                       />
-                      {tableFilters.account && (
+                      {moneyOutFilters.account && (
                         <IconButton size="small" onClick={() => clearColumnFilter('account')} title="Clear account filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
@@ -1549,8 +1783,8 @@ const Cashflow = () => {
                     <Stack direction="row" spacing={0.5} alignItems="center">
                       <FormControl size="small" fullWidth>
                         <Select
-                          value={selectedCategory}
-                          onChange={(e) => setSelectedCategory(e.target.value)}
+                          value={moneyOutCategory}
+                          onChange={(e) => setMoneyOutCategory(e.target.value)}
                           displayEmpty
                           renderValue={(value) => renderCategoryLabel(value, 'All Categories')}
                         >
@@ -1567,8 +1801,8 @@ const Cashflow = () => {
                           ))}
                         </Select>
                       </FormControl>
-                      {selectedCategory && (
-                        <IconButton size="small" onClick={() => setSelectedCategory('')} title="Clear category filter">
+                      {moneyOutCategory && (
+                        <IconButton size="small" onClick={() => setMoneyOutCategory('')} title="Clear category filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
                       )}
@@ -1580,7 +1814,7 @@ const Cashflow = () => {
                         size="small"
                         type="number"
                         placeholder="Min"
-                        value={tableFilters.amountMin}
+                        value={moneyOutFilters.amountMin}
                         onChange={(e) => handleTableFilterChange('amountMin', e.target.value)}
                         sx={{ width: 100 }}
                       />
@@ -1588,11 +1822,11 @@ const Cashflow = () => {
                         size="small"
                         type="number"
                         placeholder="Max"
-                        value={tableFilters.amountMax}
+                        value={moneyOutFilters.amountMax}
                         onChange={(e) => handleTableFilterChange('amountMax', e.target.value)}
                         sx={{ width: 100 }}
                       />
-                      {(tableFilters.amountMin || tableFilters.amountMax) && (
+                      {(moneyOutFilters.amountMin || moneyOutFilters.amountMax) && (
                         <IconButton size="small" onClick={() => clearColumnFilter('amount')} title="Clear amount filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
@@ -1604,11 +1838,11 @@ const Cashflow = () => {
                       <TextField
                         size="small"
                         placeholder="Search notes"
-                        value={tableFilters.notes}
+                        value={moneyOutFilters.notes}
                         onChange={(e) => handleTableFilterChange('notes', e.target.value)}
                         fullWidth
                       />
-                      {tableFilters.notes && (
+                      {moneyOutFilters.notes && (
                         <IconButton size="small" onClick={() => clearColumnFilter('notes')} title="Clear notes filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
@@ -1622,7 +1856,7 @@ const Cashflow = () => {
                       startIcon={<ClearIcon />}
                       onClick={() => {
                         resetTableFilters();
-                        setSelectedCategory('');
+                        setMoneyOutCategory('');
                       }}
                     >
                       Clear All
@@ -1631,7 +1865,11 @@ const Cashflow = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'money_out').length === 0 ? (
+                {displayedExpenses.filter(exp => {
+                  const category = exp.category || 'Uncategorized';
+                  const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
+                  return getCategoryType(category) === 'money_out' && !transferCategories.includes(category);
+                }).length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} align="center">
                       <Typography color="textSecondary" py={3}>
@@ -1640,7 +1878,11 @@ const Cashflow = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'money_out').map((expense) => {
+                  displayedExpenses.filter(exp => {
+                    const category = exp.category || 'Uncategorized';
+                    const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
+                    return getCategoryType(category) === 'money_out' && !transferCategories.includes(category);
+                  }).map((expense) => {
                     const accountLabel = getAccountLabel(expense.account_id);
                     const isSelected = selectedExpenseIds.includes(expense.id);
                     return (
@@ -1796,8 +2038,8 @@ const Cashflow = () => {
         </Paper>
       )}
 
-      {/* Tab 1: Money In List */}
-      {tabValue === 1 && (
+      {/* Tab 2: Money In List */}
+      {tabValue === 2 && (
         <Paper sx={{ p: 2, pb: selectedIncomeIds.length > 0 ? 10 : 2 }}>
           <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
             <ExportButtons
@@ -1824,55 +2066,55 @@ const Cashflow = () => {
                       inputProps={{ 'aria-label': 'Select all incomes' }}
                     />
                   </TableCell>
-                  <TableCell sortDirection={tableSortConfig.field === 'date' ? tableSortConfig.direction : false}>
+                  <TableCell sortDirection={moneyInSortConfig.field === 'date' ? moneyInSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'date'}
-                      direction={tableSortConfig.field === 'date' ? tableSortConfig.direction : 'asc'}
+                      active={moneyInSortConfig.field === 'date'}
+                      direction={moneyInSortConfig.field === 'date' ? moneyInSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('date')}
                     >
                       Date
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell sortDirection={tableSortConfig.field === 'description' ? tableSortConfig.direction : false}>
+                  <TableCell sortDirection={moneyInSortConfig.field === 'description' ? moneyInSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'description'}
-                      direction={tableSortConfig.field === 'description' ? tableSortConfig.direction : 'asc'}
+                      active={moneyInSortConfig.field === 'description'}
+                      direction={moneyInSortConfig.field === 'description' ? moneyInSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('description')}
                     >
                       Description
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell sortDirection={tableSortConfig.field === 'account' ? tableSortConfig.direction : false}>
+                  <TableCell sortDirection={moneyInSortConfig.field === 'account' ? moneyInSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'account'}
-                      direction={tableSortConfig.field === 'account' ? tableSortConfig.direction : 'asc'}
+                      active={moneyInSortConfig.field === 'account'}
+                      direction={moneyInSortConfig.field === 'account' ? moneyInSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('account')}
                     >
                       Account
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell sortDirection={tableSortConfig.field === 'category' ? tableSortConfig.direction : false}>
+                  <TableCell sortDirection={moneyInSortConfig.field === 'category' ? moneyInSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'category'}
-                      direction={tableSortConfig.field === 'category' ? tableSortConfig.direction : 'asc'}
+                      active={moneyInSortConfig.field === 'category'}
+                      direction={moneyInSortConfig.field === 'category' ? moneyInSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('category')}
                     >
                       Category
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell align="right" sortDirection={tableSortConfig.field === 'amount' ? tableSortConfig.direction : false}>
+                  <TableCell align="right" sortDirection={moneyInSortConfig.field === 'amount' ? moneyInSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'amount'}
-                      direction={tableSortConfig.field === 'amount' ? tableSortConfig.direction : 'asc'}
+                      active={moneyInSortConfig.field === 'amount'}
+                      direction={moneyInSortConfig.field === 'amount' ? moneyInSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('amount')}
                     >
                       Amount
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell sortDirection={tableSortConfig.field === 'notes' ? tableSortConfig.direction : false}>
+                  <TableCell sortDirection={moneyInSortConfig.field === 'notes' ? moneyInSortConfig.direction : false}>
                     <TableSortLabel
-                      active={tableSortConfig.field === 'notes'}
-                      direction={tableSortConfig.field === 'notes' ? tableSortConfig.direction : 'asc'}
+                      active={moneyInSortConfig.field === 'notes'}
+                      direction={moneyInSortConfig.field === 'notes' ? moneyInSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('notes')}
                     >
                       Notes
@@ -1887,11 +2129,11 @@ const Cashflow = () => {
                       <TextField
                         type="date"
                         size="small"
-                        value={tableFilters.date}
+                        value={moneyOutFilters.date}
                         onChange={(e) => handleTableFilterChange('date', e.target.value)}
                         fullWidth
                       />
-                      {tableFilters.date && (
+                      {moneyInFilters.date && (
                         <IconButton size="small" onClick={() => clearColumnFilter('date')} title="Clear date filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
@@ -1903,11 +2145,11 @@ const Cashflow = () => {
                       <TextField
                         size="small"
                         placeholder="Search description"
-                        value={tableFilters.description}
+                        value={moneyInFilters.description}
                         onChange={(e) => handleTableFilterChange('description', e.target.value)}
                         fullWidth
                       />
-                      {tableFilters.description && (
+                      {moneyInFilters.description && (
                         <IconButton size="small" onClick={() => clearColumnFilter('description')} title="Clear description filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
@@ -1919,11 +2161,11 @@ const Cashflow = () => {
                       <TextField
                         size="small"
                         placeholder="Search account"
-                        value={tableFilters.account}
+                        value={moneyInFilters.account}
                         onChange={(e) => handleTableFilterChange('account', e.target.value)}
                         fullWidth
                       />
-                      {tableFilters.account && (
+                      {moneyInFilters.account && (
                         <IconButton size="small" onClick={() => clearColumnFilter('account')} title="Clear account filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
@@ -1934,8 +2176,8 @@ const Cashflow = () => {
                     <Stack direction="row" spacing={0.5} alignItems="center">
                       <FormControl size="small" fullWidth>
                         <Select
-                          value={selectedCategory}
-                          onChange={(e) => setSelectedCategory(e.target.value)}
+                          value={moneyInCategory}
+                          onChange={(e) => setMoneyInCategory(e.target.value)}
                           displayEmpty
                           renderValue={(value) => renderCategoryLabel(value, 'All Categories')}
                         >
@@ -1952,8 +2194,8 @@ const Cashflow = () => {
                           ))}
                         </Select>
                       </FormControl>
-                      {selectedCategory && (
-                        <IconButton size="small" onClick={() => setSelectedCategory('')} title="Clear category filter">
+                      {moneyInCategory && (
+                        <IconButton size="small" onClick={() => setMoneyInCategory('')} title="Clear category filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
                       )}
@@ -1965,7 +2207,7 @@ const Cashflow = () => {
                         size="small"
                         type="number"
                         placeholder="Min"
-                        value={tableFilters.amountMin}
+                        value={moneyInFilters.amountMin}
                         onChange={(e) => handleTableFilterChange('amountMin', e.target.value)}
                         sx={{ width: 100 }}
                       />
@@ -1973,11 +2215,11 @@ const Cashflow = () => {
                         size="small"
                         type="number"
                         placeholder="Max"
-                        value={tableFilters.amountMax}
+                        value={moneyInFilters.amountMax}
                         onChange={(e) => handleTableFilterChange('amountMax', e.target.value)}
                         sx={{ width: 100 }}
                       />
-                      {(tableFilters.amountMin || tableFilters.amountMax) && (
+                      {(moneyInFilters.amountMin || moneyInFilters.amountMax) && (
                         <IconButton size="small" onClick={() => clearColumnFilter('amount')} title="Clear amount filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
@@ -1989,11 +2231,11 @@ const Cashflow = () => {
                       <TextField
                         size="small"
                         placeholder="Search notes"
-                        value={tableFilters.notes}
+                        value={moneyInFilters.notes}
                         onChange={(e) => handleTableFilterChange('notes', e.target.value)}
                         fullWidth
                       />
-                      {tableFilters.notes && (
+                      {moneyInFilters.notes && (
                         <IconButton size="small" onClick={() => clearColumnFilter('notes')} title="Clear notes filter">
                           <ClearIcon fontSize="small" />
                         </IconButton>
@@ -2007,7 +2249,7 @@ const Cashflow = () => {
                       startIcon={<ClearIcon />}
                       onClick={() => {
                         resetTableFilters();
-                        setSelectedCategory('');
+                        setMoneyInCategory('');
                       }}
                     >
                       Clear All
@@ -2016,7 +2258,11 @@ const Cashflow = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'money_in').length === 0 ? (
+                {displayedExpenses.filter(exp => {
+                  const category = exp.category || 'Uncategorized';
+                  const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
+                  return getCategoryType(category) === 'money_in' && !transferCategories.includes(category);
+                }).length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} align="center">
                       <Typography color="textSecondary" py={3}>
@@ -2025,7 +2271,11 @@ const Cashflow = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'money_in').map((expense) => {
+                  displayedExpenses.filter(exp => {
+                    const category = exp.category || 'Uncategorized';
+                    const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
+                    return getCategoryType(category) === 'money_in' && !transferCategories.includes(category);
+                  }).map((expense) => {
                     const accountLabel = getAccountLabel(expense.account_id);
                     const isSelected = selectedIncomeIds.includes(expense.id);
                     return (
@@ -2180,6 +2430,124 @@ const Cashflow = () => {
         </Paper>
       )}
 
+      {/* Tab 3: Transfers */}
+      {tabValue === 3 && (
+        <Paper sx={{ p: { xs: 2, md: 3 } }}>
+          <Typography variant="h5" gutterBottom>
+            Transfers Between Accounts
+          </Typography>
+          <Typography variant="body2" color="textSecondary" gutterBottom sx={{ mb: 3 }}>
+            Inter-account transfers, credit card payments, and other payment transactions consolidated to show source and destination
+          </Typography>
+
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Description</TableCell>
+                  <TableCell>From Account</TableCell>
+                  <TableCell>To Account</TableCell>
+                  <TableCell align="right">Amount</TableCell>
+                  <TableCell>Notes</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(() => {
+                  // Get all transfer-related transactions (transfers, payments, credit card payments)
+                  const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
+                  const transferTransactions = expenses.filter(exp => transferCategories.includes(exp.category));
+
+                  // Group transfers by date and description to consolidate pairs
+                  const transferGroups = new Map();
+                  transferTransactions.forEach(transfer => {
+                    const key = `${transfer.date}_${transfer.description}`;
+                    if (!transferGroups.has(key)) {
+                      transferGroups.set(key, []);
+                    }
+                    transferGroups.get(key).push(transfer);
+                  });
+
+                  // Convert to consolidated transfers
+                  const consolidatedTransfers = [];
+                  transferGroups.forEach((group, key) => {
+                    if (group.length >= 2) {
+                      // Find the outgoing (negative) and incoming (positive) transactions
+                      const outgoing = group.find(t => t.amount < 0);
+                      const incoming = group.find(t => t.amount > 0);
+
+                      if (outgoing && incoming) {
+                        consolidatedTransfers.push({
+                          date: outgoing.date,
+                          description: outgoing.description,
+                          fromAccount: outgoing.account_id,
+                          toAccount: incoming.account_id,
+                          amount: Math.abs(outgoing.amount),
+                          notes: outgoing.notes || incoming.notes || ''
+                        });
+                      } else {
+                        // If we can't find a pair, show individual transactions
+                        group.forEach(t => {
+                          consolidatedTransfers.push({
+                            date: t.date,
+                            description: t.description,
+                            fromAccount: t.amount < 0 ? t.account_id : null,
+                            toAccount: t.amount > 0 ? t.account_id : null,
+                            amount: Math.abs(t.amount),
+                            notes: t.notes || ''
+                          });
+                        });
+                      }
+                    } else {
+                      // Single transfer transaction (unpaired)
+                      group.forEach(t => {
+                        consolidatedTransfers.push({
+                          date: t.date,
+                          description: t.description,
+                          fromAccount: t.amount < 0 ? t.account_id : null,
+                          toAccount: t.amount > 0 ? t.account_id : null,
+                          amount: Math.abs(t.amount),
+                          notes: t.notes || ''
+                        });
+                      });
+                    }
+                  });
+
+                  // Sort by date descending
+                  consolidatedTransfers.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+                  if (consolidatedTransfers.length === 0) {
+                    return (
+                      <TableRow>
+                        <TableCell colSpan={6} align="center">
+                          <Typography color="textSecondary" py={3}>
+                            No transfer or payment transactions found. Transfers, credit card payments, and other payments between accounts will appear here.
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  }
+
+                  return consolidatedTransfers.map((transfer, index) => (
+                    <TableRow key={index}>
+                      <TableCell>{formatDate(transfer.date)}</TableCell>
+                      <TableCell>{transfer.description}</TableCell>
+                      <TableCell>
+                        {transfer.fromAccount ? getAccountLabel(transfer.fromAccount) : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {transfer.toAccount ? getAccountLabel(transfer.toAccount) : '-'}
+                      </TableCell>
+                      <TableCell align="right">{formatCurrency(transfer.amount)}</TableCell>
+                      <TableCell>{transfer.notes}</TableCell>
+                    </TableRow>
+                  ));
+                })()}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      )}
 
       {/* Category Management Dialog */}
       <Dialog open={categoryDialogOpen} onClose={() => setCategoryDialogOpen(false)} maxWidth="md" fullWidth>
