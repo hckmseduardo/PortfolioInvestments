@@ -247,6 +247,9 @@ class PlaidClient:
             request = TransactionsSyncRequest(**request_args)
             response = self.client.transactions_sync(request)
 
+            # Convert Plaid response to dict for raw storage
+            response_dict = response.to_dict() if hasattr(response, 'to_dict') else dict(response)
+
             logger.info(f"[PLAID DEBUG] Transaction sync response:")
             logger.info(f"  Added: {len(response.get('added', []))}")
             logger.info(f"  Modified: {len(response.get('modified', []))}")
@@ -265,6 +268,7 @@ class PlaidClient:
                 "removed": [self._format_removed_transaction(txn) for txn in response.get('removed', [])],
                 "next_cursor": response['next_cursor'],
                 "has_more": response['has_more'],
+                "raw_response": response_dict  # Include raw Plaid API response
             }
         except ApiException as e:
             error_body = e.body if hasattr(e, 'body') else ''
@@ -344,6 +348,9 @@ class PlaidClient:
 
             response = self.client.transactions_get(request)
 
+            # Convert Plaid response to dict for raw storage
+            response_dict = response.to_dict() if hasattr(response, 'to_dict') else dict(response)
+
             transactions = response.get('transactions', [])
             total_transactions = response.get('total_transactions', 0)
 
@@ -361,6 +368,7 @@ class PlaidClient:
                 "transactions": [self._format_transaction(txn) for txn in transactions],
                 "total_transactions": total_transactions,
                 "accounts": response.get('accounts', []),
+                "raw_response": response_dict  # Include raw Plaid API response
             }
         except ApiException as e:
             logger.error(f"[PLAID DEBUG - HISTORICAL] API exception: {e}")
@@ -374,7 +382,9 @@ class PlaidClient:
         self,
         access_token: str,
         start_date: str,
-        end_date: str
+        end_date: str,
+        count: int = 500,
+        offset: int = 0
     ) -> Optional[Dict[str, Any]]:
         """
         Get investment transactions for a date range
@@ -383,6 +393,8 @@ class PlaidClient:
             access_token: Plaid access token
             start_date: Start date in YYYY-MM-DD format
             end_date: End date in YYYY-MM-DD format
+            count: Number of transactions to fetch per request (max 500)
+            offset: Offset for pagination
 
         Returns:
             Dictionary with investment transactions
@@ -397,23 +409,39 @@ class PlaidClient:
             start_date_obj = dt.strptime(start_date, '%Y-%m-%d').date()
             end_date_obj = dt.strptime(end_date, '%Y-%m-%d').date()
 
-            logger.info(f"[PLAID DEBUG] Fetching investment transactions:")
+            logger.info(f"[PLAID DEBUG - INVESTMENT] Fetching investment transactions:")
             # Security: Access token removed from logs
             logger.info(f"  Start date: {start_date_obj} (type: {type(start_date_obj).__name__})")
             logger.info(f"  End date: {end_date_obj} (type: {type(end_date_obj).__name__})")
+            logger.info(f"  Count: {count}, Offset: {offset}")
+
+            from plaid.model.investments_transactions_get_request_options import InvestmentsTransactionsGetRequestOptions
+
+            options = InvestmentsTransactionsGetRequestOptions(
+                count=min(count, 500),
+                offset=offset
+            )
 
             request = InvestmentsTransactionsGetRequest(
                 access_token=access_token,
                 start_date=start_date_obj,
-                end_date=end_date_obj
+                end_date=end_date_obj,
+                options=options
             )
 
-            logger.info(f"[PLAID DEBUG] Request object created, calling Plaid API...")
+            logger.info(f"[PLAID DEBUG - INVESTMENT] Request object created, calling Plaid API...")
 
             response = self.client.investments_transactions_get(request)
 
-            logger.info(f"[PLAID DEBUG] Investment transactions response:")
-            logger.info(f"  Total transactions: {len(response.get('investment_transactions', []))}")
+            # Convert Plaid response to dict for raw storage
+            response_dict = response.to_dict() if hasattr(response, 'to_dict') else dict(response)
+
+            fetched_count = len(response.get('investment_transactions', []))
+            total_available = response.get('total_investment_transactions', 0)
+
+            logger.info(f"[PLAID DEBUG - INVESTMENT] Investment transactions response:")
+            logger.info(f"  Fetched: {fetched_count} transactions")
+            logger.info(f"  Total available: {total_available}")
             logger.info(f"  Total securities: {len(response.get('securities', []))}")
             logger.info(f"  Total accounts: {len(response.get('accounts', []))}")
 
@@ -422,7 +450,8 @@ class PlaidClient:
                                 for txn in response.get('investment_transactions', [])],
                 "accounts": response.get('accounts', []),
                 "securities": response.get('securities', []),
-                "total_transactions": response.get('total_investment_transactions', 0)
+                "total_transactions": total_available,
+                "raw_response": response_dict  # Include raw Plaid API response
             }
         except ApiException as e:
             # Check if this is a "products not supported" error

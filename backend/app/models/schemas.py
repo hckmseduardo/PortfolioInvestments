@@ -161,6 +161,18 @@ class Position(PositionBase):
     id: str
     account_id: str
     last_updated: datetime
+    # Plaid holdings metadata
+    security_type: Optional[str] = None
+    security_subtype: Optional[str] = None
+    sector: Optional[str] = None
+    industry: Optional[str] = None
+    institution_price: Optional[float] = None
+    price_as_of: Optional[datetime] = None
+    sync_date: Optional[datetime] = None
+    # Frontend compatibility fields
+    price: Optional[float] = None  # Maps to institution_price for frontend
+    has_live_price: bool = False  # Indicates if position has a valid price
+    price_source: Optional[str] = None  # Source of the price (e.g., 'plaid', 'yfinance')
 
     @property
     def unrealized_gain_loss(self) -> float:

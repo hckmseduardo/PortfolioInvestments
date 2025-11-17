@@ -163,6 +163,11 @@ class Position(Base):
     price_as_of = Column(DateTime, nullable=True)  # Date when institution price was captured
     sync_date = Column(DateTime, nullable=True)  # Date when position was last synced from Plaid
 
+    # Frontend compatibility fields
+    price = Column(Float, nullable=True)  # Current price (maps to institution_price for Plaid positions)
+    has_live_price = Column(Boolean, default=False, nullable=True)  # Whether position has a valid price
+    price_source = Column(String(50), nullable=True)  # Source of price (e.g., 'plaid', 'yfinance')
+
     # Relationships
     account = relationship("Account", back_populates="positions")
     statement = relationship("Statement", back_populates="positions")

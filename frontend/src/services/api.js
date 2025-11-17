@@ -168,9 +168,12 @@ export const positionsAPI = {
       }
     }),
   getSnapshotDates: () => api.get('/positions/snapshots/dates'),
-  getBySnapshotDate: (snapshotDate) =>
+  getBySnapshotDate: (snapshotDate, accountId = null) =>
     api.get('/positions/snapshots/by-date', {
-      params: { snapshot_date: snapshotDate }
+      params: {
+        snapshot_date: snapshotDate,
+        ...(accountId && { account_id: accountId })
+      }
     })
 };
 

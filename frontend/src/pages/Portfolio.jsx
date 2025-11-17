@@ -375,8 +375,11 @@ const Portfolio = () => {
     try {
       // Always use snapshots API
       if (selectedSnapshotDate) {
-        console.log('Fetching snapshot for date:', selectedSnapshotDate);
-        const positionsRes = await positionsAPI.getBySnapshotDate(selectedSnapshotDate);
+        console.log('Fetching snapshot for date:', selectedSnapshotDate, 'account:', selectedAccountId || 'all');
+        const positionsRes = await positionsAPI.getBySnapshotDate(
+          selectedSnapshotDate,
+          selectedAccountId || null
+        );
         const data = positionsRes.data || [];
         console.log('Snapshot data received:', data.length, 'positions');
 
@@ -1324,6 +1327,16 @@ const Portfolio = () => {
               value={selectedSnapshotDate}
               label="Snapshot Date"
               onChange={(event) => setSelectedSnapshotDate(event.target.value)}
+              renderValue={(value) => {
+                if (!value) return <em>Select date</em>;
+                return new Date(value).toLocaleDateString('en-US', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                });
+              }}
               sx={isMobile ? {
                 '& .MuiInputBase-root': {
                   minHeight: 48

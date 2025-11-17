@@ -894,10 +894,11 @@ async def get_snapshot_dates(
 @router.get("/snapshots/by-date")
 async def get_positions_by_snapshot(
     snapshot_date: str,  # ISO format date: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
+    account_id: Optional[str] = None,  # Optional account filter
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
-    """Get positions from a specific snapshot date"""
+    """Get positions from a specific snapshot date, optionally filtered by account"""
     db = get_db_service(session)
 
     # Parse the snapshot date
@@ -908,12 +909,22 @@ async def get_positions_by_snapshot(
             detail="Invalid date format. Use ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS"
         )
 
-    # Get all user's account IDs
-    accounts = db.find("accounts", {"user_id": current_user.id})
-    if not accounts:
-        return []
-
-    account_ids = [acc["id"] for acc in accounts]
+    # Get account IDs based on filter
+    if account_id:
+        # Verify account belongs to user
+        account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+        if not account:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Account not found"
+            )
+        account_ids = [account_id]
+    else:
+        # Get all user's account IDs
+        accounts = db.find("accounts", {"user_id": current_user.id})
+        if not accounts:
+            return []
+        account_ids = [acc["id"] for acc in accounts]
 
     # Query snapshots for the specified date
     from sqlalchemy import select, and_, func

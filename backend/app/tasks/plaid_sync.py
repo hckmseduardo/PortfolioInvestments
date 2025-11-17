@@ -94,6 +94,9 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 if not historical_result:
                     raise Exception("Failed to fetch historical transactions from Plaid")
 
+                # Collect raw Plaid API responses for debug logging
+                all_raw_responses = [historical_result.get('raw_response', {})]
+
                 # Convert to sync_result format (added transactions)
                 sync_result = {
                     "added": historical_result.get('transactions', []),
@@ -126,6 +129,9 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                     if not historical_result:
                         break
 
+                    # Collect raw response from this page
+                    all_raw_responses.append(historical_result.get('raw_response', {}))
+
                     new_transactions = historical_result.get('transactions', [])
                     sync_result["added"].extend(new_transactions)
                     total_fetched = len(sync_result["added"])
@@ -148,13 +154,18 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                                 "start": start_date.isoformat(),
                                 "end": end_date.isoformat()
                             },
-                            "transaction_count": len(sync_result['added']),
-                            "transactions": sync_result['added'][:10],  # Save only first 10 for brevity
-                            "total_transactions": len(sync_result['added'])
+                            "pagination_info": {
+                                "total_api_calls": len(all_raw_responses),
+                                "total_transactions_fetched": len(sync_result['added'])
+                            },
+                            "raw_plaid_responses": all_raw_responses  # Save ALL raw Plaid API responses (one per page)
                         }
                         with open(debug_file, 'w') as f:
                             json.dump(debug_data, f, indent=2, default=str)
-                        logger.info(f"Saved Plaid full sync payload to {debug_file}")
+                        logger.info(
+                            f"[FULL RESYNC] Saved {len(all_raw_responses)} raw Plaid API responses "
+                            f"({len(sync_result['added'])} total transactions) to {debug_file}"
+                        )
                     except Exception as debug_error:
                         logger.warning(f"Failed to save debug payload: {debug_error}")
 
@@ -269,17 +280,16 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                             "institution_name": plaid_item.institution_name,
                             "sync_type": sync_type,
                             "had_cursor": cursor is not None,
-                            "added_count": len(sync_result.get('added', [])),
-                            "modified_count": len(sync_result.get('modified', [])),
-                            "removed_count": len(sync_result.get('removed', [])),
-                            "added_sample": sync_result.get('added', [])[:5],  # First 5 for sample
-                            "modified_sample": sync_result.get('modified', [])[:5],
-                            "removed_sample": sync_result.get('removed', [])[:5],
-                            "has_more": sync_result.get('has_more', False)
+                            "raw_plaid_response": sync_result.get('raw_response', {})  # Save raw Plaid API response
                         }
                         with open(debug_file, 'w') as f:
                             json.dump(debug_data, f, indent=2, default=str)
-                        logger.info(f"Saved Plaid incremental sync payload to {debug_file}")
+                        logger.info(
+                            f"[INCREMENTAL SYNC] Saved raw Plaid API response to {debug_file}: "
+                            f"{len(sync_result.get('added', []))} added, "
+                            f"{len(sync_result.get('modified', []))} modified, "
+                            f"{len(sync_result.get('removed', []))} removed"
+                        )
                     except Exception as debug_error:
                         logger.warning(f"Failed to save debug payload: {debug_error}")
 
@@ -729,13 +739,17 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
     logger.info(f"[INVESTMENT SYNC DEBUG] Fetching investment transactions from {start_date_str} to {end_date_str}")
     logger.info(f"[INVESTMENT SYNC] Calling plaid_client.get_investment_transactions()...")
 
-    # Fetch investment transactions
+    # Fetch investment transactions with pagination
     # Security: Decrypt access token before using
     access_token = encryption_service.decrypt(plaid_item.access_token)
+
+    # Fetch first batch
     investment_result = plaid_client.get_investment_transactions(
         access_token=access_token,
         start_date=start_date_str,
-        end_date=end_date_str
+        end_date=end_date_str,
+        count=500,
+        offset=0
     )
 
     logger.info(f"[INVESTMENT SYNC] API call completed, result is: {type(investment_result).__name__ if investment_result else 'None'}")
@@ -745,9 +759,53 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
         logger.error("[INVESTMENT SYNC] This usually means the Plaid API call failed. Check logs above for Plaid API errors.")
         return 0
 
-    transactions = investment_result.get('transactions', [])
-    securities = {sec['security_id']: sec for sec in investment_result.get('securities', [])}
+    # Collect all transactions, securities, and accounts
+    # Store BOTH raw Plaid responses AND formatted data
+    all_transactions = investment_result.get('transactions', [])
+    all_securities = {sec['security_id']: sec for sec in investment_result.get('securities', [])}
     investment_accounts = investment_result.get('accounts', [])
+    total_available = investment_result.get('total_transactions', 0)
+
+    # Collect raw Plaid API responses for debug logging
+    all_raw_responses = [investment_result.get('raw_response', {})]
+
+    # Fetch remaining pages if there are more transactions
+    total_fetched = len(all_transactions)
+
+    while total_fetched < total_available:
+        logger.info(f"[INVESTMENT SYNC] Fetching more investment transactions (offset: {total_fetched}/{total_available})")
+
+        investment_result = plaid_client.get_investment_transactions(
+            access_token=access_token,
+            start_date=start_date_str,
+            end_date=end_date_str,
+            count=500,
+            offset=total_fetched
+        )
+
+        if not investment_result:
+            logger.warning(f"[INVESTMENT SYNC] Failed to fetch page at offset {total_fetched}, stopping pagination")
+            break
+
+        new_transactions = investment_result.get('transactions', [])
+        if not new_transactions:
+            logger.warning(f"[INVESTMENT SYNC] No more transactions returned at offset {total_fetched}, stopping pagination")
+            break
+
+        all_transactions.extend(new_transactions)
+
+        # Merge securities (new ones might appear in later pages)
+        new_securities = {sec['security_id']: sec for sec in investment_result.get('securities', [])}
+        all_securities.update(new_securities)
+
+        # Collect raw response from this page
+        all_raw_responses.append(investment_result.get('raw_response', {}))
+
+        total_fetched = len(all_transactions)
+        logger.info(f"[INVESTMENT SYNC] Fetched {len(new_transactions)} more transactions, total so far: {total_fetched}/{total_available}")
+
+    transactions = all_transactions
+    securities = all_securities
 
     logger.info(f"[INVESTMENT SYNC DEBUG] Retrieved {len(transactions)} investment transactions")
     logger.info(f"[INVESTMENT SYNC DEBUG] Retrieved {len(securities)} securities")
@@ -769,20 +827,23 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
                 "plaid_item_id": plaid_item.id,
                 "institution_name": plaid_item.institution_name,
                 "sync_type": "investment",
+                "sync_mode": "full_resync" if full_resync else "incremental",
                 "date_range": {
                     "start": start_date_str,
                     "end": end_date_str
                 },
-                "transaction_count": len(transactions),
-                "security_count": len(securities),
-                "account_count": len(investment_accounts),
-                "transactions": transactions[:10],  # Save first 10 for sample
-                "securities": list(securities.values())[:10],  # First 10 securities
-                "accounts": investment_accounts[:10] if investment_accounts else []  # First 10 accounts
+                "pagination_info": {
+                    "total_api_calls": len(all_raw_responses),
+                    "total_transactions_fetched": len(transactions)
+                },
+                "raw_plaid_responses": all_raw_responses  # Save ALL raw Plaid API responses (one per page)
             }
             with open(debug_file, 'w') as f:
                 json.dump(debug_data, f, indent=2, default=str)
-            logger.info(f"Saved Plaid investment sync payload to {debug_file}")
+            logger.info(
+                f"[INVESTMENT SYNC] Saved {len(all_raw_responses)} raw Plaid API responses "
+                f"({len(transactions)} total transactions) to {debug_file}"
+            )
         except Exception as debug_error:
             logger.warning(f"Failed to save investment sync debug payload: {debug_error}")
 
@@ -1155,6 +1216,10 @@ def _sync_investment_holdings(db, plaid_item, plaid_accounts, plaid_account_map,
             existing_position.institution_price = institution_price
             existing_position.price_as_of = price_as_of
             existing_position.sync_date = sync_timestamp
+            # Frontend compatibility fields
+            existing_position.price = institution_price
+            existing_position.has_live_price = institution_price is not None and institution_price > 0
+            existing_position.price_source = 'plaid' if institution_price else None
             position_id = existing_position.id
             logger.debug(f"[HOLDINGS SYNC] Updated position: {ticker}")
         else:
@@ -1176,7 +1241,11 @@ def _sync_investment_holdings(db, plaid_item, plaid_accounts, plaid_account_map,
                 industry=industry,
                 institution_price=institution_price,
                 price_as_of=price_as_of,
-                sync_date=sync_timestamp
+                sync_date=sync_timestamp,
+                # Frontend compatibility fields
+                price=institution_price,
+                has_live_price=institution_price is not None and institution_price > 0,
+                price_source='plaid' if institution_price else None
             )
             db.add(new_position)
             logger.debug(f"[HOLDINGS SYNC] Created new position: {ticker}")
