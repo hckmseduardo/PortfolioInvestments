@@ -18,21 +18,21 @@ class PlaidTransactionMapper:
     """Maps Plaid transactions to our database models"""
 
     # Plaid category to our transaction type mapping
+    # Simplified category to type mapping
+    # All transactions are now either Money In or Money Out based on amount
     CATEGORY_TO_TYPE = {
-        # Income
-        "INCOME": "DEPOSIT",
-        "TRANSFER_IN": "TRANSFER",
+        # Income/Credits - Money In
+        "INCOME": "Money In",
+        "TRANSFER_IN": "Money In",
+        "INTEREST": "Money In",
+        "DIVIDEND": "Money In",
+        "SECURITIES_SELL": "Money In",
 
-        # Expenses
-        "TRANSFER_OUT": "TRANSFER",
-        "PAYMENT": "WITHDRAWAL",
-        "BANK_FEES": "FEE",
-        "INTEREST": "DEPOSIT",  # Interest earned
-
-        # Investment-related (for investment accounts)
-        "SECURITIES_BUY": "BUY",
-        "SECURITIES_SELL": "SELL",
-        "DIVIDEND": "DIVIDEND",
+        # Expenses/Debits - Money Out
+        "TRANSFER_OUT": "Money Out",
+        "PAYMENT": "Money Out",
+        "BANK_FEES": "Money Out",
+        "SECURITIES_BUY": "Money Out",
     }
 
     # Plaid payment channels
@@ -90,26 +90,19 @@ class PlaidTransactionMapper:
         date = self._parse_plaid_date(plaid_txn['date'])
 
         # Amount in Plaid is positive for debits, negative for credits
-        # We store amounts as positive, type determines direction
-        amount = abs(plaid_txn['amount'])
-        is_debit = plaid_txn['amount'] > 0
+        # We convert to our format: positive = money in, negative = money out
+        amount = plaid_txn['amount']
 
-        # Determine transaction type based on categories and account type
-        txn_type = self._determine_transaction_type(
-            plaid_txn,
-            account_type,
-            is_debit
-        )
+        # Convert Plaid's convention (positive=debit) to ours (positive=credit)
+        # For most accounts: debit (money out) should be negative, credit (money in) should be positive
+        total = -amount
 
         # Build description from available fields
         description = self._build_description(plaid_txn)
 
-        # For deposits (credits), amount should be positive
-        # For withdrawals (debits), amount should be negative in total
-        if txn_type in ['WITHDRAWAL', 'FEE', 'TRANSFER'] and is_debit:
-            total = -amount
-        else:
-            total = amount
+        # Determine transaction type based on amount using transaction_classifier
+        from app.services.transaction_classifier import transaction_classifier
+        txn_type = transaction_classifier.classify_transaction(total)
 
         # Extract Plaid Personal Finance Category (PFC) if available
         pfc_data = self._extract_pfc(plaid_txn)
@@ -137,7 +130,10 @@ class PlaidTransactionMapper:
         transaction_id: str
     ) -> Optional[Dict[str, Any]]:
         """
-        Map a Plaid transaction to an Expense if applicable
+        Map a Plaid transaction to an Expense for tracking in the Cashflow page
+
+        Creates expense records for both Money In and Money Out transactions so they
+        can be categorized and tracked in the Cashflow section.
 
         Args:
             plaid_txn: Plaid transaction object
@@ -145,12 +141,8 @@ class PlaidTransactionMapper:
             transaction_id: Associated transaction ID
 
         Returns:
-            Dictionary for Expense model creation, or None if not an expense
+            Dictionary for Expense model creation
         """
-        # Only create expenses for debits (positive amounts in Plaid)
-        if plaid_txn['amount'] <= 0:
-            return None
-
         # Parse date
         date = self._parse_plaid_date(plaid_txn['date'])
 
@@ -167,7 +159,7 @@ class PlaidTransactionMapper:
         if not category and pfc_data.get('detailed'):
             category = self._map_pfc_to_category(pfc_data['detailed'])
 
-        # Amount is always positive for expenses
+        # Amount is always positive for expense records
         amount = abs(plaid_txn['amount'])
 
         return {
@@ -248,33 +240,16 @@ class PlaidTransactionMapper:
         is_debit: bool
     ) -> str:
         """Determine our transaction type from Plaid transaction"""
-        categories = plaid_txn.get('category', [])
-
-        # Check primary category
-        if categories:
-            primary_category = categories[0].upper().replace(' ', '_')
-
-            # Map known categories
-            if 'TRANSFER' in primary_category:
-                return 'TRANSFER'
-            elif primary_category in ['INTEREST', 'INTEREST_EARNED']:
-                return 'DEPOSIT'
-            elif primary_category in ['BANK_FEES', 'FEE']:
-                return 'FEE'
-            elif 'DIVIDEND' in primary_category:
-                return 'DIVIDEND'
-
-        # For investment accounts, check for securities transactions
-        if account_type == 'investment':
-            payment_channel = plaid_txn.get('payment_channel', '').lower()
-            if 'securities' in str(categories).lower():
-                return 'BUY' if is_debit else 'SELL'
+        # Simplified transaction types: Money In or Money Out
+        # Based on Definitions.MD - transaction types are now simplified to:
+        # - Money In: positive values (credits)
+        # - Money Out: negative values (debits)
 
         # Default based on debit/credit
         if is_debit:
-            return 'WITHDRAWAL'
+            return 'Money Out'
         else:
-            return 'DEPOSIT'
+            return 'Money In'
 
     def _build_description(self, plaid_txn: Dict[str, Any]) -> str:
         """Build a description from Plaid transaction fields"""
@@ -502,11 +477,18 @@ class PlaidTransactionMapper:
             'RENT_AND_UTILITIES_WATER': 'Utilities',
             'RENT_AND_UTILITIES_OTHER_UTILITIES': 'Utilities',
 
-            # Transfers & Payments
-            'TRANSFER_IN_DEPOSIT': 'Transfer',
+            # Income & Transfers In
+            'INCOME_WAGES': 'Salary',
+            'INCOME_DIVIDENDS': 'Dividends',
+            'INCOME_INTEREST_EARNED': 'Interest',
+            'INCOME_RETIREMENT_PENSION': 'Retirement Income',
+            'INCOME_TAX_REFUND': 'Tax Refund',
+            'INCOME_UNEMPLOYMENT': 'Unemployment',
+            'INCOME_OTHER_INCOME': 'Other Income',
+            'TRANSFER_IN_DEPOSIT': 'Deposit',
             'TRANSFER_IN_CASH_ADVANCES_AND_LOANS': 'Transfer',
-            'TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS': 'Transfer',
-            'TRANSFER_IN_SAVINGS': 'Transfer',
+            'TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS': 'Investment Transfer',
+            'TRANSFER_IN_SAVINGS': 'Savings Transfer',
             'TRANSFER_IN_ACCOUNT_TRANSFER': 'Transfer',
             'TRANSFER_IN_OTHER_TRANSFER_IN': 'Transfer',
             'TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS': 'Transfer',

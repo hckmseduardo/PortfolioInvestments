@@ -13,6 +13,8 @@ from app.services.job_queue import enqueue_expense_conversion_job, get_job_info
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 
+# Account types that appear in Cashflow section
+# Only checking and credit card accounts are tracked for cashflow/expense management
 EXPENSE_ACCOUNT_TYPES = {"checking", "credit_card"}
 
 # Enhanced category keywords for intelligent auto-categorization
@@ -308,14 +310,14 @@ def auto_categorize_expense(
     return None, 0.0, "unknown"
 
 def _is_expense_account(account: Optional[dict]) -> bool:
-    """Return True if the account type should appear in expenses."""
+    """Return True if the account type should appear in Cashflow section (checking or credit card only)."""
     if not account:
         return False
     return account.get("account_type") in EXPENSE_ACCOUNT_TYPES
 
 
 def _get_expense_accounts(db, user_id: str) -> List[dict]:
-    """Return all checking/credit card accounts for the user."""
+    """Return all checking and credit card accounts for the user."""
     all_accounts = db.find("accounts", {"user_id": user_id})
     return [acc for acc in all_accounts if _is_expense_account(acc)]
 
@@ -505,7 +507,7 @@ async def get_expenses(
         if not _is_expense_account(account):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Expenses are limited to checking and credit card accounts"
+                detail="Cashflow tracking is only available for checking and credit card accounts"
             )
 
         query = {"account_id": account_id}
@@ -546,7 +548,7 @@ async def get_expense_summary(
         if not _is_expense_account(account):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Expenses are limited to checking and credit card accounts"
+                detail="Cashflow tracking is only available for checking and credit card accounts"
             )
         expenses = db.find("expenses", {"account_id": account_id})
     else:
@@ -747,53 +749,51 @@ async def initialize_default_categories(
             session.commit()
 
     # Define default categories with colors - separated by type
-    # Aligned with Categorization Rules.md
+    # Simplified categories: Money In (positive values) and Money Out (negative values)
     default_categories = [
-        # Income categories (Amount > 0)
-        {"name": "Income", "type": "income", "color": "#4CAF50", "budget_limit": None},
-        {"name": "Salary", "type": "income", "color": "#66BB6A", "budget_limit": None},
-        {"name": "Bonus", "type": "income", "color": "#81C784", "budget_limit": None},
-        {"name": "Freelance", "type": "income", "color": "#A5D6A7", "budget_limit": None},
-        {"name": "Dividends", "type": "income", "color": "#C8E6C9", "budget_limit": None},
-        {"name": "Interest", "type": "income", "color": "#8BC34A", "budget_limit": None},
-        {"name": "Other Income", "type": "income", "color": "#CDDC39", "budget_limit": None},
+        # Money In categories (Amount > 0)
+        {"name": "Income", "type": "money_in", "color": "#4CAF50", "budget_limit": None},
+        {"name": "Salary", "type": "money_in", "color": "#66BB6A", "budget_limit": None},
+        {"name": "Bonus", "type": "money_in", "color": "#81C784", "budget_limit": None},
+        {"name": "Freelance", "type": "money_in", "color": "#A5D6A7", "budget_limit": None},
+        {"name": "Dividends", "type": "money_in", "color": "#C8E6C9", "budget_limit": None},
+        {"name": "Interest", "type": "money_in", "color": "#8BC34A", "budget_limit": None},
+        {"name": "Refund", "type": "money_in", "color": "#CDDC39", "budget_limit": None},
+        {"name": "Investment Out", "type": "money_in", "color": "#0D47A1", "budget_limit": None},
+        {"name": "Stock Sale", "type": "money_in", "color": "#1E88E5", "budget_limit": None},
+        {"name": "ETF Sale", "type": "money_in", "color": "#1976D2", "budget_limit": None},
+        {"name": "Crypto Sale", "type": "money_in", "color": "#1565C0", "budget_limit": None},
+        {"name": "Other Income", "type": "money_in", "color": "#7CB342", "budget_limit": None},
 
-        # Investment categories (Investment movements)
-        {"name": "Investment", "type": "investment", "color": "#1976D2", "budget_limit": None},
-        {"name": "Investment In", "type": "investment", "color": "#2196F3", "budget_limit": None},
-        {"name": "Investment Out", "type": "investment", "color": "#0D47A1", "budget_limit": None},
-        {"name": "Stock Purchase", "type": "investment", "color": "#42A5F5", "budget_limit": None},
-        {"name": "ETF Purchase", "type": "investment", "color": "#64B5F6", "budget_limit": None},
-        {"name": "Crypto Purchase", "type": "investment", "color": "#1565C0", "budget_limit": None},
-        {"name": "Stock Sale", "type": "investment", "color": "#1E88E5", "budget_limit": None},
-        {"name": "ETF Sale", "type": "investment", "color": "#1976D2", "budget_limit": None},
-        {"name": "Crypto Sale", "type": "investment", "color": "#1565C0", "budget_limit": None},
-        {"name": "Other Investment", "type": "investment", "color": "#90CAF9", "budget_limit": None},
-
-        # Transfer categories (Internal transfers between accounts)
-        {"name": "Transfer", "type": "transfer", "color": "#607D8B", "budget_limit": None},
-        {"name": "Credit Card Payment", "type": "transfer", "color": "#78909C", "budget_limit": None},
-        {"name": "Bank Transfer", "type": "transfer", "color": "#90A4AE", "budget_limit": None},
-        {"name": "Account Transfer", "type": "transfer", "color": "#B0BEC5", "budget_limit": None},
-        {"name": "E-Transfer", "type": "transfer", "color": "#CFD8DC", "budget_limit": None},
-
-        # Expense categories (Amount < 0, goods and services)
-        {"name": "Groceries", "type": "expense", "color": "#8BC34A", "budget_limit": None},
-        {"name": "Dining", "type": "expense", "color": "#FF9800", "budget_limit": None},
-        {"name": "Transportation", "type": "expense", "color": "#2196F3", "budget_limit": None},
-        {"name": "Utilities", "type": "expense", "color": "#9C27B0", "budget_limit": None},
-        {"name": "Entertainment", "type": "expense", "color": "#E91E63", "budget_limit": None},
-        {"name": "Shopping", "type": "expense", "color": "#00BCD4", "budget_limit": None},
-        {"name": "Healthcare", "type": "expense", "color": "#F44336", "budget_limit": None},
-        {"name": "Bills", "type": "expense", "color": "#795548", "budget_limit": None},
-        {"name": "ATM", "type": "expense", "color": "#9E9E9E", "budget_limit": None},
-        {"name": "Fees", "type": "expense", "color": "#FF5722", "budget_limit": None},
-        {"name": "Insurance", "type": "expense", "color": "#3F51B5", "budget_limit": None},
-        {"name": "Housing", "type": "expense", "color": "#673AB7", "budget_limit": None},
-        {"name": "Education", "type": "expense", "color": "#009688", "budget_limit": None},
-        {"name": "Personal Care", "type": "expense", "color": "#CDDC39", "budget_limit": None},
-        {"name": "Gifts", "type": "expense", "color": "#FFC107", "budget_limit": None},
-        {"name": "Other Expense", "type": "expense", "color": "#757575", "budget_limit": None},
+        # Money Out categories (Amount < 0)
+        # Expenses
+        {"name": "Groceries", "type": "money_out", "color": "#8BC34A", "budget_limit": None},
+        {"name": "Dining", "type": "money_out", "color": "#FF9800", "budget_limit": None},
+        {"name": "Transportation", "type": "money_out", "color": "#2196F3", "budget_limit": None},
+        {"name": "Utilities", "type": "money_out", "color": "#9C27B0", "budget_limit": None},
+        {"name": "Entertainment", "type": "money_out", "color": "#E91E63", "budget_limit": None},
+        {"name": "Shopping", "type": "money_out", "color": "#00BCD4", "budget_limit": None},
+        {"name": "Healthcare", "type": "money_out", "color": "#F44336", "budget_limit": None},
+        {"name": "Bills", "type": "money_out", "color": "#795548", "budget_limit": None},
+        {"name": "ATM", "type": "money_out", "color": "#9E9E9E", "budget_limit": None},
+        {"name": "Fees", "type": "money_out", "color": "#FF5722", "budget_limit": None},
+        {"name": "Insurance", "type": "money_out", "color": "#3F51B5", "budget_limit": None},
+        {"name": "Housing", "type": "money_out", "color": "#673AB7", "budget_limit": None},
+        {"name": "Education", "type": "money_out", "color": "#009688", "budget_limit": None},
+        {"name": "Personal Care", "type": "money_out", "color": "#CDDC39", "budget_limit": None},
+        {"name": "Gifts", "type": "money_out", "color": "#FFC107", "budget_limit": None},
+        # Investments
+        {"name": "Investment In", "type": "money_out", "color": "#2196F3", "budget_limit": None},
+        {"name": "Stock Purchase", "type": "money_out", "color": "#42A5F5", "budget_limit": None},
+        {"name": "ETF Purchase", "type": "money_out", "color": "#64B5F6", "budget_limit": None},
+        {"name": "Crypto Purchase", "type": "money_out", "color": "#1565C0", "budget_limit": None},
+        # Transfers
+        {"name": "Transfer", "type": "money_out", "color": "#607D8B", "budget_limit": None},
+        {"name": "Credit Card Payment", "type": "money_out", "color": "#78909C", "budget_limit": None},
+        {"name": "Bank Transfer", "type": "money_out", "color": "#90A4AE", "budget_limit": None},
+        {"name": "Account Transfer", "type": "money_out", "color": "#B0BEC5", "budget_limit": None},
+        {"name": "E-Transfer", "type": "money_out", "color": "#CFD8DC", "budget_limit": None},
+        {"name": "Other Expense", "type": "money_out", "color": "#757575", "budget_limit": None},
     ]
 
     created_categories = []
@@ -896,7 +896,7 @@ async def get_monthly_expense_comparison(
         if not _is_expense_account(account):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Expenses are limited to checking and credit card accounts"
+                detail="Cashflow tracking is only available for checking and credit card accounts"
             )
         expenses = db.find("expenses", {"account_id": account_id})
     else:
@@ -914,19 +914,18 @@ async def get_monthly_expense_comparison(
 
     # Get user categories to determine types
     user_categories = db.find("categories", {"user_id": current_user.id})
-    category_types = {cat["name"]: cat.get("type", "expense") for cat in user_categories}
+    category_types = {cat["name"]: cat.get("type", "money_out") for cat in user_categories}
 
     # Organize expenses by month, separating by type
     monthly_data = defaultdict(lambda: {
-        "income": 0,
-        "expenses": 0,
-        "investments": 0,
+        "money_in": 0,
+        "money_out": 0,
         "by_category": defaultdict(float)
     })
 
     for exp in expenses:
         category = exp.get("category", "Uncategorized")
-        category_type = category_types.get(category, "expense")
+        category_type = category_types.get(category, "money_out")
 
         date_str = exp.get("date", "")
         if date_str:
@@ -936,12 +935,10 @@ async def get_monthly_expense_comparison(
                 amount = abs(exp.get("amount", 0))
 
                 # Add to appropriate type total
-                if category_type == "income":
-                    monthly_data[month_key]["income"] += amount
-                elif category_type == "investment":
-                    monthly_data[month_key]["investments"] += amount
-                elif category_type == "expense":
-                    monthly_data[month_key]["expenses"] += amount
+                if category_type == "money_in":
+                    monthly_data[month_key]["money_in"] += amount
+                elif category_type == "money_out":
+                    monthly_data[month_key]["money_out"] += amount
 
                 # Also track by category for detailed breakdown
                 monthly_data[month_key]["by_category"][category] += amount
@@ -956,9 +953,8 @@ async def get_monthly_expense_comparison(
     for month in sorted_months:
         result.append({
             "month": month,
-            "income": monthly_data[month]["income"],
-            "expenses": monthly_data[month]["expenses"],
-            "investments": monthly_data[month]["investments"],
+            "money_in": monthly_data[month]["money_in"],
+            "money_out": monthly_data[month]["money_out"],
             "by_category": dict(monthly_data[month]["by_category"])
         })
 
@@ -1047,14 +1043,12 @@ def run_expense_conversion(
     account_ids = [acc["id"] for acc in accounts]
 
     notify("loading_transactions", {"message": "Loading transactions from accounts...", "current": 0, "total": len(account_ids)})
-    # Load all relevant transaction types:
-    # - WITHDRAWAL, FEE: Expenses
-    # - DEPOSIT, DIVIDEND, INTEREST: Income (excluding transfers)
-    # - TRANSFER: Transfers between accounts (credit card payments, bank transfers, investment movements)
+    # Load all transactions (Money In and Money Out)
+    # All transactions are now categorized as either "Money In" (positive) or "Money Out" (negative)
     transactions = []
     for idx, acc_id in enumerate(account_ids, 1):
         txns = db.find("transactions", {"account_id": acc_id})
-        transactions.extend([t for t in txns if t.get("type") in ["WITHDRAWAL", "FEE", "DEPOSIT", "DIVIDEND", "INTEREST", "TRANSFER"]])
+        transactions.extend([t for t in txns if t.get("type") in ["Money In", "Money Out"]])
         notify("loading_transactions", {
             "message": f"Loading transactions ({idx}/{len(account_ids)} accounts processed)",
             "current": idx,
@@ -1218,10 +1212,10 @@ def run_expense_conversion(
         elif is_transfer:
             # Transfer without paired account info
             return "Transfer"
-        elif txn_type in ["DEPOSIT", "DIVIDEND", "INTEREST"]:
+        elif txn_type == "Money In":
             # Income transactions (not transfers)
             return "Income"
-        elif txn_type in ["WITHDRAWAL", "FEE"]:
+        elif txn_type == "Money Out":
             # Expense transactions - will be categorized by auto_categorize_expense
             return "Uncategorized"
         return "Uncategorized"

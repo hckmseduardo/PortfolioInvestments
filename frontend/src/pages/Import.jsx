@@ -64,7 +64,8 @@ const STATEMENT_COLUMNS = [
   { id: 'transaction_last_date', label: 'Last Transaction', numeric: false },
   { id: 'file_size', label: 'Size', numeric: true },
   { id: 'positions_count', label: 'Positions', numeric: true },
-  { id: 'transactions_count', label: 'Transactions', numeric: true },
+  { id: 'transactions_created', label: 'Txns Imported', numeric: true },
+  { id: 'transactions_skipped', label: 'Txns Ignored', numeric: true },
   { id: 'dividends_count', label: 'Dividends', numeric: true },
   { id: 'credit_volume', label: 'Credits', numeric: true },
   { id: 'debit_volume', label: 'Debits', numeric: true }
@@ -348,11 +349,14 @@ const Import = () => {
         case 'file_size':
           return statement.file_size || 0;
         case 'positions_count':
-        case 'transactions_count':
         case 'dividends_count':
         case 'credit_volume':
         case 'debit_volume':
           return statement[columnId] || 0;
+        case 'transactions_created':
+          return statement.transactions_created || statement.transactions_count || 0;
+        case 'transactions_skipped':
+          return statement.transactions_skipped || 0;
         case 'status':
           return statement.status || '';
         default:
@@ -418,7 +422,8 @@ const Import = () => {
           statement.uploaded_at,
           statement.file_size,
           statement.positions_count,
-          statement.transactions_count,
+          statement.transactions_created || statement.transactions_count,
+          statement.transactions_skipped,
           statement.dividends_count,
           statement.transaction_first_date,
           statement.transaction_last_date,
@@ -1215,7 +1220,17 @@ const Import = () => {
                             <Typography variant="caption" color="text.secondary">
                               Transactions Imported
                             </Typography>
-                            <Typography variant="subtitle1">{statement.transactions_count || 0}</Typography>
+                            <Typography variant="subtitle1" color="success.main">
+                              {statement.transactions_created || statement.transactions_count || 0}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="text.secondary">
+                              Transactions Ignored
+                            </Typography>
+                            <Typography variant="subtitle1" color="warning.main">
+                              {statement.transactions_skipped || 0}
+                            </Typography>
                           </Grid>
                           <Grid item xs={6}>
                             <Typography variant="caption" color="text.secondary">
@@ -1387,9 +1402,14 @@ const Import = () => {
                               content = formatFileSize(statement.file_size);
                               break;
                             case 'positions_count':
-                            case 'transactions_count':
                             case 'dividends_count':
                               content = statement[id] || 0;
+                              break;
+                            case 'transactions_created':
+                              content = statement.transactions_created || statement.transactions_count || 0;
+                              break;
+                            case 'transactions_skipped':
+                              content = statement.transactions_skipped || 0;
                               break;
                             case 'credit_volume':
                             case 'debit_volume':

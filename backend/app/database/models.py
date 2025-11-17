@@ -68,16 +68,8 @@ class AccountTypeEnum(str, enum.Enum):
 
 
 class TransactionTypeEnum(str, enum.Enum):
-    BUY = "BUY"
-    SELL = "SELL"
-    DIVIDEND = "DIVIDEND"
-    DEPOSIT = "DEPOSIT"
-    WITHDRAWAL = "WITHDRAWAL"
-    FEE = "FEE"
-    BONUS = "BONUS"
-    TRANSFER = "TRANSFER"
-    TAX = "TAX"
-    INTEREST = "INTEREST"
+    MONEY_IN = "Money In"
+    MONEY_OUT = "Money Out"
 
 
 class User(Base):
@@ -126,6 +118,7 @@ class Account(Base):
     is_plaid_linked = Column(Integer, default=0, nullable=False)  # 0 = not linked, 1 = linked
     opening_balance = Column(Float, nullable=True)  # Starting balance before oldest transaction
     opening_balance_date = Column(DateTime, nullable=True)  # Date of the opening balance
+    first_plaid_transaction_date = Column(DateTime, nullable=True)  # First transaction date imported from Plaid
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, onupdate=datetime.utcnow, nullable=True)
 
@@ -275,11 +268,7 @@ class Transaction(Base):
     account_id = Column(String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
     statement_id = Column(String, ForeignKey("statements.id", ondelete="CASCADE"), nullable=True, index=True)
     date = Column(DateTime, nullable=False, index=True)
-    type = Column(SQLEnum(TransactionTypeEnum), nullable=False, index=True)
-    ticker = Column(String, nullable=True)
-    quantity = Column(Float, nullable=True)
-    price = Column(Float, nullable=True)
-    fees = Column(Float, default=0.0, nullable=False)
+    type = Column(SQLEnum(TransactionTypeEnum, values_callable=lambda x: [e.value for e in x]), nullable=False, index=True)
     total = Column(Float, nullable=False)
     description = Column(Text, nullable=True)
     source = Column(String, default="manual", nullable=False, index=True)  # manual, plaid, import
@@ -402,6 +391,8 @@ class Statement(Base):
     end_date = Column(DateTime, nullable=True)
     file_type = Column(String, nullable=False)
     transactions_count = Column(Integer, default=0, nullable=False)
+    transactions_created = Column(Integer, default=0, nullable=False)  # Number of transactions imported
+    transactions_skipped = Column(Integer, default=0, nullable=False)  # Number of transactions skipped/ignored
 
     # Relationships
     account = relationship("Account", back_populates="statements")

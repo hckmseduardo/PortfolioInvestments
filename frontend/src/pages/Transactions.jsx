@@ -59,13 +59,6 @@ const TRANSACTION_FILTER_DEFAULTS = {
   date: '',
   account: '',
   type: '',
-  ticker: '',
-  quantityMin: '',
-  quantityMax: '',
-  priceMin: '',
-  priceMax: '',
-  feesMin: '',
-  feesMax: '',
   totalMin: '',
   totalMax: '',
   balanceMin: '',
@@ -317,14 +310,6 @@ const Transactions = () => {
         return getAccountName(transaction.account_id).toLowerCase();
       case 'type':
         return (transaction.type || '').toLowerCase();
-      case 'ticker':
-        return (transaction.ticker || '').toLowerCase();
-      case 'quantity':
-        return Number(transaction.quantity ?? Number.NEGATIVE_INFINITY);
-      case 'price':
-        return Number(transaction.price ?? Number.NEGATIVE_INFINITY);
-      case 'fees':
-        return Number(transaction.fees ?? Number.NEGATIVE_INFINITY);
       case 'total':
         return Number(transaction.total ?? Number.NEGATIVE_INFINITY);
       case 'running_balance':
@@ -341,7 +326,6 @@ const Transactions = () => {
   const processedTransactions = useMemo(() => {
     const normalizedTextFilters = {
       account: filters.account.trim().toLowerCase(),
-      ticker: filters.ticker.trim().toLowerCase(),
       description: filters.description.trim().toLowerCase(),
       source: filters.source.trim().toLowerCase()
     };
@@ -372,25 +356,6 @@ const Transactions = () => {
       }
 
       if (filters.type && tx.type !== filters.type) {
-        return false;
-      }
-
-      if (normalizedTextFilters.ticker) {
-        const ticker = (tx.ticker || '').toLowerCase();
-        if (!ticker.includes(normalizedTextFilters.ticker)) {
-          return false;
-        }
-      }
-
-      if (!passesRangeFilter(tx.quantity, filters.quantityMin, filters.quantityMax)) {
-        return false;
-      }
-
-      if (!passesRangeFilter(tx.price, filters.priceMin, filters.priceMax)) {
-        return false;
-      }
-
-      if (!passesRangeFilter(tx.fees, filters.feesMin, filters.feesMax)) {
         return false;
       }
 
@@ -459,12 +424,8 @@ const Transactions = () => {
     { field: 'account_name', header: 'Account' },
     { field: 'type', header: 'Type' },
     { field: 'description', header: 'Description' },
-    { field: 'total', header: 'Total', type: 'currency' },
-    { field: 'running_balance', header: 'Balance', type: 'currency' },
-    { field: 'ticker', header: 'Ticker' },
-    { field: 'quantity', header: 'Quantity', type: 'number' },
-    { field: 'price', header: 'Price', type: 'currency' },
-    { field: 'fees', header: 'Fees', type: 'currency' }
+    { field: 'total', header: 'Amount', type: 'currency' },
+    { field: 'running_balance', header: 'Balance', type: 'currency' }
   ], []);
 
   const transactionExportData = useMemo(() =>
@@ -667,7 +628,7 @@ const Transactions = () => {
                     direction={sortConfig.field === 'total' ? sortConfig.direction : 'asc'}
                     onClick={() => handleSort('total')}
                   >
-                    Total
+                    Amount
                   </TableSortLabel>
                 </TableCell>
                 <TableCell align="right" sortDirection={sortConfig.field === 'running_balance' ? sortConfig.direction : false}>
@@ -677,42 +638,6 @@ const Transactions = () => {
                     onClick={() => handleSort('running_balance')}
                   >
                     Balance
-                  </TableSortLabel>
-                </TableCell>
-                <TableCell sortDirection={sortConfig.field === 'ticker' ? sortConfig.direction : false}>
-                  <TableSortLabel
-                    active={sortConfig.field === 'ticker'}
-                    direction={sortConfig.field === 'ticker' ? sortConfig.direction : 'asc'}
-                    onClick={() => handleSort('ticker')}
-                  >
-                    Ticker
-                  </TableSortLabel>
-                </TableCell>
-                <TableCell align="right" sortDirection={sortConfig.field === 'quantity' ? sortConfig.direction : false}>
-                  <TableSortLabel
-                    active={sortConfig.field === 'quantity'}
-                    direction={sortConfig.field === 'quantity' ? sortConfig.direction : 'asc'}
-                    onClick={() => handleSort('quantity')}
-                  >
-                    Quantity
-                  </TableSortLabel>
-                </TableCell>
-                <TableCell align="right" sortDirection={sortConfig.field === 'price' ? sortConfig.direction : false}>
-                  <TableSortLabel
-                    active={sortConfig.field === 'price'}
-                    direction={sortConfig.field === 'price' ? sortConfig.direction : 'asc'}
-                    onClick={() => handleSort('price')}
-                  >
-                    Price
-                  </TableSortLabel>
-                </TableCell>
-                <TableCell align="right" sortDirection={sortConfig.field === 'fees' ? sortConfig.direction : false}>
-                  <TableSortLabel
-                    active={sortConfig.field === 'fees'}
-                    direction={sortConfig.field === 'fees' ? sortConfig.direction : 'asc'}
-                    onClick={() => handleSort('fees')}
-                  >
-                    Fees
                   </TableSortLabel>
                 </TableCell>
                 <TableCell sortDirection={sortConfig.field === 'source' ? sortConfig.direction : false}>
@@ -829,75 +754,6 @@ const Transactions = () => {
                   </Stack>
                 </TableCell>
                 <TableCell>
-                  <TextField
-                    size="small"
-                    placeholder="Search ticker"
-                    value={filters.ticker}
-                    onChange={(e) => handleFilterChange('ticker', e.target.value)}
-                    fullWidth
-                  />
-                </TableCell>
-                <TableCell align="right">
-                  <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                    <TextField
-                      size="small"
-                      type="number"
-                      placeholder="Min"
-                      value={filters.quantityMin}
-                      onChange={(e) => handleFilterChange('quantityMin', e.target.value)}
-                      sx={{ width: 90 }}
-                    />
-                    <TextField
-                      size="small"
-                      type="number"
-                      placeholder="Max"
-                      value={filters.quantityMax}
-                      onChange={(e) => handleFilterChange('quantityMax', e.target.value)}
-                      sx={{ width: 90 }}
-                    />
-                  </Stack>
-                </TableCell>
-                <TableCell align="right">
-                  <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                    <TextField
-                      size="small"
-                      type="number"
-                      placeholder="Min"
-                      value={filters.priceMin}
-                      onChange={(e) => handleFilterChange('priceMin', e.target.value)}
-                      sx={{ width: 90 }}
-                    />
-                    <TextField
-                      size="small"
-                      type="number"
-                      placeholder="Max"
-                      value={filters.priceMax}
-                      onChange={(e) => handleFilterChange('priceMax', e.target.value)}
-                      sx={{ width: 90 }}
-                    />
-                  </Stack>
-                </TableCell>
-                <TableCell align="right">
-                  <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                    <TextField
-                      size="small"
-                      type="number"
-                      placeholder="Min"
-                      value={filters.feesMin}
-                      onChange={(e) => handleFilterChange('feesMin', e.target.value)}
-                      sx={{ width: 90 }}
-                    />
-                    <TextField
-                      size="small"
-                      type="number"
-                      placeholder="Max"
-                      value={filters.feesMax}
-                      onChange={(e) => handleFilterChange('feesMax', e.target.value)}
-                      sx={{ width: 90 }}
-                    />
-                  </Stack>
-                </TableCell>
-                <TableCell>
                   <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }}>
                     <Select
                       size="small"
@@ -921,19 +777,19 @@ const Transactions = () => {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={11} align="center">
+                  <TableCell colSpan={7} align="center">
                     <CircularProgress />
                   </TableCell>
                 </TableRow>
               ) : transactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={11} align="center">
+                  <TableCell colSpan={7} align="center">
                     No transactions found
                   </TableCell>
                 </TableRow>
               ) : processedTransactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={11} align="center">
+                  <TableCell colSpan={7} align="center">
                     No transactions match the selected filters
                   </TableCell>
                 </TableRow>
@@ -965,7 +821,7 @@ const Transactions = () => {
                         variant="body2"
                         sx={{
                           fontWeight: 'bold',
-                          color: ['DEPOSIT', 'DIVIDEND', 'SELL', 'BONUS', 'INTEREST'].includes(transaction.type)
+                          color: transaction.total >= 0
                             ? 'success.main'
                             : 'error.main'
                         }}
@@ -1029,16 +885,6 @@ const Transactions = () => {
                           </Tooltip>
                         )}
                       </Stack>
-                    </TableCell>
-                    <TableCell>{transaction.ticker || '-'}</TableCell>
-                    <TableCell align="right">
-                      {transaction.quantity ? transaction.quantity.toFixed(4) : '-'}
-                    </TableCell>
-                    <TableCell align="right">
-                      {transaction.price ? formatCurrency(transaction.price) : '-'}
-                    </TableCell>
-                    <TableCell align="right">
-                      {formatCurrency(transaction.fees)}
                     </TableCell>
                     <TableCell>
                       <Chip

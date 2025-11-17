@@ -105,6 +105,8 @@ def _process_statement(db, session, user, statement_id: str, reprocess: bool, ne
         # Update only fields that exist in Statement model
         db.update("statements", {"id": statement_id}, {
             "transactions_count": result["transactions_created"],
+            "transactions_created": result["transactions_created"],
+            "transactions_skipped": result["transactions_skipped"],
             "start_date": metrics.get("transaction_first_date"),
             "end_date": metrics.get("transaction_last_date"),
         })

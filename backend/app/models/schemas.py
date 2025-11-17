@@ -60,16 +60,8 @@ class AccountType(str, Enum):
     OTHER = "other"
 
 class TransactionType(str, Enum):
-    BUY = "BUY"
-    SELL = "SELL"
-    DIVIDEND = "DIVIDEND"
-    INTEREST = "INTEREST"
-    DEPOSIT = "DEPOSIT"
-    WITHDRAWAL = "WITHDRAWAL"
-    FEE = "FEE"
-    BONUS = "BONUS"
-    TRANSFER = "TRANSFER"
-    TAX = "TAX"
+    MONEY_IN = "Money In"
+    MONEY_OUT = "Money Out"
 
 class UserBase(BaseModel):
     email: EmailStr
@@ -416,6 +408,8 @@ class Statement(StatementBase):
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     transactions_count: int = 0
+    transactions_created: int = 0  # Number of transactions successfully imported
+    transactions_skipped: int = 0  # Number of transactions skipped/ignored
     processed_at: Optional[datetime] = None  # For frontend compatibility
     positions_count: int = 0  # For frontend compatibility
     dividends_count: int = 0  # For frontend compatibility

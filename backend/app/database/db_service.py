@@ -103,8 +103,7 @@ class DatabaseService:
             document['account_type'] = AccountTypeEnum(account_type_value)
         elif collection == "transactions" and 'type' in document:
             type_value = document['type']
-            if isinstance(type_value, str):
-                type_value = type_value.upper()  # Convert to uppercase to match database enum
+            # TransactionTypeEnum values are title case ("Money In", "Money Out")
             document['type'] = TransactionTypeEnum(type_value)
 
         # Create model instance

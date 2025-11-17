@@ -17,6 +17,7 @@ from app.database.models import PlaidItem, PlaidAccount, PlaidSyncCursor, Transa
 from app.services.plaid_client import plaid_client
 from app.services.plaid_transaction_mapper import create_mapper
 from app.services.encryption import encryption_service
+from app.services.transaction_classifier import transaction_classifier
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -169,7 +170,7 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                     except Exception as debug_error:
                         logger.warning(f"Failed to save debug payload: {debug_error}")
 
-                # Delete existing transactions and expenses for this Plaid item's accounts
+                # Delete existing Plaid-imported transactions for this Plaid item's accounts
                 plaid_accounts = db.query(PlaidAccount).filter(
                     PlaidAccount.plaid_item_id == plaid_item_id
                 ).all()
@@ -177,29 +178,41 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
 
                 if account_ids:
                     update_stage("cleaning", {
-                        "message": f"Removing old transactions for {len(account_ids)} accounts...",
+                        "message": f"Removing old Plaid transactions for {len(account_ids)} accounts...",
                         "current": 0,
                         "total": len(account_ids)
                     })
 
-                    # Delete expenses first (they reference transactions)
-                    deleted_expenses = db.query(Expense).filter(
-                        Expense.account_id.in_(account_ids)
-                    ).delete(synchronize_session=False)
+                    # Delete only Plaid-imported transactions (those with plaid_transaction_id)
+                    # First, get all Plaid transaction IDs to delete associated expenses
+                    plaid_transactions = db.query(Transaction).filter(
+                        Transaction.account_id.in_(account_ids),
+                        Transaction.plaid_transaction_id.isnot(None)
+                    ).all()
+                    plaid_transaction_ids = [txn.id for txn in plaid_transactions]
 
-                    # Delete dividends (they are separate records)
+                    # Delete expenses for Plaid transactions (they reference transactions)
+                    deleted_expenses = 0
+                    if plaid_transaction_ids:
+                        deleted_expenses = db.query(Expense).filter(
+                            Expense.transaction_id.in_(plaid_transaction_ids)
+                        ).delete(synchronize_session=False)
+
+                    # Delete dividends imported from Plaid (those without statement_id)
                     deleted_dividends = db.query(Dividend).filter(
-                        Dividend.account_id.in_(account_ids)
+                        Dividend.account_id.in_(account_ids),
+                        Dividend.statement_id.is_(None)
                     ).delete(synchronize_session=False)
 
-                    # Delete transactions
+                    # Delete Plaid-imported transactions only
                     deleted_transactions = db.query(Transaction).filter(
-                        Transaction.account_id.in_(account_ids)
+                        Transaction.account_id.in_(account_ids),
+                        Transaction.plaid_transaction_id.isnot(None)
                     ).delete(synchronize_session=False)
 
                     db.commit()
                     logger.info(
-                        f"[FULL RESYNC] Deleted {deleted_transactions} transactions, "
+                        f"[FULL RESYNC] Deleted {deleted_transactions} Plaid-imported transactions, "
                         f"{deleted_expenses} expenses, and {deleted_dividends} dividends "
                         f"for {len(account_ids)} accounts"
                     )
@@ -356,10 +369,6 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                     account_id=account_id,
                     date=txn_data['date'],
                     type=txn_data['type'],
-                    ticker=txn_data.get('ticker'),
-                    quantity=txn_data.get('quantity'),
-                    price=txn_data.get('price'),
-                    fees=txn_data.get('fees', 0.0),
                     total=txn_data['total'],
                     description=txn_data.get('description'),
                     source=txn_data['source'],
@@ -372,18 +381,9 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 db.add(transaction)
                 added_count += 1
 
-                # Create expense if applicable (for depository, credit, and loan accounts)
-                # These account types typically have trackable expenses/payments
-                expense_account_types = [
-                    # Depository accounts
-                    'checking', 'savings', 'money_market', 'cd', 'cash_management',
-                    'prepaid', 'paypal', 'hsa', 'ebt',
-                    # Credit accounts
-                    'credit_card',
-                    # Loan accounts (track payments)
-                    'mortgage', 'auto_loan', 'student_loan', 'home_equity',
-                    'personal_loan', 'business_loan', 'line_of_credit'
-                ]
+                # Create expense records only for checking and credit card accounts
+                # These appear in the Cashflow section for expense/income tracking
+                expense_account_types = ['checking', 'credit_card']
                 if account_type in expense_account_types:
                     expense_data = mapper.map_to_expense(
                         plaid_txn,
@@ -620,6 +620,21 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 plaid_accounts=plaid_accounts,
                 plaid_account_map=plaid_account_map
             )
+
+            # Update first Plaid transaction date for accounts (only during full resync or if not set)
+            if full_resync:
+                _update_first_plaid_transaction_date(
+                    db=db,
+                    plaid_accounts=plaid_accounts,
+                    plaid_account_map=plaid_account_map
+                )
+
+                # Clean up overlapping non-Plaid transactions after updating first Plaid transaction date
+                _cleanup_overlapping_transactions(
+                    db=db,
+                    plaid_accounts=plaid_accounts,
+                    plaid_account_map=plaid_account_map
+                )
 
             # Validate transaction balances and flag inconsistencies
             _validate_transaction_balances(
@@ -879,15 +894,6 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
         if security:
             ticker = security.get('ticker_symbol')
 
-        # Map investment transaction type to our transaction type
-        txn_type = _map_investment_type(inv_txn['type'])
-
-        # Skip 'cash' type transactions without a security
-        # These represent account cash balances (like ETF cash components), not actual deposits
-        if txn_type == 'DEPOSIT' and not ticker:
-            logger.debug(f"Skipping cash transaction without security: {inv_txn.get('name')} - Amount: ${inv_txn.get('amount', 0)}")
-            continue
-
         # Parse date - Plaid SDK may return string or date object
         txn_date = inv_txn['date']
         if isinstance(txn_date, str):
@@ -896,16 +902,31 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
             # If it's some other type, convert to string first then parse
             txn_date = datetime.strptime(str(txn_date), '%Y-%m-%d').date()
 
-        # Get the raw amount from Plaid
+        # Get the raw amount from Plaid and determine transaction type
+        # Plaid uses positive for debits (buys/withdrawals), negative for credits (sells/deposits)
+        # We convert to our convention: positive = money in, negative = money out
         raw_amount = inv_txn.get('amount', 0)
+        plaid_type = str(inv_txn.get('type', '')).lower()
+        plaid_subtype = str(inv_txn.get('subtype', '')).lower()
 
-        # Plaid returns dividends, interest, and cash distributions as negative amounts (institution's perspective)
-        # We need to negate them to show as positive income to the user
-        # Note: DEPOSIT with ticker = dividend/distribution (cash without ticker is skipped above)
-        if txn_type in ['DIVIDEND', 'INTEREST', 'DEPOSIT']:
-            transaction_amount = -raw_amount  # Negate to make income positive
-        else:
+        # Investment transaction amount handling depends on type:
+        # - Cash transactions: positive = deposit (money IN), negative = withdrawal (money OUT)
+        #   Keep amount as-is since it already matches our convention
+        # - Buy/Sell/Other: positive = debit (money OUT), negative = credit (money IN)
+        #   Negate to match our convention
+        if plaid_type == 'cash':
+            # For cash deposits/withdrawals, Plaid's amount already matches our convention
+            # positive = deposit (money in), negative = withdrawal (money out)
             transaction_amount = raw_amount
+        else:
+            # For non-cash investment transactions (buy, sell, dividend, etc.), negate the amount
+            # Plaid: buy=positive (debit), sell=negative (credit), dividend=negative (credit)
+            # Ours: money out=negative, money in=positive
+            transaction_amount = -raw_amount
+
+        # Determine transaction type based on amount using transaction_classifier
+        from app.services.transaction_classifier import transaction_classifier
+        txn_type = transaction_classifier.classify_transaction(transaction_amount)
 
         # Create transaction
         transaction = Transaction(
@@ -913,10 +934,6 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
             account_id=account_id,
             date=txn_date,
             type=txn_type,
-            ticker=ticker,
-            quantity=abs(inv_txn.get('quantity', 0)),
-            price=inv_txn.get('price', 0),
-            fees=inv_txn.get('fees', 0),
             total=transaction_amount,
             description=inv_txn.get('name'),
             source='plaid',
@@ -926,9 +943,9 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
         db.add(transaction)
         added_count += 1
 
-        # If this is a dividend or cash distribution, also create a record in the dividends table
-        # DEPOSIT with ticker = dividend/cash distribution from ETFs/stocks
-        if txn_type in ['DIVIDEND', 'DEPOSIT'] and ticker:
+        # If this is a dividend or cash distribution (Money In with ticker), create a record in the dividends table
+        # Dividends from ETFs/stocks appear as Money In transactions with a ticker symbol
+        if txn_type == 'Money In' and ticker and plaid_type in ['dividend', 'cash']:
             # Check if dividend already exists (by plaid_transaction_id or unique combination)
             # We use ticker+date+amount+account_id as a unique identifier since dividends don't have plaid_transaction_id field
             existing_dividend = db.query(Dividend).filter(
@@ -1585,4 +1602,141 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
 
     except Exception as e:
         logger.error(f"Error updating opening balances: {e}", exc_info=True)
+        # Don't raise - this is not critical enough to fail the entire sync
+
+
+def _update_first_plaid_transaction_date(db, plaid_accounts, plaid_account_map):
+    """
+    Update first_plaid_transaction_date for accounts during full sync
+
+    This tracks the earliest transaction date imported from Plaid, which helps
+    understand the historical data coverage from Plaid for each account.
+
+    Args:
+        db: Database session
+        plaid_accounts: List of PlaidAccount records
+        plaid_account_map: Mapping of plaid_account_id to account_id
+    """
+    try:
+        logger.info("[FIRST TXN DATE] Updating first Plaid transaction dates for accounts")
+
+        for plaid_account in plaid_accounts:
+            account_id = plaid_account_map.get(plaid_account.plaid_account_id)
+            if not account_id:
+                continue
+
+            # Get our Account record
+            account = db.query(Account).filter(Account.id == account_id).first()
+            if not account:
+                continue
+
+            # Get the earliest Plaid transaction for this account
+            # Only consider transactions with plaid_transaction_id (i.e., from Plaid)
+            from sqlalchemy import cast, Date
+            earliest_transaction = db.query(Transaction).filter(
+                Transaction.account_id == account_id,
+                Transaction.plaid_transaction_id.isnot(None)
+            ).order_by(
+                cast(Transaction.date, Date).asc()
+            ).first()
+
+            if earliest_transaction:
+                first_date = datetime.combine(earliest_transaction.date, datetime.min.time())
+                account.first_plaid_transaction_date = first_date
+                logger.info(
+                    f"[FIRST TXN DATE] Set first Plaid transaction date for {account.label}: "
+                    f"{earliest_transaction.date}"
+                )
+            else:
+                logger.info(
+                    f"[FIRST TXN DATE] No Plaid transactions found for {account.label}, "
+                    f"skipping first transaction date update"
+                )
+
+        logger.info("[FIRST TXN DATE] Completed updating first Plaid transaction dates")
+
+    except Exception as e:
+        logger.error(f"Error updating first Plaid transaction dates: {e}", exc_info=True)
+        # Don't raise - this is not critical enough to fail the entire sync
+
+
+def _cleanup_overlapping_transactions(db, plaid_accounts, plaid_account_map):
+    """
+    Delete non-Plaid transactions that overlap with Plaid transaction history during full sync
+
+    When doing a full sync, we want to delete any manually imported or statement-imported
+    transactions that fall on or after the first Plaid transaction date. This prevents
+    duplicates and ensures Plaid data takes precedence for the covered period.
+
+    Args:
+        db: Database session
+        plaid_accounts: List of PlaidAccount records
+        plaid_account_map: Mapping of plaid_account_id to account_id
+    """
+    try:
+        logger.info("[CLEANUP OVERLAP] Cleaning up overlapping non-Plaid transactions")
+
+        total_deleted_transactions = 0
+        total_deleted_expenses = 0
+
+        for plaid_account in plaid_accounts:
+            account_id = plaid_account_map.get(plaid_account.plaid_account_id)
+            if not account_id:
+                continue
+
+            # Get our Account record
+            account = db.query(Account).filter(Account.id == account_id).first()
+            if not account or not account.first_plaid_transaction_date:
+                continue
+
+            first_plaid_date = account.first_plaid_transaction_date
+
+            # Find all non-Plaid transactions on or after the first Plaid transaction date
+            from sqlalchemy import cast, Date
+            overlapping_transactions = db.query(Transaction).filter(
+                Transaction.account_id == account_id,
+                Transaction.plaid_transaction_id.is_(None),  # Non-Plaid transactions only
+                cast(Transaction.date, Date) >= cast(first_plaid_date, Date)
+            ).all()
+
+            if overlapping_transactions:
+                overlapping_transaction_ids = [txn.id for txn in overlapping_transactions]
+
+                logger.info(
+                    f"[CLEANUP OVERLAP] Found {len(overlapping_transactions)} non-Plaid transactions "
+                    f"for {account.label} on or after {first_plaid_date.date()}"
+                )
+
+                # Delete associated expenses first
+                deleted_expenses = db.query(Expense).filter(
+                    Expense.transaction_id.in_(overlapping_transaction_ids)
+                ).delete(synchronize_session=False)
+
+                # Delete the overlapping transactions
+                deleted_transactions = db.query(Transaction).filter(
+                    Transaction.id.in_(overlapping_transaction_ids)
+                ).delete(synchronize_session=False)
+
+                total_deleted_transactions += deleted_transactions
+                total_deleted_expenses += deleted_expenses
+
+                logger.info(
+                    f"[CLEANUP OVERLAP] Deleted {deleted_transactions} transactions and "
+                    f"{deleted_expenses} expenses for {account.label}"
+                )
+            else:
+                logger.info(
+                    f"[CLEANUP OVERLAP] No overlapping non-Plaid transactions found for {account.label}"
+                )
+
+        if total_deleted_transactions > 0:
+            logger.info(
+                f"[CLEANUP OVERLAP] Total deleted: {total_deleted_transactions} transactions, "
+                f"{total_deleted_expenses} expenses across all accounts"
+            )
+        else:
+            logger.info("[CLEANUP OVERLAP] No overlapping transactions to delete")
+
+    except Exception as e:
+        logger.error(f"Error cleaning up overlapping transactions: {e}", exc_info=True)
         # Don't raise - this is not critical enough to fail the entire sync

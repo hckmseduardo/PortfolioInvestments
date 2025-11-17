@@ -1031,6 +1031,34 @@ const Portfolio = () => {
     }));
   }, []);
 
+  // Handle pie chart slice click to filter positions grid
+  const handlePieSliceClickBase = useCallback((slice) => {
+    if (!slice || !slice.name) return;
+
+    // Map breakdown type to column filter field
+    const filterFieldMap = {
+      type: 'security_type',
+      subtype: 'security_subtype',
+      sector: 'sector',
+      industry: 'industry'
+    };
+
+    const filterField = filterFieldMap[breakdownType];
+    if (!filterField) return;
+
+    // Toggle filter: if already filtering this value, clear it; otherwise set it
+    setColumnFilters((prev) => {
+      const currentValue = prev[filterField];
+      return {
+        ...prev,
+        [filterField]: currentValue === slice.name ? '' : slice.name
+      };
+    });
+  }, [breakdownType]);
+
+  // Use mobile-aware click handler (double-click on mobile, single-click on desktop)
+  const handlePieSliceClick = useMobileClick(handlePieSliceClickBase);
+
   const resetColumnFilters = useCallback(() => {
     setColumnFilters({ ...COLUMN_FILTER_DEFAULTS });
   }, []);
@@ -1125,6 +1153,12 @@ const Portfolio = () => {
     return positions.filter((position) => {
       if (!matchesFilter(position.ticker, normalizedFilters.ticker)) return false;
       if (!matchesFilter(position.name, normalizedFilters.name)) return false;
+
+      // Security metadata filters
+      if (!matchesFilter(position.security_type, normalizedFilters.security_type)) return false;
+      if (!matchesFilter(position.security_subtype, normalizedFilters.security_subtype)) return false;
+      if (!matchesFilter(position.sector, normalizedFilters.sector)) return false;
+      if (!matchesFilter(position.industry, normalizedFilters.industry)) return false;
 
       const typeLabel = position.instrument_type_name || 'Unassigned';
       if (!matchesFilter(typeLabel, normalizedFilters.instrument_type_name)) return false;
@@ -1356,91 +1390,6 @@ const Portfolio = () => {
               ))}
             </Select>
           </FormControl>
-
-          <FormControl size={isMobile ? 'medium' : 'small'} sx={{ minWidth: isMobile ? '100%' : 200 }}>
-            <InputLabel id="portfolio-type-select">Type</InputLabel>
-            <Select
-              labelId="portfolio-type-select"
-              value={selectedTypeId}
-              label="Type"
-              onChange={(event) => setSelectedTypeId(event.target.value)}
-              sx={isMobile ? {
-                '& .MuiInputBase-root': {
-                  minHeight: 48
-                }
-              } : {}}
-              renderValue={(value) => {
-                if (!value) {
-                  return <em>All types</em>;
-                }
-                if (value === UNCLASSIFIED_SENTINEL) {
-                  return <em>Unclassified only</em>;
-                }
-                const info = typeLookup[value];
-                return (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    {renderColorSwatch(info?.color)}
-                    <span>{info?.name || 'Unknown'}</span>
-                  </Box>
-                );
-              }}
-            >
-              <MenuItem value="">
-                <em>All types</em>
-              </MenuItem>
-              <MenuItem value={UNCLASSIFIED_SENTINEL}>
-                <em>Unclassified only</em>
-              </MenuItem>
-              {instrumentTypes.map((type) => (
-                <MenuItem key={type.id} value={type.id}>
-                  {renderColorSwatch(type.color)}
-                  {type.name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <FormControl size={isMobile ? 'medium' : 'small'} sx={{ minWidth: isMobile ? '100%' : 200 }}>
-            <InputLabel id="portfolio-industry-select">Industry</InputLabel>
-            <Select
-              labelId="portfolio-industry-select"
-              value={selectedIndustryId}
-              label="Industry"
-              onChange={(event) => setSelectedIndustryId(event.target.value)}
-              sx={isMobile ? {
-                '& .MuiInputBase-root': {
-                  minHeight: 48
-                }
-              } : {}}
-              renderValue={(value) => {
-                if (!value) {
-                  return <em>All industries</em>;
-                }
-                if (value === UNCLASSIFIED_SENTINEL) {
-                  return <em>Unclassified only</em>;
-                }
-                const info = industryLookup[value];
-                return (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    {renderColorSwatch(info?.color)}
-                    <span>{info?.name || 'Unknown'}</span>
-                  </Box>
-                );
-              }}
-            >
-              <MenuItem value="">
-                <em>All industries</em>
-              </MenuItem>
-              <MenuItem value={UNCLASSIFIED_SENTINEL}>
-                <em>Unclassified only</em>
-              </MenuItem>
-              {instrumentIndustries.map((industry) => (
-                <MenuItem key={industry.id} value={industry.id}>
-                  {renderColorSwatch(industry.color)}
-                  {industry.name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
         </Stack>
       </Paper>
 
@@ -1525,11 +1474,17 @@ const Portfolio = () => {
                         outerRadius="80%"
                         paddingAngle={2}
                         labelLine={false}
+                        onClick={(data) => {
+                          if (data && data.payload) {
+                            handlePieSliceClick(data.payload);
+                          }
+                        }}
                       >
                         {breakdownData.data.map((slice, index) => (
                           <Cell
                             key={slice.name || `slice-${index}`}
                             fill={breakdownData.colorMap[slice.name] || COLOR_PALETTE[index % COLOR_PALETTE.length]}
+                            style={{ cursor: 'pointer' }}
                           />
                         ))}
                       </Pie>

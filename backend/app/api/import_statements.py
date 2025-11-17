@@ -19,6 +19,7 @@ from app.parsers.nbc_parser import NBCParser
 from app.parsers.ibkr_parser import InteractiveBrokersParser
 from app.config import settings
 from app.services.job_queue import enqueue_statement_job, get_job_info
+from app.services.transaction_classifier import transaction_classifier
 
 router = APIRouter(prefix="/import", tags=["import"])
 logger = logging.getLogger(__name__)
@@ -533,10 +534,54 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
         if transaction_data.get('type') is None:
             continue
 
-        # Normalize transaction type to uppercase for database enum
-        txn_type = transaction_data.get('type')
-        if isinstance(txn_type, str):
-            txn_type = txn_type.upper()
+        # Classify transaction type based on amount (Money In/Money Out)
+        from app.services.transaction_classifier import transaction_classifier
+        amount = transaction_data.get('total', 0)
+        txn_type = transaction_classifier.classify_transaction(amount)
+
+        # Skip transactions from Plaid sync date onwards
+        # If account is synced with Plaid, only import historical transactions before first Plaid transaction
+        txn_date = transaction_data.get('date')
+        if txn_date:
+            try:
+                from app.database.models import Account as AccountModel
+                from sqlalchemy.orm import Session
+
+                # Get session from db object
+                if hasattr(db, 'session'):
+                    session = db.session
+
+                    # Check if account has first_plaid_transaction_date set
+                    account_record = session.query(AccountModel).filter(
+                        AccountModel.id == account_id
+                    ).first()
+
+                    if account_record and account_record.first_plaid_transaction_date:
+                        # Convert transaction date to datetime for comparison
+                        if isinstance(txn_date, datetime):
+                            txn_datetime = txn_date
+                        elif isinstance(txn_date, date):
+                            txn_datetime = datetime.combine(txn_date, datetime.min.time())
+                        else:
+                            txn_datetime = txn_date
+
+                        # Skip if transaction is on or after first Plaid transaction date
+                        if txn_datetime >= account_record.first_plaid_transaction_date:
+                            transactions_skipped += 1
+                            skipped_transactions_details.append({
+                                "date": str(transaction_data.get('date')),
+                                "description": transaction_data.get('description'),
+                                "amount": transaction_data.get('total'),
+                                "type": txn_type,
+                                "reason": f"On or after first Plaid transaction date ({account_record.first_plaid_transaction_date.date()})"
+                            })
+                            logger.info(
+                                f"Skipping transaction from {txn_date} - on or after first Plaid transaction date "
+                                f"({account_record.first_plaid_transaction_date.date()}): {transaction_data.get('description')}"
+                            )
+                            continue
+            except Exception as e:
+                logger.warning(f"Could not check first Plaid transaction date: {e}")
 
         # Enhanced duplicate detection:
         # 1. Check for Plaid-synced transactions (same account, date, amount)
@@ -546,19 +591,12 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
 
         # Query for transactions with same account, type, and amount
         # We'll filter by date separately to handle time component differences
+        # Duplicate filter: account_id, type, total, and date (filtered separately below)
         duplicate_filter = {
             "account_id": account_id,
             "type": txn_type,
             "total": transaction_data.get('total')
         }
-        # Add optional fields to the filter if they exist
-        # Only use ticker and quantity for investment transactions where they're meaningful
-        if transaction_data.get('ticker'):
-            duplicate_filter["ticker"] = transaction_data.get('ticker')
-        # Only use quantity as a filter if it's non-zero (investment transactions)
-        # Bank transactions typically have quantity=0 or NULL, which shouldn't be used for matching
-        if transaction_data.get('quantity') and transaction_data.get('quantity') != 0:
-            duplicate_filter["quantity"] = transaction_data.get('quantity')
 
         # Get all potential duplicates (same account, type, amount)
         potential_duplicates = db.find("transactions", duplicate_filter)
@@ -649,13 +687,17 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
                 continue
 
         # Prepare transaction document with normalized type
+        # Exclude ticker, quantity, price, and fees fields as they are no longer tracked
         transaction_doc = {
-            **transaction_data,
+            key: value for key, value in transaction_data.items()
+            if key not in ['ticker', 'quantity', 'price', 'fees']
+        }
+        transaction_doc.update({
             "type": txn_type,  # Use normalized uppercase type
             "account_id": account_id,
             "source": "import",  # Mark as imported from statement
             "import_sequence": idx  # Preserve order from statement file
-        }
+        })
         # Link transaction to statement if statement_id is provided
         if statement_id:
             transaction_doc["statement_id"] = statement_id
@@ -719,94 +761,11 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
     # This ensures running balances are coherent
     from app.services.balance_validator import validate_and_update_balances
 
-    # Check if account is linked to Plaid to reconcile balance
-    plaid_current_balance = None
-    try:
-        from app.database.models import PlaidAccount, PlaidItem
-        from app.services.plaid_client import plaid_client
-        from sqlalchemy.orm import Session
-
-        # Get session from db object (assuming it has a session attribute)
-        if hasattr(db, 'session'):
-            session = db.session
-
-            # Check if account is linked to Plaid
-            plaid_account = session.query(PlaidAccount).filter(
-                PlaidAccount.account_id == account_id
-            ).first()
-
-            if plaid_account:
-                # Get the Plaid item
-                plaid_item = session.query(PlaidItem).filter(
-                    PlaidItem.id == plaid_account.plaid_item_id
-                ).first()
-
-                if plaid_item and plaid_item.access_token:
-                    # Fetch current balance from Plaid
-                    accounts_response = plaid_client.get_accounts(plaid_item.access_token)
-
-                    # Fetch investment holdings to get cash balances
-                    holdings_response = plaid_client.get_investment_holdings(plaid_item.access_token)
-                    investment_cash_map = {}
-
-                    if holdings_response:
-                        # Use calculated cash balances (Total Account Value - Holdings Value)
-                        investment_cash_map = holdings_response.get('cash_balances', {})
-
-                    if accounts_response and accounts_response.get('accounts'):
-                        for plaid_acc in accounts_response['accounts']:
-                            if plaid_acc['account_id'] == plaid_account.plaid_account_id:
-                                # Get balance from Plaid
-                                # For investment accounts, use cash balance from holdings
-                                # For other accounts, use current balance
-                                account_obj = db.find_one("accounts", {"id": account_id})
-                                balances = plaid_acc.get('balances', {})
-                                acc_type = plaid_acc.get('type')
-                                if acc_type and hasattr(acc_type, 'value'):
-                                    acc_type = acc_type.value
-                                elif acc_type:
-                                    acc_type = str(acc_type)
-
-                                if acc_type == 'investment':
-                                    plaid_current_balance = investment_cash_map.get(plaid_account.plaid_account_id, 0.0)
-                                    logger.info(
-                                        f"Using cash from holdings for investment account {account_obj.get('label') if account_obj else 'Unknown'}: ${plaid_current_balance}"
-                                    )
-                                else:
-                                    plaid_current_balance = balances.get('current')
-
-                                # For credit cards and loans, Plaid returns positive balance = amount owed
-                                # We need to negate it so owing money = negative balance in our system
-                                liability_account_types = ['credit_card', 'mortgage', 'auto_loan', 'student_loan',
-                                                          'home_equity', 'personal_loan', 'business_loan', 'line_of_credit']
-                                if account_obj and account_obj.get('account_type') in liability_account_types:
-                                    plaid_current_balance = -plaid_current_balance
-                                    logger.info(
-                                        f"Negated liability account balance for {account_obj.get('label')} ({account_obj.get('account_type')}): ${plaid_current_balance}"
-                                    )
-
-                                logger.info(
-                                    f"Account {account_id} is Plaid-linked. "
-                                    f"Current balance from Plaid: ${plaid_current_balance}"
-                                )
-
-                                # Update account balance to match Plaid
-                                if plaid_current_balance is not None:
-                                    db.update("accounts", {"id": account_id}, {
-                                        "balance": plaid_current_balance
-                                    })
-                                    logger.info(
-                                        f"Updated account {account_id} balance to match Plaid: ${plaid_current_balance}"
-                                    )
-                                break
-    except Exception as e:
-        logger.warning(f"Could not fetch Plaid balance for reconciliation: {e}")
-
-    # Validate and update balances with Plaid's current balance if available
+    # Validate and update balances (statement import doesn't fetch from Plaid)
     validation_result = validate_and_update_balances(
         db=db,
         account_id=account_id,
-        source_current_balance=plaid_current_balance,
+        source_current_balance=None,
         source_name="statement_import"
     )
 
@@ -1168,80 +1127,12 @@ async def cleanup_duplicate_transactions(
     positions_created = recalculate_positions_from_transactions(account_id, db)
     session.commit()
 
-    # Reconcile balance with Plaid
-    plaid_current_balance = None
-    try:
-        from app.database.models import PlaidAccount, PlaidItem
-        from app.services.plaid_client import plaid_client
-
-        plaid_account = session.query(PlaidAccount).filter(
-            PlaidAccount.account_id == account_id
-        ).first()
-
-        if plaid_account:
-            plaid_item = session.query(PlaidItem).filter(
-                PlaidItem.id == plaid_account.plaid_item_id
-            ).first()
-
-            if plaid_item and plaid_item.access_token:
-                accounts_response = plaid_client.get_accounts(plaid_item.access_token)
-
-                # Fetch investment holdings to get cash balances
-                holdings_response = plaid_client.get_investment_holdings(plaid_item.access_token)
-                investment_cash_map = {}
-
-                if holdings_response:
-                    # Use calculated cash balances (Total Account Value - Holdings Value)
-                    investment_cash_map = holdings_response.get('cash_balances', {})
-
-                if accounts_response and accounts_response.get('accounts'):
-                    for plaid_acc in accounts_response['accounts']:
-                        if plaid_acc['account_id'] == plaid_account.plaid_account_id:
-                            balances = plaid_acc.get('balances', {})
-                            acc_type = plaid_acc.get('type')
-                            if acc_type and hasattr(acc_type, 'value'):
-                                acc_type = acc_type.value
-                            elif acc_type:
-                                acc_type = str(acc_type)
-
-                            # For investment accounts, use cash balance from holdings
-                            # For other accounts, use current balance
-                            if acc_type == 'investment':
-                                plaid_current_balance = investment_cash_map.get(plaid_account.plaid_account_id, 0.0)
-                                logger.info(
-                                    f"Using cash from holdings for investment account {account.get('label') if account else 'Unknown'}: ${plaid_current_balance}"
-                                )
-                            else:
-                                plaid_current_balance = balances.get('current')
-
-                            # For credit cards and loans, Plaid returns positive balance = amount owed
-                            # We need to negate it so owing money = negative balance in our system
-                            liability_account_types = ['credit_card', 'mortgage', 'auto_loan', 'student_loan',
-                                                      'home_equity', 'personal_loan', 'business_loan', 'line_of_credit']
-                            if account.get('account_type') in liability_account_types:
-                                plaid_current_balance = -plaid_current_balance
-                                logger.info(
-                                    f"Negated liability account balance for {account.get('label')} ({account.get('account_type')}): ${plaid_current_balance}"
-                                )
-
-                            if plaid_current_balance is not None:
-                                db.update("accounts", {"id": account_id}, {
-                                    "balance": plaid_current_balance
-                                })
-                                session.commit()
-                                logger.info(
-                                    f"Updated account {account_id} balance to match Plaid: ${plaid_current_balance}"
-                                )
-                            break
-    except Exception as e:
-        logger.warning(f"Could not fetch Plaid balance for reconciliation: {e}")
-
-    # Validate balances
+    # Validate balances (cleanup doesn't fetch from Plaid)
     from app.services.balance_validator import validate_and_update_balances
     validation_result = validate_and_update_balances(
         db=db,
         account_id=account_id,
-        source_current_balance=plaid_current_balance,
+        source_current_balance=None,
         source_name="cleanup"
     )
     session.commit()
@@ -1250,7 +1141,6 @@ async def cleanup_duplicate_transactions(
         "message": "Duplicate cleanup completed",
         "cleanup": cleanup_result,
         "positions_recalculated": positions_created,
-        "plaid_balance": plaid_current_balance,
         "validation": validation_result
     }
 
