@@ -2437,7 +2437,7 @@ const Cashflow = () => {
             Transfers Between Accounts
           </Typography>
           <Typography variant="body2" color="textSecondary" gutterBottom sx={{ mb: 3 }}>
-            Inter-account transfers, credit card payments, and other payment transactions consolidated to show source and destination
+            Inter-account transfers, credit card payments, and other payment transactions. Money out shows source account with negative amount, money in shows destination account with positive amount.
           </Typography>
 
           <TableContainer>
@@ -2458,65 +2458,25 @@ const Cashflow = () => {
                   const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
                   const transferTransactions = expenses.filter(exp => transferCategories.includes(exp.category));
 
-                  // Group transfers by date and description to consolidate pairs
-                  const transferGroups = new Map();
-                  transferTransactions.forEach(transfer => {
-                    const key = `${transfer.date}_${transfer.description}`;
-                    if (!transferGroups.has(key)) {
-                      transferGroups.set(key, []);
-                    }
-                    transferGroups.get(key).push(transfer);
+                  // Map to display format
+                  const displayTransfers = transferTransactions.map(t => ({
+                    date: t.date,
+                    description: t.description,
+                    fromAccount: t.amount < 0 ? t.account_id : null,
+                    toAccount: t.amount > 0 ? t.account_id : null,
+                    amount: t.amount, // Keep original sign (negative for money out, positive for money in)
+                    notes: t.notes || '',
+                    id: t.id
+                  }));
+
+                  // Sort by date descending, then by amount
+                  displayTransfers.sort((a, b) => {
+                    const dateCompare = new Date(b.date) - new Date(a.date);
+                    if (dateCompare !== 0) return dateCompare;
+                    return a.amount - b.amount; // Negative amounts first
                   });
 
-                  // Convert to consolidated transfers
-                  const consolidatedTransfers = [];
-                  transferGroups.forEach((group, key) => {
-                    if (group.length >= 2) {
-                      // Find the outgoing (negative) and incoming (positive) transactions
-                      const outgoing = group.find(t => t.amount < 0);
-                      const incoming = group.find(t => t.amount > 0);
-
-                      if (outgoing && incoming) {
-                        consolidatedTransfers.push({
-                          date: outgoing.date,
-                          description: outgoing.description,
-                          fromAccount: outgoing.account_id,
-                          toAccount: incoming.account_id,
-                          amount: Math.abs(outgoing.amount),
-                          notes: outgoing.notes || incoming.notes || ''
-                        });
-                      } else {
-                        // If we can't find a pair, show individual transactions
-                        group.forEach(t => {
-                          consolidatedTransfers.push({
-                            date: t.date,
-                            description: t.description,
-                            fromAccount: t.amount < 0 ? t.account_id : null,
-                            toAccount: t.amount > 0 ? t.account_id : null,
-                            amount: Math.abs(t.amount),
-                            notes: t.notes || ''
-                          });
-                        });
-                      }
-                    } else {
-                      // Single transfer transaction (unpaired)
-                      group.forEach(t => {
-                        consolidatedTransfers.push({
-                          date: t.date,
-                          description: t.description,
-                          fromAccount: t.amount < 0 ? t.account_id : null,
-                          toAccount: t.amount > 0 ? t.account_id : null,
-                          amount: Math.abs(t.amount),
-                          notes: t.notes || ''
-                        });
-                      });
-                    }
-                  });
-
-                  // Sort by date descending
-                  consolidatedTransfers.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-                  if (consolidatedTransfers.length === 0) {
+                  if (displayTransfers.length === 0) {
                     return (
                       <TableRow>
                         <TableCell colSpan={6} align="center">
@@ -2528,8 +2488,8 @@ const Cashflow = () => {
                     );
                   }
 
-                  return consolidatedTransfers.map((transfer, index) => (
-                    <TableRow key={index}>
+                  return displayTransfers.map((transfer) => (
+                    <TableRow key={transfer.id}>
                       <TableCell>{formatDate(transfer.date)}</TableCell>
                       <TableCell>{transfer.description}</TableCell>
                       <TableCell>
@@ -2538,7 +2498,9 @@ const Cashflow = () => {
                       <TableCell>
                         {transfer.toAccount ? getAccountLabel(transfer.toAccount) : '-'}
                       </TableCell>
-                      <TableCell align="right">{formatCurrency(transfer.amount)}</TableCell>
+                      <TableCell align="right" sx={{ color: transfer.amount < 0 ? 'error.main' : 'success.main' }}>
+                        {formatCurrency(transfer.amount)}
+                      </TableCell>
                       <TableCell>{transfer.notes}</TableCell>
                     </TableRow>
                   ));
