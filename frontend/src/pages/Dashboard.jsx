@@ -686,23 +686,86 @@ const Dashboard = () => {
       setFetching(true);
       try {
         const asOfParam = valuationDate || undefined;
-        const [summaryRes, accountsRes, dividendsRes, industryRes, typeRes, sectorRes, subtypeRes] = await Promise.all([
+        const [summaryRes, accountsRes, dividendsRes, positionsRes] = await Promise.all([
           positionsAPI.getSummary(asOfParam),
           accountsAPI.getAll(),
           dividendsAPI.getSummary(undefined, undefined, asOfParam),
-          positionsAPI.getIndustryBreakdown({ as_of_date: asOfParam }),
-          positionsAPI.getTypeBreakdown({ as_of_date: asOfParam }),
-          positionsAPI.getSectorBreakdown({ as_of_date: asOfParam }),
-          positionsAPI.getSubtypeBreakdown({ as_of_date: asOfParam })
+          positionsAPI.getAll(null, asOfParam) // Fetch positions to calculate breakdowns client-side
         ]);
 
         setSummary(summaryRes.data);
         setAccounts(accountsRes.data);
         setDividendSummary(dividendsRes.data);
-        setIndustryBreakdown(industryRes.data || []);
-        setTypeBreakdown(typeRes.data || []);
-        setSectorBreakdown(sectorRes.data || []);
-        setSubtypeBreakdown(subtypeRes.data || []);
+
+        // Calculate breakdowns client-side from positions (same as Portfolio section)
+        const positions = positionsRes.data || [];
+        const totalMarketValue = positions.reduce((sum, pos) => sum + (pos.market_value || 0), 0);
+
+        // Calculate industry breakdown
+        const industryMap = {};
+        const typeMap = {};
+        const subtypeMap = {};
+        const sectorMap = {};
+
+        positions.forEach(pos => {
+          if (pos.industry) {
+            if (!industryMap[pos.industry]) {
+              industryMap[pos.industry] = { industry_name: pos.industry, market_value: 0, position_count: 0, color: null };
+            }
+            industryMap[pos.industry].market_value += pos.market_value || 0;
+            industryMap[pos.industry].position_count += 1;
+          }
+
+          if (pos.security_type) {
+            if (!typeMap[pos.security_type]) {
+              typeMap[pos.security_type] = { type_name: pos.security_type, market_value: 0, position_count: 0, color: null };
+            }
+            typeMap[pos.security_type].market_value += pos.market_value || 0;
+            typeMap[pos.security_type].position_count += 1;
+          }
+
+          if (pos.security_subtype) {
+            if (!subtypeMap[pos.security_subtype]) {
+              subtypeMap[pos.security_subtype] = { subtype_name: pos.security_subtype, market_value: 0, position_count: 0, color: null };
+            }
+            subtypeMap[pos.security_subtype].market_value += pos.market_value || 0;
+            subtypeMap[pos.security_subtype].position_count += 1;
+          }
+
+          if (pos.sector) {
+            if (!sectorMap[pos.sector]) {
+              sectorMap[pos.sector] = { sector_name: pos.sector, market_value: 0, position_count: 0, color: null };
+            }
+            sectorMap[pos.sector].market_value += pos.market_value || 0;
+            sectorMap[pos.sector].position_count += 1;
+          }
+        });
+
+        // Convert to arrays with percentages
+        const industryBreakdownData = Object.values(industryMap).map(item => ({
+          ...item,
+          percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+        }));
+
+        const typeBreakdownData = Object.values(typeMap).map(item => ({
+          ...item,
+          percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+        }));
+
+        const subtypeBreakdownData = Object.values(subtypeMap).map(item => ({
+          ...item,
+          percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+        }));
+
+        const sectorBreakdownData = Object.values(sectorMap).map(item => ({
+          ...item,
+          percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+        }));
+
+        setIndustryBreakdown(industryBreakdownData);
+        setTypeBreakdown(typeBreakdownData);
+        setSectorBreakdown(sectorBreakdownData);
+        setSubtypeBreakdown(subtypeBreakdownData);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
@@ -875,23 +938,84 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
       await positionsAPI.refreshPrices();
       // Refetch all data after refreshing prices
       const asOfParam = valuationDate || undefined;
-      const [summaryRes, accountsRes, dividendsRes, industryRes, typeRes, sectorRes, subtypeRes] = await Promise.all([
+      const [summaryRes, accountsRes, dividendsRes, positionsRes] = await Promise.all([
         positionsAPI.getSummary(asOfParam),
         accountsAPI.getAll(),
         dividendsAPI.getSummary(undefined, undefined, asOfParam),
-        positionsAPI.getIndustryBreakdown({ as_of_date: asOfParam }),
-        positionsAPI.getTypeBreakdown({ as_of_date: asOfParam }),
-        positionsAPI.getSectorBreakdown({ as_of_date: asOfParam }),
-        positionsAPI.getSubtypeBreakdown({ as_of_date: asOfParam })
+        positionsAPI.getAll(null, asOfParam)
       ]);
 
       setSummary(summaryRes.data);
       setAccounts(accountsRes.data);
       setDividendSummary(dividendsRes.data);
-      setIndustryBreakdown(industryRes.data || []);
-      setTypeBreakdown(typeRes.data || []);
-      setSectorBreakdown(sectorRes.data || []);
-      setSubtypeBreakdown(subtypeRes.data || []);
+
+      // Calculate breakdowns client-side from positions
+      const positions = positionsRes.data || [];
+      const totalMarketValue = positions.reduce((sum, pos) => sum + (pos.market_value || 0), 0);
+
+      const industryMap = {};
+      const typeMap = {};
+      const subtypeMap = {};
+      const sectorMap = {};
+
+      positions.forEach(pos => {
+        if (pos.industry) {
+          if (!industryMap[pos.industry]) {
+            industryMap[pos.industry] = { industry_name: pos.industry, market_value: 0, position_count: 0, color: null };
+          }
+          industryMap[pos.industry].market_value += pos.market_value || 0;
+          industryMap[pos.industry].position_count += 1;
+        }
+
+        if (pos.security_type) {
+          if (!typeMap[pos.security_type]) {
+            typeMap[pos.security_type] = { type_name: pos.security_type, market_value: 0, position_count: 0, color: null };
+          }
+          typeMap[pos.security_type].market_value += pos.market_value || 0;
+          typeMap[pos.security_type].position_count += 1;
+        }
+
+        if (pos.security_subtype) {
+          if (!subtypeMap[pos.security_subtype]) {
+            subtypeMap[pos.security_subtype] = { subtype_name: pos.security_subtype, market_value: 0, position_count: 0, color: null };
+          }
+          subtypeMap[pos.security_subtype].market_value += pos.market_value || 0;
+          subtypeMap[pos.security_subtype].position_count += 1;
+        }
+
+        if (pos.sector) {
+          if (!sectorMap[pos.sector]) {
+            sectorMap[pos.sector] = { sector_name: pos.sector, market_value: 0, position_count: 0, color: null };
+          }
+          sectorMap[pos.sector].market_value += pos.market_value || 0;
+          sectorMap[pos.sector].position_count += 1;
+        }
+      });
+
+      const industryBreakdownData = Object.values(industryMap).map(item => ({
+        ...item,
+        percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+      }));
+
+      const typeBreakdownData = Object.values(typeMap).map(item => ({
+        ...item,
+        percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+      }));
+
+      const subtypeBreakdownData = Object.values(subtypeMap).map(item => ({
+        ...item,
+        percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+      }));
+
+      const sectorBreakdownData = Object.values(sectorMap).map(item => ({
+        ...item,
+        percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
+      }));
+
+      setIndustryBreakdown(industryBreakdownData);
+      setTypeBreakdown(typeBreakdownData);
+      setSectorBreakdown(sectorBreakdownData);
+      setSubtypeBreakdown(subtypeBreakdownData);
       await fetchPerformanceSeries();
     } catch (error) {
       console.error('Error refreshing prices:', error);
