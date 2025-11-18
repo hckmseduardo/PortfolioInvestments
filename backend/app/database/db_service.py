@@ -18,6 +18,7 @@ from app.database.models import (
     InstrumentIndustry as InstrumentIndustryModel,
     InstrumentMetadata as InstrumentMetadataModel,
     MerchantMemory as MerchantMemoryModel,
+    UserCategorizationRule as UserCategorizationRuleModel,
     AccountTypeEnum, TransactionTypeEnum
 )
 
@@ -38,7 +39,8 @@ COLLECTION_MODEL_MAP = {
     "instrument_types": InstrumentTypeModel,
     "instrument_industries": InstrumentIndustryModel,
     "instrument_metadata": InstrumentMetadataModel,
-    "merchant_memory": MerchantMemoryModel
+    "merchant_memory": MerchantMemoryModel,
+    "user_categorization_rules": UserCategorizationRuleModel
 }
 
 
