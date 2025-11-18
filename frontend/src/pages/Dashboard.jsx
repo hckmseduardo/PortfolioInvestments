@@ -538,18 +538,23 @@ const Dashboard = () => {
   const [sectorColors, setSectorColors] = useState({});
   const [industryColors, setIndustryColors] = useState({});
 
-  const valuationDate = useMemo(
-    () => computeValuationDate(datePreset, specificMonth, endOfYear),
-    [datePreset, specificMonth, endOfYear]
-  );
+  // For Dashboard, when CURRENT is selected, use last month-end to get the most recent snapshot
+  const valuationDate = useMemo(() => {
+    const computed = computeValuationDate(datePreset, specificMonth, endOfYear);
+    // If current price mode (empty string), use last month-end as fallback
+    if (computed === '' && datePreset === DATE_PRESETS.CURRENT) {
+      const now = new Date();
+      const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+      return formatISODate(lastMonthEnd);
+    }
+    return computed;
+  }, [datePreset, specificMonth, endOfYear]);
 
   // Transform breakdown data for portfolio components
-  const portfolioTypeSlices = useMemo(() => {
-    console.log('Dashboard - typeBreakdown:', typeBreakdown);
-    const transformed = typeBreakdown.map(item => ({ name: item.type_name, market_value: item.market_value, percentage: item.percentage }));
-    console.log('Dashboard - portfolioTypeSlices:', transformed);
-    return transformed;
-  }, [typeBreakdown]);
+  const portfolioTypeSlices = useMemo(() =>
+    typeBreakdown.map(item => ({ name: item.type_name, market_value: item.market_value, percentage: item.percentage })),
+    [typeBreakdown]
+  );
 
   const portfolioSubtypeSlices = useMemo(() =>
     subtypeBreakdown.map(item => ({ name: item.subtype_name, market_value: item.market_value, percentage: item.percentage })),
@@ -746,25 +751,8 @@ const Dashboard = () => {
         setDividendSummary(dividendsRes.data);
 
         // Calculate breakdowns client-side from positions (same as Portfolio section)
-        let positions = positionsRes.data || [];
-        console.log('Dashboard fetchData - positions (first try):', positions);
-        console.log('Dashboard fetchData - positions.length:', positions.length);
-
-        // If no positions for the requested date and we're looking at current, fetch the last month-end positions
-        if (positions.length === 0 && !valuationDate) {
-          console.log('Dashboard fetchData - No current positions, fetching last month-end...');
-          const now = new Date();
-          const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-          const lastMonthEndDate = lastMonthEnd.toISOString().split('T')[0];
-          console.log('Dashboard fetchData - Fetching for date:', lastMonthEndDate);
-          const lastPositionsRes = await positionsAPI.getAggregated(null, lastMonthEndDate);
-          positions = lastPositionsRes.data || [];
-          console.log('Dashboard fetchData - last positions:', positions);
-          console.log('Dashboard fetchData - last positions.length:', positions.length);
-        }
-
+        const positions = positionsRes.data || [];
         const totalMarketValue = positions.reduce((sum, pos) => sum + (pos.market_value || 0), 0);
-        console.log('Dashboard fetchData - totalMarketValue:', totalMarketValue);
 
         // Calculate industry breakdown
         const industryMap = {};
@@ -826,11 +814,6 @@ const Dashboard = () => {
           ...item,
           percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
         }));
-
-        console.log('Dashboard fetchData - typeBreakdownData:', typeBreakdownData);
-        console.log('Dashboard fetchData - subtypeBreakdownData:', subtypeBreakdownData);
-        console.log('Dashboard fetchData - sectorBreakdownData:', sectorBreakdownData);
-        console.log('Dashboard fetchData - industryBreakdownData:', industryBreakdownData);
 
         setIndustryBreakdown(industryBreakdownData);
         setTypeBreakdown(typeBreakdownData);

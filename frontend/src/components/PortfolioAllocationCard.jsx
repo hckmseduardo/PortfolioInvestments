@@ -99,11 +99,6 @@ const PortfolioAllocationCard = ({
 
   const breakdownData = getCurrentBreakdownData();
 
-  // Debug: Log the data
-  console.log('PortfolioAllocationCard - breakdownType:', breakdownType);
-  console.log('PortfolioAllocationCard - typeSlices:', typeSlices);
-  console.log('PortfolioAllocationCard - breakdownData:', breakdownData);
-
   return (
     <Paper sx={{ p: 3, height: '100%' }}>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>

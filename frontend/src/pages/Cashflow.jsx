@@ -1417,14 +1417,36 @@ const Cashflow = () => {
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={3}>
-        <Typography variant="h4">Cash Flow</Typography>
-        <Box display="flex" flexDirection="column" alignItems="flex-end" gap={1}>
-          <Box display="flex" gap={1}>
+      <Box
+        display="flex"
+        flexDirection={isMobile ? "column" : "row"}
+        justifyContent="space-between"
+        alignItems={isMobile ? "stretch" : "flex-start"}
+        mb={3}
+        gap={isMobile ? 2 : 0}
+      >
+        <Typography variant={isMobile ? "h5" : "h4"} mb={isMobile ? 0 : 0}>
+          Cash Flow
+        </Typography>
+        <Box
+          display="flex"
+          flexDirection="column"
+          alignItems={isMobile ? "stretch" : "flex-end"}
+          gap={1}
+          width={isMobile ? "100%" : "auto"}
+        >
+          <Box
+            display="flex"
+            flexDirection={isMobile ? "column" : "row"}
+            gap={1}
+            width={isMobile ? "100%" : "auto"}
+          >
             <Button
               variant="outlined"
-              startIcon={<CategoryIcon />}
+              startIcon={!isMobile && <CategoryIcon />}
               onClick={handleOpenCategoryDialog}
+              fullWidth={isMobile}
+              size={isMobile ? "medium" : "medium"}
             >
               Manage Categories
             </Button>
@@ -1432,27 +1454,31 @@ const Cashflow = () => {
               variant="outlined"
               onClick={handleRecategorize}
               disabled={isRecategorizeRunning}
+              fullWidth={isMobile}
+              size={isMobile ? "medium" : "medium"}
             >
               {isRecategorizeRunning ? 'Recategorizing...' : 'Recategorize'}
             </Button>
             <Button
               variant="contained"
-              startIcon={<RefreshIcon />}
+              startIcon={!isMobile && <RefreshIcon />}
               onClick={handleConvertTransactions}
               disabled={isConversionRunning}
+              fullWidth={isMobile}
+              size={isMobile ? "medium" : "medium"}
             >
               {isConversionRunning ? 'Import in Progress' : 'Import from Transactions'}
             </Button>
           </Box>
           {(isRecategorizeRunning || isConversionRunning) && (
-            <Box display="flex" flexDirection="column" alignItems="flex-end" gap={0.5}>
+            <Box display="flex" flexDirection="column" alignItems={isMobile ? "flex-start" : "flex-end"} gap={0.5}>
               {isRecategorizeRunning && (
-                <Typography variant="body2" color="textSecondary">
+                <Typography variant="body2" color="textSecondary" fontSize={isMobile ? "0.75rem" : "0.875rem"}>
                   Recategorizing: {recategorizeJobStatus || 'queued'}{recategorizeStage ? ` - ${formatStageLabel(recategorizeStage)}` : ''}
                 </Typography>
               )}
               {isConversionRunning && (
-                <Typography variant="body2" color="textSecondary">
+                <Typography variant="body2" color="textSecondary" fontSize={isMobile ? "0.75rem" : "0.875rem"}>
                   Import: {conversionJobStatus || 'queued'}{conversionStage ? ` - ${formatStageLabel(conversionStage)}` : ''}
                 </Typography>
               )}
@@ -1795,27 +1821,40 @@ const Cashflow = () => {
       {tabValue === 1 && (
         <Paper sx={{ p: isMobile ? 1 : 2, pb: selectedExpenseIds.length > 0 ? 10 : 2 }}>
           {/* Export and Filter Controls */}
-          <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+          <Box
+            sx={{
+              mb: 2,
+              display: 'flex',
+              justifyContent: isMobile ? 'flex-start' : 'space-between',
+              flexWrap: 'wrap',
+              gap: 1,
+              flexDirection: isMobile ? 'column' : 'row',
+              alignItems: isMobile ? 'stretch' : 'center'
+            }}
+          >
             {isMobile && (
               <Button
                 variant="outlined"
-                size="small"
+                size="medium"
                 startIcon={<FilterAltIcon />}
                 onClick={() => setMoneyOutCategory('')}
+                fullWidth
               >
                 {moneyOutCategory || 'All Categories'}
               </Button>
             )}
-            <ExportButtons
-              data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'money_out').map(expense => ({
-                ...expense,
-                account_label: getAccountLabel(expense.account_id),
-                category: expense.category || 'Uncategorized'
-              }))}
-              columns={expenseExportColumns}
-              filename="expenses"
-              title="Expenses Report"
-            />
+            <Box sx={{ width: isMobile ? '100%' : 'auto' }}>
+              <ExportButtons
+                data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'money_out').map(expense => ({
+                  ...expense,
+                  account_label: getAccountLabel(expense.account_id),
+                  category: expense.category || 'Uncategorized'
+                }))}
+                columns={expenseExportColumns}
+                filename="expenses"
+                title="Expenses Report"
+              />
+            </Box>
           </Box>
 
           {/* Mobile Card View */}
@@ -2283,13 +2322,14 @@ const Cashflow = () => {
                   ))}
                 </Select>
               </FormControl>
-              <Stack direction="row" spacing={1}>
+              <Stack direction={isMobile ? "column" : "row"} spacing={1} sx={{ width: { xs: '100%', md: 'auto' } }}>
                 <Button
                   variant="contained"
                   size={isMobile ? 'medium' : 'large'}
                   onClick={handleBulkCategoryApply}
                   disabled={!bulkCategory || isBulkUpdating}
                   sx={{ bgcolor: 'success.main', '&:hover': { bgcolor: 'success.dark' }, flex: 1 }}
+                  fullWidth={isMobile}
                 >
                   {isBulkUpdating ? 'Applying...' : isMobile ? 'Apply' : 'Apply Category'}
                 </Button>
@@ -2301,6 +2341,7 @@ const Cashflow = () => {
                     setBulkCategory('');
                   }}
                   sx={{ borderColor: 'white', color: 'white', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' }, flex: 1 }}
+                  fullWidth={isMobile}
                 >
                   {isMobile ? 'Clear' : 'Clear Selection'}
                 </Button>
@@ -2312,18 +2353,27 @@ const Cashflow = () => {
 
       {/* Tab 2: Money In List */}
       {tabValue === 2 && (
-        <Paper sx={{ p: 2, pb: selectedIncomeIds.length > 0 ? 10 : 2 }}>
-          <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
-            <ExportButtons
-              data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'money_in').map(expense => ({
-                ...expense,
-                account_label: getAccountLabel(expense.account_id),
-                category: expense.category || 'Uncategorized'
-              }))}
-              columns={expenseExportColumns}
-              filename="incomes"
-              title="Incomes Report"
-            />
+        <Paper sx={{ p: isMobile ? 1 : 2, pb: selectedIncomeIds.length > 0 ? 10 : 2 }}>
+          <Box
+            sx={{
+              mb: 2,
+              display: 'flex',
+              justifyContent: 'flex-end',
+              width: '100%'
+            }}
+          >
+            <Box sx={{ width: isMobile ? '100%' : 'auto' }}>
+              <ExportButtons
+                data={displayedExpenses.filter(exp => getCategoryType(exp.category || 'Uncategorized') === 'money_in').map(expense => ({
+                  ...expense,
+                  account_label: getAccountLabel(expense.account_id),
+                  category: expense.category || 'Uncategorized'
+                }))}
+                columns={expenseExportColumns}
+                filename="incomes"
+                title="Incomes Report"
+              />
+            </Box>
           </Box>
           <TableContainer>
             <Table stickyHeader>
@@ -2657,13 +2707,14 @@ const Cashflow = () => {
                   ))}
                 </Select>
               </FormControl>
-              <Stack direction="row" spacing={1}>
+              <Stack direction={isMobile ? "column" : "row"} spacing={1} sx={{ width: { xs: '100%', md: 'auto' } }}>
                 <Button
                   variant="contained"
                   size={isMobile ? 'medium' : 'large'}
                   onClick={handleBulkIncomeCategoryApply}
                   disabled={!bulkIncomeCategory || isBulkUpdating}
                   sx={{ bgcolor: 'success.main', '&:hover': { bgcolor: 'success.dark' }, flex: 1 }}
+                  fullWidth={isMobile}
                 >
                   {isBulkUpdating ? 'Applying...' : isMobile ? 'Apply' : 'Apply Category'}
                 </Button>
@@ -2675,6 +2726,7 @@ const Cashflow = () => {
                     setBulkIncomeCategory('');
                   }}
                   sx={{ borderColor: 'white', color: 'white', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' }, flex: 1 }}
+                  fullWidth={isMobile}
                 >
                   {isMobile ? 'Clear' : 'Clear Selection'}
                 </Button>
