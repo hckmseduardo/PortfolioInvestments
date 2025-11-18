@@ -13,7 +13,7 @@ from app.api import (
     accounts,
     positions,
     import_statements,
-    expenses,
+    cashflow,
     dividends,
     transactions,
     dashboard,
@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Investment Portfolio Management API",
-    description="API for managing investment portfolios and tracking expenses",
+    description="API for managing investment portfolios and tracking cashflow",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -72,7 +72,7 @@ api_router.include_router(auth_entra.router)
 api_router.include_router(accounts.router)
 api_router.include_router(positions.router)
 api_router.include_router(import_statements.router)
-api_router.include_router(expenses.router)
+api_router.include_router(cashflow.router)
 api_router.include_router(dividends.router)
 api_router.include_router(transactions.router)
 api_router.include_router(dashboard.router)

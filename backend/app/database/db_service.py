@@ -30,7 +30,7 @@ COLLECTION_MODEL_MAP = {
     "positions": PositionModel,
     "transactions": TransactionModel,
     "dividends": DividendModel,
-    "expenses": ExpenseModel,
+    "cashflow": ExpenseModel,
     "categories": CategoryModel,
     "statements": StatementModel,
     "dashboard_layouts": DashboardLayoutModel,

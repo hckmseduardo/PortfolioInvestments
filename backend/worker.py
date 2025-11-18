@@ -32,7 +32,7 @@ def main():
         listen = [q.strip() for q in queue_list.split(",") if q.strip()]
     else:
         listen = [
-            settings.EXPENSE_QUEUE_NAME,
+            settings.CASHFLOW_QUEUE_NAME,
             settings.PRICE_QUEUE_NAME,
             settings.STATEMENT_QUEUE_NAME,
         ]

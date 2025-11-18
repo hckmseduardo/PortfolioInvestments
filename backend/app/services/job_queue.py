@@ -11,7 +11,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _redis_connection: Optional[Redis] = None
-_expense_queue: Optional[Queue] = None
+_cashflow_queue: Optional[Queue] = None
 _price_queue: Optional[Queue] = None
 _statement_queue: Optional[Queue] = None
 _plaid_queue: Optional[Queue] = None
@@ -25,28 +25,28 @@ def _get_redis_connection() -> Redis:
     return _redis_connection
 
 
-def get_expense_queue() -> Queue:
-    global _expense_queue
-    if _expense_queue is None:
-        _expense_queue = Queue(
-            settings.EXPENSE_QUEUE_NAME,
+def get_cashflow_queue() -> Queue:
+    global _cashflow_queue
+    if _cashflow_queue is None:
+        _cashflow_queue = Queue(
+            settings.CASHFLOW_QUEUE_NAME,
             connection=_get_redis_connection(),
-            default_timeout=settings.EXPENSE_JOB_TIMEOUT,
+            default_timeout=settings.CASHFLOW_JOB_TIMEOUT,
         )
-    return _expense_queue
+    return _cashflow_queue
 
 
-def enqueue_expense_conversion_job(user_id: str, account_id: Optional[str] = None) -> Job:
-    from app.tasks.expenses import run_expense_conversion_job
+def enqueue_cashflow_conversion_job(user_id: str, account_id: Optional[str] = None) -> Job:
+    from app.tasks.cashflow import run_cashflow_conversion_job
 
-    queue = get_expense_queue()
+    queue = get_cashflow_queue()
     job = queue.enqueue(
-        run_expense_conversion_job,
+        run_cashflow_conversion_job,
         user_id,
         account_id,
-        job_timeout=settings.EXPENSE_JOB_TIMEOUT,
+        job_timeout=settings.CASHFLOW_JOB_TIMEOUT,
     )
-    logger.info("Enqueued expense conversion job %s for user %s", job.id, user_id)
+    logger.info("Enqueued cashflow conversion job %s for user %s", job.id, user_id)
     return job
 
 

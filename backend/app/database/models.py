@@ -311,7 +311,7 @@ class Dividend(Base):
 
 
 class Expense(Base):
-    __tablename__ = "expenses"
+    __tablename__ = "cashflow"
 
     id = Column(String, primary_key=True)
     account_id = Column(String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)

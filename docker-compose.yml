@@ -130,7 +130,7 @@ services:
       - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
       - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
-      - QUEUE_LIST=expense_conversion
+      - QUEUE_LIST=cashflow_conversion
     depends_on:
       postgres:
         condition: service_healthy

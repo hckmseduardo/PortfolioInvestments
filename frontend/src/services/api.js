@@ -237,7 +237,7 @@ export const dividendsAPI = {
 
 export const expensesAPI = {
   getAll: (accountId, category, startDate, endDate) =>
-    api.get('/expenses', {
+    api.get('/cashflow', {
       params: {
         ...(accountId ? { account_id: accountId } : {}),
         ...(category ? { category } : {}),
@@ -246,31 +246,33 @@ export const expensesAPI = {
       }
     }),
   getSummary: (accountId) =>
-    api.get('/expenses/summary', { params: accountId ? { account_id: accountId } : {} }),
+    api.get('/cashflow/summary', { params: accountId ? { account_id: accountId } : {} }),
   getMonthlyComparison: (months = 6, accountId = null) =>
-    api.get('/expenses/monthly-comparison', {
+    api.get('/cashflow/monthly-comparison', {
       params: {
         months,
         ...(accountId ? { account_id: accountId } : {})
       }
     }),
-  create: (data) => api.post('/expenses', data),
-  update: (id, data) => api.put(`/expenses/${id}`, data),
-  updateExpenseCategory: (id, category) => api.patch(`/expenses/${id}/category`, null, { params: { category } }),
-  delete: (id) => api.delete(`/expenses/${id}`),
-  getCategories: () => api.get('/expenses/categories'),
-  createCategory: (data) => api.post('/expenses/categories', data),
-  updateCategory: (id, data) => api.put(`/expenses/categories/${id}`, data),
-  deleteCategory: (id) => api.delete(`/expenses/categories/${id}`),
-  initDefaultCategories: (forceRefresh = false) => api.post('/expenses/categories/init-defaults', null, {
+  create: (data) => api.post('/cashflow', data),
+  update: (id, data) => api.put(`/cashflow/${id}`, data),
+  updateExpenseCategory: (id, category) => api.patch(`/cashflow/${id}/category`, null, { params: { category } }),
+  delete: (id) => api.delete(`/cashflow/${id}`),
+  getCategories: () => api.get('/cashflow/categories'),
+  createCategory: (data) => api.post('/cashflow/categories', data),
+  updateCategory: (id, data) => api.put(`/cashflow/categories/${id}`, data),
+  deleteCategory: (id) => api.delete(`/cashflow/categories/${id}`),
+  initDefaultCategories: (forceRefresh = false) => api.post('/cashflow/categories/init-defaults', null, {
     params: { force_refresh: forceRefresh }
   }),
   convertTransactions: (accountId = null) =>
-    api.post('/expenses/convert-transactions', null, {
+    api.post('/cashflow/convert-transactions', null, {
       params: accountId ? { account_id: accountId } : {}
     }),
   getConversionJobStatus: (jobId) =>
-    api.get(`/expenses/convert-transactions/jobs/${jobId}`),
+    api.get(`/cashflow/convert-transactions/jobs/${jobId}`),
+  recategorize: () =>
+    api.post('/cashflow/recategorize'),
 };
 
 export const importAPI = {

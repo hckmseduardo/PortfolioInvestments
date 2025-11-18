@@ -65,6 +65,9 @@ const COLOR_PALETTE = [
 // Only checking and credit card accounts are tracked for cashflow/expense management
 const ALLOWED_EXPENSE_ACCOUNT_TYPES = ['checking', 'credit_card'];
 
+// Special categories that can only have their color changed
+const SPECIAL_CATEGORIES = ['Uncategorized', 'Dividend', 'Transfer'];
+
 const isAllowedExpenseAccount = (account = {}) =>
   ALLOWED_EXPENSE_ACCOUNT_TYPES.includes(String(account.account_type || '').toLowerCase());
 
@@ -847,11 +850,28 @@ const Cashflow = () => {
       setConversionStage(meta?.stage || 'queued');
 
       // Show persistent notification for background job with jobType
-      const notificationId = showJobProgress('Converting transactions to expenses', jobId, JOB_TYPE_CONVERSION);
+      const notificationId = showJobProgress('Converting transactions to cashflow', jobId, JOB_TYPE_CONVERSION);
       conversionNotificationIdRef.current = notificationId;
     } catch (error) {
       console.error('Error converting transactions:', error);
       showError('Error starting conversion job');
+    }
+  };
+
+  const handleRecategorize = async () => {
+    if (!window.confirm('This will reset all cashflow records to "Uncategorized". Are you sure?')) {
+      return;
+    }
+
+    try {
+      const response = await expensesAPI.recategorize();
+      showSuccess(response.data.message || 'All records reset to Uncategorized');
+      await fetchExpenses();
+      await fetchSummary();
+      await fetchMonthlyComparison();
+    } catch (error) {
+      console.error('Error recategorizing:', error);
+      showError('Error resetting categories');
     }
   };
 
@@ -1062,8 +1082,14 @@ const Cashflow = () => {
   };
 
   // Prepare Money In and Money Out pie chart data
-  const moneyInData = categoryData.filter(item => getCategoryType(item.name) === 'money_in');
-  const moneyOutData = categoryData.filter(item => getCategoryType(item.name) === 'money_out');
+  // Exclude transfer categories from the charts
+  const transferCategories = ['Transfer', 'Credit Card Payment', 'Investment In', 'Investment Out'];
+  const moneyInData = categoryData.filter(item =>
+    getCategoryType(item.name) === 'money_in' && !transferCategories.includes(item.name)
+  );
+  const moneyOutData = categoryData.filter(item =>
+    getCategoryType(item.name) === 'money_out' && !transferCategories.includes(item.name)
+  );
 
   const totalMoneyIn = moneyInData.reduce((sum, item) => sum + item.value, 0);
   const totalMoneyOut = moneyOutData.reduce((sum, item) => sum + item.value, 0);
@@ -1109,6 +1135,9 @@ const Cashflow = () => {
   const allCategories = [...new Set(monthlyByCategoryData.flatMap(m => Object.keys(m).filter(k => k !== 'month')))];
 
   const displayedExpenses = useMemo(() => {
+    // Define transfer categories to exclude from Money In/Out tabs
+    const transferCategories = ['Transfer', 'Credit Card Payment', 'Investment In', 'Investment Out'];
+
     // Determine which filters and sort config to use based on active tab
     const activeFilters = tabValue === 1 ? moneyOutFilters : moneyInFilters;
     const activeSortConfig = tabValue === 1 ? moneyOutSortConfig : moneyInSortConfig;
@@ -1125,13 +1154,13 @@ const Cashflow = () => {
 
       // Filter by transaction type based on active tab (not for Transfers tab)
       if (tabValue === 1) {
-        // Money Out tab: show only Money Out transactions
-        if (expense.type !== 'Money Out') {
+        // Money Out tab: show only Money Out transactions, exclude transfers
+        if (expense.type !== 'Money Out' || transferCategories.includes(expense.category)) {
           return false;
         }
       } else if (tabValue === 2) {
-        // Money In tab: show only Money In transactions
-        if (expense.type !== 'Money In') {
+        // Money In tab: show only Money In transactions, exclude transfers
+        if (expense.type !== 'Money In' || transferCategories.includes(expense.category)) {
           return false;
         }
       }
@@ -1198,17 +1227,22 @@ const Cashflow = () => {
 
   // Calculate filtered transaction statistics
   const transactionStats = useMemo(() => {
+    // Define transfer categories to exclude from Money In/Out
+    const transferCategories = ['Transfer', 'Credit Card Payment', 'Investment In', 'Investment Out'];
+
+    // Money In: exclude transfer categories
     const moneyInCount = expenses.filter(expense =>
-      expense.type === 'Money In'
+      expense.type === 'Money In' && !transferCategories.includes(expense.category)
     ).length;
 
+    // Money Out: exclude transfer categories
     const moneyOutCount = expenses.filter(expense =>
-      expense.type === 'Money Out'
+      expense.type === 'Money Out' && !transferCategories.includes(expense.category)
     ).length;
 
-    // Only count Transfer category
+    // Transfers: only transfer categories
     const transferCount = expenses.filter(expense =>
-      expense.category === 'Transfer'
+      transferCategories.includes(expense.category)
     ).length;
 
     return { moneyInCount, moneyOutCount, transferCount };
@@ -1262,6 +1296,13 @@ const Cashflow = () => {
             sx={{ mr: 1 }}
           >
             Manage Categories
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={handleRecategorize}
+            sx={{ mr: 1 }}
+          >
+            Recategorize
           </Button>
           <Button
             variant="contained"
@@ -2509,7 +2550,7 @@ const Cashflow = () => {
             Transfers
           </Typography>
           <Typography variant="body2" color="textSecondary" gutterBottom sx={{ mb: 3 }}>
-            All transactions categorized as "Transfer" from Money In and Money Out tabs.
+            All transfer transactions (Transfer, Credit Card Payment, Investment In, Investment Out).
           </Typography>
 
           <TableContainer>
@@ -2684,14 +2725,18 @@ const Cashflow = () => {
               </TableHead>
               <TableBody>
                 {(() => {
-                  // Get all transactions with Transfer category from Money In or Money Out tabs
+                  // Define transfer categories
+                  const transferCategories = ['Transfer', 'Credit Card Payment', 'Investment In', 'Investment Out'];
+
+                  // Get all transactions with transfer categories
                   let displayTransfers = expenses
-                    .filter(exp => exp.category === 'Transfer')
+                    .filter(exp => transferCategories.includes(exp.category))
                     .map(t => ({
                       id: t.id,
                       date: t.date,
                       description: t.description,
                       account_id: t.account_id,
+                      paired_account_id: t.paired_account_id, // The other account in the transfer
                       category: t.category,
                       type: t.type, // Money In or Money Out
                       amount: t.transaction_amount != null ? t.transaction_amount : 0,
@@ -2803,23 +2848,29 @@ const Cashflow = () => {
                   }
 
                   return displayTransfers.map((transfer) => {
-                    // Money Out (negative amount) shows in Source Account
-                    // Money In (positive amount) shows in Destination Account
-                    const isMoneyOut = transfer.amount < 0;
+                    // For transfers:
+                    // - Money Out: current account is source, paired account is destination
+                    // - Money In: paired account is source, current account is destination
+                    const isMoneyOut = transfer.type === 'Money Out';
 
                     // Determine which category type to show based on transfer type
                     const categoryType = transfer.type === 'Money In' ? 'money_in' : 'money_out';
+
+                    // Determine source and destination accounts
+                    const sourceAccount = isMoneyOut
+                      ? getAccountLabel(transfer.account_id)
+                      : (transfer.paired_account_id ? getAccountLabel(transfer.paired_account_id) : 'Unknown');
+
+                    const destinationAccount = isMoneyOut
+                      ? (transfer.paired_account_id ? getAccountLabel(transfer.paired_account_id) : 'Unknown')
+                      : getAccountLabel(transfer.account_id);
 
                     return (
                       <TableRow key={transfer.id}>
                         <TableCell>{formatDate(transfer.date)}</TableCell>
                         <TableCell>{transfer.description}</TableCell>
-                        <TableCell>
-                          {isMoneyOut ? getAccountLabel(transfer.account_id) : '-'}
-                        </TableCell>
-                        <TableCell>
-                          {!isMoneyOut ? getAccountLabel(transfer.account_id) : '-'}
-                        </TableCell>
+                        <TableCell>{sourceAccount}</TableCell>
+                        <TableCell>{destinationAccount}</TableCell>
                         <TableCell>
                           <FormControl size="small" fullWidth>
                             <Select
@@ -2894,14 +2945,16 @@ const Cashflow = () => {
                     >
                       <EditIcon fontSize="small" />
                     </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleDeleteCategory(category.id)}
-                      sx={{ ml: 0.5 }}
-                      color="error"
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
+                    {!SPECIAL_CATEGORIES.includes(category.name) && (
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteCategory(category.id)}
+                        sx={{ ml: 0.5 }}
+                        color="error"
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    )}
                   </Box>
                 ))}
               </Box>
@@ -2917,6 +2970,11 @@ const Cashflow = () => {
               <Typography variant="subtitle1" gutterBottom>
                 Edit Category: {editingCategory.name}
               </Typography>
+              {SPECIAL_CATEGORIES.includes(editingCategory.name) && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  This is a special category. You can only change its color.
+                </Alert>
+              )}
               <TextField
                 fullWidth
                 label="Category Name"
@@ -2924,6 +2982,7 @@ const Cashflow = () => {
                 onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
                 margin="normal"
                 size="small"
+                disabled={SPECIAL_CATEGORIES.includes(editingCategory.name)}
               />
               <FormControl fullWidth margin="normal" size="small">
                 <InputLabel>Type</InputLabel>
@@ -2931,6 +2990,7 @@ const Cashflow = () => {
                   value={editingCategory.type}
                   onChange={(e) => setEditingCategory({ ...editingCategory, type: e.target.value })}
                   label="Type"
+                  disabled={SPECIAL_CATEGORIES.includes(editingCategory.name)}
                 >
                   <MenuItem value="money_out">Money Out</MenuItem>
                   <MenuItem value="money_in">Money In</MenuItem>
@@ -2986,6 +3046,7 @@ const Cashflow = () => {
                 onChange={(e) => setEditingCategory({ ...editingCategory, budget_limit: e.target.value })}
                 margin="normal"
                 size="small"
+                disabled={SPECIAL_CATEGORIES.includes(editingCategory.name)}
               />
               <Box display="flex" gap={1} mt={2}>
                 <Button onClick={handleUpdateCategory} variant="contained" size="small">

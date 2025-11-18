@@ -39,8 +39,8 @@ class Settings(BaseSettings):
 
     # Background job / Redis configuration
     REDIS_URL: str = "redis://redis:6379/0"
-    EXPENSE_QUEUE_NAME: str = "expense_conversion"
-    EXPENSE_JOB_TIMEOUT: int = 1800  # 30 minutes
+    CASHFLOW_QUEUE_NAME: str = "cashflow_conversion"
+    CASHFLOW_JOB_TIMEOUT: int = 1800  # 30 minutes
     PRICE_QUEUE_NAME: str = "price_fetch"
     PRICE_JOB_TIMEOUT: int = 600  # 10 minutes
     STATEMENT_QUEUE_NAME: str = "statement_processing"
