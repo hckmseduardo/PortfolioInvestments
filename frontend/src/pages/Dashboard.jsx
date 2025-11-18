@@ -750,10 +750,14 @@ const Dashboard = () => {
         console.log('Dashboard fetchData - positions (first try):', positions);
         console.log('Dashboard fetchData - positions.length:', positions.length);
 
-        // If no positions for the requested date and we're looking at current, fetch the last available positions
+        // If no positions for the requested date and we're looking at current, fetch the last month-end positions
         if (positions.length === 0 && !valuationDate) {
-          console.log('Dashboard fetchData - No current positions, fetching last available...');
-          const lastPositionsRes = await positionsAPI.getAggregated(null, undefined);
+          console.log('Dashboard fetchData - No current positions, fetching last month-end...');
+          const now = new Date();
+          const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+          const lastMonthEndDate = lastMonthEnd.toISOString().split('T')[0];
+          console.log('Dashboard fetchData - Fetching for date:', lastMonthEndDate);
+          const lastPositionsRes = await positionsAPI.getAggregated(null, lastMonthEndDate);
           positions = lastPositionsRes.data || [];
           console.log('Dashboard fetchData - last positions:', positions);
           console.log('Dashboard fetchData - last positions.length:', positions.length);
