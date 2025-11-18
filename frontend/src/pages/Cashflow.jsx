@@ -130,6 +130,7 @@ const Cashflow = () => {
   const [recategorizeJobStatus, setRecategorizeJobStatus] = useState(null);
   const [recategorizeStage, setRecategorizeStage] = useState(null);
   const [isRecategorizeRunning, setIsRecategorizeRunning] = useState(false);
+  const [confirmRecategorizeOpen, setConfirmRecategorizeOpen] = useState(false);
 
   // Separate filter states for Money Out tab
   const [moneyOutCategory, setMoneyOutCategory] = useState('');
@@ -973,10 +974,12 @@ const Cashflow = () => {
     }
   };
 
-  const handleRecategorize = async () => {
-    if (!window.confirm('This will reset all cashflow records to "Uncategorized" and recategorize them. Are you sure?')) {
-      return;
-    }
+  const handleRecategorize = () => {
+    setConfirmRecategorizeOpen(true);
+  };
+
+  const handleConfirmRecategorize = async () => {
+    setConfirmRecategorizeOpen(false);
 
     // Check if a recategorization job is already running
     if (isRecategorizeRunning || isJobRunning(JOB_TYPE_RECATEGORIZE)) {
@@ -1447,6 +1450,7 @@ const Cashflow = () => {
               onClick={handleOpenCategoryDialog}
               fullWidth={isMobile}
               size={isMobile ? "medium" : "medium"}
+              sx={{ touchAction: 'manipulation', minHeight: isMobile ? 48 : 'auto' }}
             >
               Manage Categories
             </Button>
@@ -1456,6 +1460,7 @@ const Cashflow = () => {
               disabled={isRecategorizeRunning}
               fullWidth={isMobile}
               size={isMobile ? "medium" : "medium"}
+              sx={{ touchAction: 'manipulation', minHeight: isMobile ? 48 : 'auto' }}
             >
               {isRecategorizeRunning ? 'Recategorizing...' : 'Recategorize'}
             </Button>
@@ -1466,6 +1471,7 @@ const Cashflow = () => {
               disabled={isConversionRunning}
               fullWidth={isMobile}
               size={isMobile ? "medium" : "medium"}
+              sx={{ touchAction: 'manipulation', minHeight: isMobile ? 48 : 'auto' }}
             >
               {isConversionRunning ? 'Import in Progress' : 'Import from Transactions'}
             </Button>
@@ -3328,6 +3334,29 @@ const Cashflow = () => {
               Create Category
             </Button>
           </Box>
+        </DialogActions>
+      </Dialog>
+
+      {/* Recategorize Confirmation Dialog */}
+      <Dialog
+        open={confirmRecategorizeOpen}
+        onClose={() => setConfirmRecategorizeOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Confirm Recategorization</DialogTitle>
+        <DialogContent>
+          <Typography>
+            This will reset all cashflow records to "Uncategorized" and recategorize them. Are you sure?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmRecategorizeOpen(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleConfirmRecategorize} variant="contained" color="primary">
+            Recategorize
+          </Button>
         </DialogActions>
       </Dialog>
     </Container>
