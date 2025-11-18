@@ -61,15 +61,8 @@ const COLOR_PALETTE = [
   '#607D8B', '#795548', '#9E9E9E', '#757575', '#424242', '#212121'
 ];
 
-// Account types that appear in Cashflow section
-// Only checking and credit card accounts are tracked for cashflow/expense management
-const ALLOWED_EXPENSE_ACCOUNT_TYPES = ['checking', 'credit_card'];
-
 // Special categories that can only have their color changed
 const SPECIAL_CATEGORIES = ['Uncategorized', 'Dividend', 'Transfer'];
-
-const isAllowedExpenseAccount = (account = {}) =>
-  ALLOWED_EXPENSE_ACCOUNT_TYPES.includes(String(account.account_type || '').toLowerCase());
 
 const PRESET_OPTIONS = [
   { value: '7d', label: '7D' },
@@ -659,14 +652,14 @@ const Cashflow = () => {
   const fetchAccounts = async () => {
     try {
       const response = await accountsAPI.getAll();
-      const filteredAccounts = (response.data || []).filter(isAllowedExpenseAccount);
-      setAccounts(filteredAccounts);
+      const allAccounts = response.data || [];
+      setAccounts(allAccounts);
 
-      if (selectedAccount && !filteredAccounts.some(account => account.id === selectedAccount)) {
+      if (selectedAccount && !allAccounts.some(account => account.id === selectedAccount)) {
         setSelectedAccount('');
       }
 
-      return filteredAccounts;
+      return allAccounts;
     } catch (error) {
       console.error('Error fetching accounts:', error);
       return [];

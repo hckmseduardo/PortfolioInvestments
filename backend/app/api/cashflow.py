@@ -14,9 +14,7 @@ from app.services.job_queue import enqueue_cashflow_conversion_job, enqueue_cash
 
 router = APIRouter(prefix="/cashflow", tags=["cashflow"])
 
-# Account types that appear in Cashflow section
-# Only checking and credit card accounts are tracked for cashflow/expense management
-EXPENSE_ACCOUNT_TYPES = {"checking", "credit_card"}
+# Cashflow section now tracks all account types
 
 # Enhanced category keywords for intelligent auto-categorization
 # Based on Categorization Rules.md decision tree and keyword recognition
@@ -502,11 +500,6 @@ def auto_categorize_expense(
     # No confident match found
     return None, 0.0, "unknown"
 
-def _is_expense_account(account: Optional[dict]) -> bool:
-    """Return True if the account type should appear in Cashflow section (checking or credit card only)."""
-    if not account:
-        return False
-    return account.get("account_type") in EXPENSE_ACCOUNT_TYPES
 
 
 def _get_expense_accounts(db, user_id: str) -> List[dict]:
@@ -704,12 +697,6 @@ async def get_expenses(
                 detail="Account not found"
             )
 
-        if not _is_expense_account(account):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cashflow tracking is only available for checking and credit card accounts"
-            )
-
         query = query.filter(ExpenseModel.account_id == account_id)
         if category:
             query = query.filter(ExpenseModel.category == category)
@@ -772,11 +759,6 @@ async def get_expense_summary(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Account not found"
-            )
-        if not _is_expense_account(account):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cashflow tracking is only available for checking and credit card accounts"
             )
         expenses = db.find("cashflow", {"account_id": account_id})
     else:
@@ -1146,11 +1128,6 @@ async def get_monthly_expense_comparison(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Account not found"
-            )
-        if not _is_expense_account(account):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cashflow tracking is only available for checking and credit card accounts"
             )
         expenses = db.find("cashflow", {"account_id": account_id})
     else:
@@ -1701,10 +1678,10 @@ async def convert_transactions_to_expenses(
 
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
-        if not account or not _is_expense_account(account):
+        if not account:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Checking or credit card account not found"
+                detail="Account not found"
             )
 
     job = enqueue_cashflow_conversion_job(current_user.id, account_id)
@@ -1764,7 +1741,7 @@ async def reclassify_uncategorized_expenses(
 
     # Get all uncategorized expenses for the user's accounts
     user_accounts = db.find("accounts", {"user_id": current_user.id})
-    account_ids = [acc["id"] for acc in user_accounts if _is_expense_account(acc)]
+    account_ids = [acc["id"] for acc in user_accounts]
 
     uncategorized_expenses = []
     for account_id in account_ids:
