@@ -21,11 +21,30 @@ EXPENSE_ACCOUNT_TYPES = {"checking", "credit_card"}
 # Enhanced category keywords for intelligent auto-categorization
 # Based on Categorization Rules.md decision tree and keyword recognition
 CATEGORY_KEYWORDS = {
-    # === INCOME KEYWORDS (Amount > 0) ===
+    # === SPECIFIC INCOME CATEGORIES (Amount > 0, Higher Priority) ===
+    "Dividends": [
+        "dividend", "dividends", "div payment", "div reinvest", "stock dividend",
+        "equity dividend", "quarterly dividend", "annual dividend", "dividend income",
+        "dist", "distribution", "capital gain dist", "etf dividend"
+    ],
+
+    "Interest": [
+        "interest", "credit interest", "savings interest", "interest income",
+        "interest earned", "bank interest", "accrued interest", "int payment",
+        "interest paid", "int credit"
+    ],
+
+    "Bonus": [
+        "bonus", "annual bonus", "performance bonus", "year end bonus",
+        "signing bonus", "retention bonus", "quarterly bonus", "cash bonus",
+        "incentive bonus", "bonus payment"
+    ],
+
+    # === GENERAL INCOME KEYWORDS (Amount > 0) ===
     "Income": [
-        "payroll", "deposit", "salary", "bonus", "refund", "dividend", "interest",
+        "payroll", "deposit", "salary", "refund",
         "transfer from", "payment received", "reimbursement", "cashback", "rebate",
-        "credit interest", "tax refund", "income", "earnings", "wages", "commission"
+        "tax refund", "income", "earnings", "wages", "commission"
     ],
 
     # === INVESTMENT KEYWORDS ===
@@ -219,20 +238,23 @@ def auto_categorize_expense(
     cleaned_words = [w for w in description_lower.split() if w not in noise_words and len(w) > 2]
 
     # Intelligent keyword-based categorization with weighted scoring
-    # Priority order: Credit Card Payment > Transfer > Income/Investment > Expense categories
+    # Priority order: Credit Card Payment > Transfer > Specific Income (Dividends/Interest/Bonus) > General Income/Investment > Expense categories
     category_scores = {}
 
     # Define priority tiers (higher number = higher priority)
     priority_categories = {
         "Credit Card Payment": 100,  # Highest priority
         "Transfer": 50,
+        "Dividends": 45,  # Specific income categories have higher priority than general Income
+        "Interest": 45,
+        "Bonus": 45,
         "Income": 40,
         "Investment": 40,
     }
 
     for category, keywords in CATEGORY_KEYWORDS.items():
         # Skip special categories if requested
-        if skip_special_categories and category in ["Transfer", "Income", "Investment", "Credit Card Payment"]:
+        if skip_special_categories and category in ["Transfer", "Income", "Investment", "Credit Card Payment", "Dividends", "Interest", "Bonus"]:
             continue
 
         score = 0
@@ -259,18 +281,18 @@ def auto_categorize_expense(
     # Filter based on transaction amount direction (decision tree logic)
     if transaction_amount is not None and category_scores:
         if transaction_amount > 0:
-            # Positive amount: Income or Transfer In
-            # Keep only Income, Transfer, and Credit Card Payment categories
+            # Positive amount: Income categories (including specific types), Transfer In
+            # Keep only Income, Dividends, Interest, Bonus, Transfer, and Credit Card Payment categories
             category_scores = {
                 cat: score for cat, score in category_scores.items()
-                if cat in ["Income", "Transfer", "Credit Card Payment", "Investment"]
+                if cat in ["Income", "Dividends", "Interest", "Bonus", "Transfer", "Credit Card Payment", "Investment"]
             }
         else:
             # Negative amount: Expense, Transfer Out, or Investment
-            # Exclude Income category
+            # Exclude all Income categories (general and specific)
             category_scores = {
                 cat: score for cat, score in category_scores.items()
-                if cat != "Income"
+                if cat not in ["Income", "Dividends", "Interest", "Bonus"]
             }
 
     # Get best keyword match
@@ -729,6 +751,15 @@ async def update_category(
             detail="Category not found"
         )
 
+    # Check if category is protected and prevent name changes
+    if existing_category.get("is_protected", False):
+        # Allow updates to other fields (color, budget_limit, type) but not name
+        if category_update.name != existing_category.get("name"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Cannot rename protected category '{existing_category.get('name')}'. This is a special system category."
+            )
+
     db.update(
         "categories",
         {"id": category_id},
@@ -790,10 +821,10 @@ async def initialize_default_categories(
         # Money In categories (Amount > 0)
         {"name": "Income", "type": "money_in", "color": "#4CAF50", "budget_limit": None},
         {"name": "Salary", "type": "money_in", "color": "#66BB6A", "budget_limit": None},
-        {"name": "Bonus", "type": "money_in", "color": "#81C784", "budget_limit": None},
+        {"name": "Bonus", "type": "money_in", "color": "#81C784", "budget_limit": None, "is_protected": True},  # Protected category
         {"name": "Freelance", "type": "money_in", "color": "#A5D6A7", "budget_limit": None},
-        {"name": "Dividends", "type": "money_in", "color": "#C8E6C9", "budget_limit": None},
-        {"name": "Interest", "type": "money_in", "color": "#8BC34A", "budget_limit": None},
+        {"name": "Dividends", "type": "money_in", "color": "#C8E6C9", "budget_limit": None, "is_protected": True},  # Protected category
+        {"name": "Interest", "type": "money_in", "color": "#8BC34A", "budget_limit": None, "is_protected": True},  # Protected category
         {"name": "Refund", "type": "money_in", "color": "#CDDC39", "budget_limit": None},
         {"name": "Investment Out", "type": "money_in", "color": "#0D47A1", "budget_limit": None},
         {"name": "Stock Sale", "type": "money_in", "color": "#1E88E5", "budget_limit": None},
@@ -1145,12 +1176,13 @@ def categorize_transaction(
         categorization_source = "transfer_detection"
     else:
         # For non-transfers or transfers without found pair, try auto-categorization first
-        # Skip Transfer/Income/Investment categories since we handle those separately
+        # Allow all categories including Dividends, Interest, and Bonus
+        # The auto_categorize_expense function filters by transaction amount direction
         category, confidence, categorization_source = auto_categorize_expense(
             txn.get("description", ""),
             user_id,
             db,
-            skip_special_categories=True,
+            skip_special_categories=False,  # Allow specific income categories (Dividends, Interest, Bonus)
             transaction_amount=txn_amount,
             account_type=current_account_type,
             use_llm=use_llm
@@ -1333,6 +1365,9 @@ def run_expense_conversion(
     # Ensure special categories exist (aligned with Categorization Rules.md)
     special_categories = [
         {"name": "Income", "type": "income", "color": "#4CAF50"},
+        {"name": "Dividends", "type": "income", "color": "#C8E6C9", "is_protected": True},
+        {"name": "Interest", "type": "income", "color": "#8BC34A", "is_protected": True},
+        {"name": "Bonus", "type": "income", "color": "#81C784", "is_protected": True},
         {"name": "Investment", "type": "investment", "color": "#1976D2"},
         {"name": "Investment In", "type": "investment", "color": "#2196F3"},
         {"name": "Investment Out", "type": "investment", "color": "#0D47A1"},
@@ -1348,7 +1383,8 @@ def run_expense_conversion(
                 "name": cat_data["name"],
                 "type": cat_data["type"],
                 "color": cat_data["color"],
-                "budget_limit": None
+                "budget_limit": None,
+                "is_protected": cat_data.get("is_protected", False)
             }
             db.insert("categories", category_doc)
 

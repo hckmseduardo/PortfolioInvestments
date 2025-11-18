@@ -353,6 +353,7 @@ class Category(Base):
     type = Column(String, nullable=False)
     color = Column(String, nullable=False)
     budget_limit = Column(Float, nullable=True)
+    is_protected = Column(Boolean, default=False, nullable=False)  # Protected categories cannot be renamed
 
     # Relationships
     user = relationship("User", back_populates="categories")

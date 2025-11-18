@@ -282,6 +282,7 @@ class CategoryBase(BaseModel):
     type: str
     color: str
     budget_limit: Optional[float] = None
+    is_protected: bool = False
 
 class CategoryCreate(CategoryBase):
     pass

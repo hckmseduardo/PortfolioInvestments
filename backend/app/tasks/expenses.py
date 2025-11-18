@@ -3,7 +3,7 @@ from typing import Optional
 
 from rq import get_current_job
 
-from app.api.expenses import run_expense_conversion
+from app.api.cashflow import run_expense_conversion
 from app.database.postgres_db import get_db_context
 from app.database.db_service import get_db_service
 

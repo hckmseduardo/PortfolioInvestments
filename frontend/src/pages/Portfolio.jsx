@@ -54,6 +54,8 @@ import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
 import { useMobileClick } from '../utils/useMobileClick';
 import PositionCard from '../components/PositionCard';
+import PortfolioAllocationCard from '../components/PortfolioAllocationCard';
+import PortfolioBreakdownCard from '../components/PortfolioBreakdownCard';
 import { useNavigate } from 'react-router-dom';
 
 const DATE_PRESETS = {
@@ -1464,142 +1466,36 @@ const Portfolio = () => {
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, height: '100%' }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">
-                Portfolio Allocation
-              </Typography>
-              <Chip
-                label={carouselEnabled ? 'Auto' : 'Manual'}
-                size="small"
-                color={carouselEnabled ? 'primary' : 'default'}
-                onClick={() => setCarouselEnabled(!carouselEnabled)}
-                sx={{ cursor: 'pointer' }}
-              />
-            </Box>
-            <Tabs
-              value={breakdownType}
-              onChange={handleBreakdownTypeChange}
-              variant="fullWidth"
-              sx={{ mb: 2, minHeight: 36 }}
-            >
-              <Tab label="Type" value="type" sx={{ minHeight: 36, py: 1 }} />
-              <Tab label="Subtype" value="subtype" sx={{ minHeight: 36, py: 1 }} />
-              <Tab label="Sector" value="sector" sx={{ minHeight: 36, py: 1 }} />
-              <Tab label="Industry" value="industry" sx={{ minHeight: 36, py: 1 }} />
-            </Tabs>
-            {(() => {
-              const breakdownData = getCurrentBreakdownData();
-              return breakdownData.data.length === 0 ? (
-                <Typography color="textSecondary" sx={{ textAlign: 'center', py: 4 }}>
-                  No {breakdownData.label.toLowerCase()} data available. Sync from Plaid to see breakdown.
-                </Typography>
-              ) : (
-                <Box sx={{ height: 320 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={breakdownData.data}
-                        dataKey="market_value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius="45%"
-                        outerRadius="80%"
-                        paddingAngle={2}
-                        labelLine={false}
-                        onClick={(data) => {
-                          if (data && data.payload) {
-                            handlePieSliceClick(data.payload);
-                          }
-                        }}
-                      >
-                        {breakdownData.data.map((slice, index) => (
-                          <Cell
-                            key={slice.name || `slice-${index}`}
-                            fill={breakdownData.colorMap[slice.name] || COLOR_PALETTE[index % COLOR_PALETTE.length]}
-                            style={{ cursor: 'pointer' }}
-                          />
-                        ))}
-                      </Pie>
-                      <RechartsTooltip
-                        formatter={(value, name, payload) => [
-                          formatCurrency(value),
-                          payload?.payload?.name || name
-                        ]}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </Box>
-              );
-            })()}
-          </Paper>
+          <PortfolioAllocationCard
+            typeSlices={typeSlices}
+            subtypeSlices={subtypeSlices}
+            sectorSlices={sectorSlices}
+            industrySlices={industrySlices}
+            securityTypeColors={securityTypeColors}
+            securitySubtypeColors={securitySubtypeColors}
+            sectorColors={sectorColors}
+            industryColors={industryColors}
+            breakdownType={breakdownType}
+            onBreakdownTypeChange={handleBreakdownTypeChange}
+            carouselEnabled={carouselEnabled}
+            onCarouselToggle={() => setCarouselEnabled(!carouselEnabled)}
+            onSliceClick={handlePieSliceClick}
+            formatCurrency={formatCurrency}
+          />
         </Grid>
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, height: '100%' }}>
-            {(() => {
-              const breakdownData = getCurrentBreakdownData();
-              return (
-                <>
-                  <Typography variant="h6" gutterBottom>
-                    {breakdownData.label} Breakdown
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-                    Market value distribution by {breakdownData.label.toLowerCase()}
-                  </Typography>
-                  {breakdownData.data.length === 0 ? (
-                    <Typography color="textSecondary" sx={{ textAlign: 'center', py: 4 }}>
-                      No data available
-                    </Typography>
-                  ) : (
-                    <TableContainer sx={{ maxHeight: 360 }}>
-                      <Table size="small" stickyHeader>
-                        <TableHead>
-                          <TableRow>
-                            <TableCell><strong>{breakdownData.label}</strong></TableCell>
-                            <TableCell align="right"><strong>Market Value</strong></TableCell>
-                            <TableCell align="right"><strong>Percentage</strong></TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {breakdownData.data
-                            .sort((a, b) => b.market_value - a.market_value)
-                            .map((item, index) => (
-                              <TableRow key={item.name || `row-${index}`}>
-                                <TableCell>
-                                  <Box display="flex" alignItems="center" gap={1}>
-                                    <Box
-                                      sx={{
-                                        width: 12,
-                                        height: 12,
-                                        borderRadius: '50%',
-                                        bgcolor: breakdownData.colorMap[item.name] || COLOR_PALETTE[index % COLOR_PALETTE.length],
-                                        border: '1px solid rgba(0,0,0,0.12)'
-                                      }}
-                                    />
-                                    <Typography variant="body2">{item.name}</Typography>
-                                  </Box>
-                                </TableCell>
-                                <TableCell align="right">
-                                  <Typography variant="body2" fontWeight={500}>
-                                    {formatCurrency(item.market_value)}
-                                  </Typography>
-                                </TableCell>
-                                <TableCell align="right">
-                                  <Typography variant="body2" color="textSecondary">
-                                    {item.percentage.toFixed(2)}%
-                                  </Typography>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  )}
-                </>
-              );
-            })()}
-          </Paper>
+          <PortfolioBreakdownCard
+            typeSlices={typeSlices}
+            subtypeSlices={subtypeSlices}
+            sectorSlices={sectorSlices}
+            industrySlices={industrySlices}
+            securityTypeColors={securityTypeColors}
+            securitySubtypeColors={securitySubtypeColors}
+            sectorColors={sectorColors}
+            industryColors={industryColors}
+            breakdownType={breakdownType}
+            formatCurrency={formatCurrency}
+          />
         </Grid>
       </Grid>
 
