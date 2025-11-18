@@ -40,11 +40,17 @@ CATEGORY_KEYWORDS = {
         "incentive bonus", "bonus payment"
     ],
 
+    "Salary": [
+        "salary", "payroll", "wages", "wage", "pay", "paystub", "pay stub",
+        "bi-weekly pay", "biweekly pay", "monthly salary", "weekly pay",
+        "employment income", "regular pay", "net pay", "gross pay"
+    ],
+
     # === GENERAL INCOME KEYWORDS (Amount > 0) ===
     "Income": [
-        "payroll", "deposit", "salary", "refund",
+        "deposit", "refund",
         "transfer from", "payment received", "reimbursement", "cashback", "rebate",
-        "tax refund", "income", "earnings", "wages", "commission"
+        "tax refund", "income", "earnings", "commission"
     ],
 
     # === INVESTMENT KEYWORDS ===
@@ -238,7 +244,7 @@ def auto_categorize_expense(
     cleaned_words = [w for w in description_lower.split() if w not in noise_words and len(w) > 2]
 
     # Intelligent keyword-based categorization with weighted scoring
-    # Priority order: Credit Card Payment > Transfer > Specific Income (Dividends/Interest/Bonus) > General Income/Investment > Expense categories
+    # Priority order: Credit Card Payment > Transfer > Specific Income (Dividends/Interest/Bonus/Salary) > General Income/Investment > Expense categories
     category_scores = {}
 
     # Define priority tiers (higher number = higher priority)
@@ -248,13 +254,14 @@ def auto_categorize_expense(
         "Dividends": 45,  # Specific income categories have higher priority than general Income
         "Interest": 45,
         "Bonus": 45,
+        "Salary": 45,
         "Income": 40,
         "Investment": 40,
     }
 
     for category, keywords in CATEGORY_KEYWORDS.items():
         # Skip special categories if requested
-        if skip_special_categories and category in ["Transfer", "Income", "Investment", "Credit Card Payment", "Dividends", "Interest", "Bonus"]:
+        if skip_special_categories and category in ["Transfer", "Income", "Investment", "Credit Card Payment", "Dividends", "Interest", "Bonus", "Salary"]:
             continue
 
         score = 0
@@ -282,17 +289,17 @@ def auto_categorize_expense(
     if transaction_amount is not None and category_scores:
         if transaction_amount > 0:
             # Positive amount: Income categories (including specific types), Transfer In
-            # Keep only Income, Dividends, Interest, Bonus, Transfer, and Credit Card Payment categories
+            # Keep only Income, Dividends, Interest, Bonus, Salary, Transfer, and Credit Card Payment categories
             category_scores = {
                 cat: score for cat, score in category_scores.items()
-                if cat in ["Income", "Dividends", "Interest", "Bonus", "Transfer", "Credit Card Payment", "Investment"]
+                if cat in ["Income", "Dividends", "Interest", "Bonus", "Salary", "Transfer", "Credit Card Payment", "Investment"]
             }
         else:
             # Negative amount: Expense, Transfer Out, or Investment
             # Exclude all Income categories (general and specific)
             category_scores = {
                 cat: score for cat, score in category_scores.items()
-                if cat not in ["Income", "Dividends", "Interest", "Bonus"]
+                if cat not in ["Income", "Dividends", "Interest", "Bonus", "Salary"]
             }
 
     # Get best keyword match
@@ -820,7 +827,7 @@ async def initialize_default_categories(
     default_categories = [
         # Money In categories (Amount > 0)
         {"name": "Income", "type": "money_in", "color": "#4CAF50", "budget_limit": None},
-        {"name": "Salary", "type": "money_in", "color": "#66BB6A", "budget_limit": None},
+        {"name": "Salary", "type": "money_in", "color": "#66BB6A", "budget_limit": None, "is_protected": True},  # Protected category
         {"name": "Bonus", "type": "money_in", "color": "#81C784", "budget_limit": None, "is_protected": True},  # Protected category
         {"name": "Freelance", "type": "money_in", "color": "#A5D6A7", "budget_limit": None},
         {"name": "Dividends", "type": "money_in", "color": "#C8E6C9", "budget_limit": None, "is_protected": True},  # Protected category
@@ -1368,6 +1375,7 @@ def run_expense_conversion(
         {"name": "Dividends", "type": "income", "color": "#C8E6C9", "is_protected": True},
         {"name": "Interest", "type": "income", "color": "#8BC34A", "is_protected": True},
         {"name": "Bonus", "type": "income", "color": "#81C784", "is_protected": True},
+        {"name": "Salary", "type": "income", "color": "#66BB6A", "is_protected": True},
         {"name": "Investment", "type": "investment", "color": "#1976D2"},
         {"name": "Investment In", "type": "investment", "color": "#2196F3"},
         {"name": "Investment Out", "type": "investment", "color": "#0D47A1"},

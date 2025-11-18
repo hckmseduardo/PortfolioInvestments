@@ -747,7 +747,10 @@ const Dashboard = () => {
 
         // Calculate breakdowns client-side from positions (same as Portfolio section)
         const positions = positionsRes.data || [];
+        console.log('Dashboard fetchData - positions:', positions);
+        console.log('Dashboard fetchData - positions.length:', positions.length);
         const totalMarketValue = positions.reduce((sum, pos) => sum + (pos.market_value || 0), 0);
+        console.log('Dashboard fetchData - totalMarketValue:', totalMarketValue);
 
         // Calculate industry breakdown
         const industryMap = {};
@@ -809,6 +812,11 @@ const Dashboard = () => {
           ...item,
           percentage: totalMarketValue ? (item.market_value / totalMarketValue) * 100 : 0
         }));
+
+        console.log('Dashboard fetchData - typeBreakdownData:', typeBreakdownData);
+        console.log('Dashboard fetchData - subtypeBreakdownData:', subtypeBreakdownData);
+        console.log('Dashboard fetchData - sectorBreakdownData:', sectorBreakdownData);
+        console.log('Dashboard fetchData - industryBreakdownData:', industryBreakdownData);
 
         setIndustryBreakdown(industryBreakdownData);
         setTypeBreakdown(typeBreakdownData);
