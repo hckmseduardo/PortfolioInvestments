@@ -690,7 +690,7 @@ const Dashboard = () => {
           positionsAPI.getSummary(asOfParam),
           accountsAPI.getAll(),
           dividendsAPI.getSummary(undefined, undefined, asOfParam),
-          positionsAPI.getAll(null, asOfParam) // Fetch positions to calculate breakdowns client-side
+          positionsAPI.getAggregated(null, asOfParam) // Fetch positions to calculate breakdowns client-side
         ]);
 
         setSummary(summaryRes.data);
@@ -942,7 +942,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
         positionsAPI.getSummary(asOfParam),
         accountsAPI.getAll(),
         dividendsAPI.getSummary(undefined, undefined, asOfParam),
-        positionsAPI.getAll(null, asOfParam)
+        positionsAPI.getAggregated(null, asOfParam)
       ]);
 
       setSummary(summaryRes.data);
