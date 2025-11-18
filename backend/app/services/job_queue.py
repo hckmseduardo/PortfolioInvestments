@@ -50,6 +50,19 @@ def enqueue_cashflow_conversion_job(user_id: str, account_id: Optional[str] = No
     return job
 
 
+def enqueue_cashflow_recategorization_job(user_id: str) -> Job:
+    from app.tasks.cashflow import run_cashflow_recategorization_job
+
+    queue = get_cashflow_queue()
+    job = queue.enqueue(
+        run_cashflow_recategorization_job,
+        user_id,
+        job_timeout=settings.CASHFLOW_JOB_TIMEOUT,
+    )
+    logger.info("Enqueued cashflow recategorization job %s for user %s", job.id, user_id)
+    return job
+
+
 def get_price_queue() -> Queue:
     global _price_queue
     if _price_queue is None:

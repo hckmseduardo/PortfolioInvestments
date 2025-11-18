@@ -10,7 +10,7 @@ from app.api.auth import get_current_user
 from app.database.postgres_db import get_db as get_session
 from app.database.db_service import get_db_service
 from app.database.models import Expense as ExpenseModel, Transaction as TransactionModel
-from app.services.job_queue import enqueue_cashflow_conversion_job, get_job_info
+from app.services.job_queue import enqueue_cashflow_conversion_job, enqueue_cashflow_recategorization_job, get_job_info
 
 router = APIRouter(prefix="/cashflow", tags=["cashflow"])
 
@@ -1594,97 +1594,46 @@ async def recategorize_all_to_uncategorized(
 ):
     """
     Reset all cashflow transactions to "Uncategorized" category, then reapply categorization.
-    This allows users to re-run the categorization process from scratch.
+    This runs as a background job to prevent timeouts on large datasets.
     """
-    db = get_db_service(session)
-
-    # Ensure special categories exist (same as import process)
-    special_categories = [
-        {"name": "Uncategorized", "type": "expense", "color": "#9E9E9E"},
-        {"name": "Income", "type": "income", "color": "#4CAF50"},
-        {"name": "Dividend", "type": "income", "color": "#8BC34A"},
-        {"name": "Investment In", "type": "investment", "color": "#2196F3"},
-        {"name": "Investment Out", "type": "investment", "color": "#0D47A1"},
-        {"name": "Transfer", "type": "transfer", "color": "#607D8B"},
-        {"name": "Credit Card Payment", "type": "transfer", "color": "#78909C"},
-    ]
-
-    for cat_data in special_categories:
-        existing_cat = db.find_one("categories", {"user_id": current_user.id, "name": cat_data["name"]})
-        if not existing_cat:
-            category_doc = {
-                "user_id": current_user.id,
-                "name": cat_data["name"],
-                "type": cat_data["type"],
-                "color": cat_data["color"],
-                "budget_limit": None
-            }
-            db.insert("categories", category_doc)
-
-    # Step 1: Reset all cashflow records to Uncategorized
-    user_accounts = db.find("accounts", {"user_id": current_user.id})
-    all_account_ids = [acc["id"] for acc in user_accounts]
-
-    reset_count = 0
-    for account_id in all_account_ids:
-        cashflow_records = db.find("cashflow", {"account_id": account_id})
-        for record in cashflow_records:
-            db.update("cashflow", {"id": record["id"]}, {
-                "category": "Uncategorized",
-                "confidence": 0.0,
-                "suggested_category": None
-            })
-            reset_count += 1
-
-    # Step 2: Reapply categorization using the same logic as import
-    # Get transfer pairs
-    transfers = detect_transfers(current_user.id, db)
-    transfer_transaction_ids = set()
-    for tid1, tid2 in transfers:
-        transfer_transaction_ids.add(tid1)
-        transfer_transaction_ids.add(tid2)
-
-    # Build account map
-    all_user_accounts = db.find("accounts", {"user_id": current_user.id})
-    account_map = {acc["id"]: acc for acc in all_user_accounts}
-
-    # Build transaction map for faster lookup (fetch per account)
-    transaction_map = {}
-    for account_id in all_account_ids:
-        account_transactions = db.find("transactions", {"account_id": account_id})
-        for txn in account_transactions:
-            transaction_map[txn["id"]] = txn
-
-    # Recategorize each cashflow record
-    recategorized_count = 0
-    for account_id in all_account_ids:
-        cashflow_records = db.find("cashflow", {"account_id": account_id})
-        for record in cashflow_records:
-            txn_id = record.get("transaction_id")
-            if not txn_id or txn_id not in transaction_map:
-                continue
-
-            # Get the original transaction
-            txn = transaction_map[txn_id]
-
-            # Apply categorization using the shared function
-            category, confidence, categorization_source, paired_txn_id, paired_account_id = categorize_transaction(
-                txn, current_user.id, db, account_map, transfers, transfer_transaction_ids, use_llm=False
-            )
-
-            # Update the cashflow record with new categorization
-            db.update("cashflow", {"id": record["id"]}, {
-                "category": category,
-                "confidence": confidence,
-                "paired_transaction_id": paired_txn_id,
-                "paired_account_id": paired_account_id
-            })
-            recategorized_count += 1
-
-    session.commit()
+    job = enqueue_cashflow_recategorization_job(current_user.id)
+    job.meta = job.meta or {}
+    job.meta["user_id"] = current_user.id
+    job.meta["stage"] = "queued"
+    job.save_meta()
 
     return {
-        "message": f"Reset {reset_count} cashflow records to Uncategorized, then recategorized {recategorized_count} records",
-        "reset": reset_count,
-        "recategorized": recategorized_count
+        "job_id": job.id,
+        "status": job.get_status(),
+        "meta": job.meta
     }
+
+
+@router.get("/recategorize/jobs/{job_id}")
+async def get_recategorization_job_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Get the status of a recategorization background job."""
+    try:
+        job_info = get_job_info(job_id)
+    except NoSuchJobError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found"
+        )
+    job_meta = job_info.get("meta") or {}
+
+    if job_meta.get("user_id") != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found"
+        )
+
+    result = job_info.get("result")
+    if isinstance(result, dict):
+        sanitized_result = result.copy()
+        sanitized_result.pop("user_id", None)
+        job_info["result"] = sanitized_result
+
+    return job_info

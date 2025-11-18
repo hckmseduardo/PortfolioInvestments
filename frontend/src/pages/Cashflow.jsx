@@ -126,6 +126,10 @@ const Cashflow = () => {
   const [conversionJobStatus, setConversionJobStatus] = useState(null);
   const [conversionStage, setConversionStage] = useState(null);
   const [isConversionRunning, setIsConversionRunning] = useState(false);
+  const [recategorizeJobId, setRecategorizeJobId] = useState(null);
+  const [recategorizeJobStatus, setRecategorizeJobStatus] = useState(null);
+  const [recategorizeStage, setRecategorizeStage] = useState(null);
+  const [isRecategorizeRunning, setIsRecategorizeRunning] = useState(false);
 
   // Separate filter states for Money Out tab
   const [moneyOutCategory, setMoneyOutCategory] = useState('');
@@ -156,9 +160,13 @@ const Cashflow = () => {
   const conversionPollRef = useRef(null);
   const conversionJobIdRef = useRef(null);
   const conversionNotificationIdRef = useRef(null);
+  const recategorizePollRef = useRef(null);
+  const recategorizeJobIdRef = useRef(null);
+  const recategorizeNotificationIdRef = useRef(null);
   const { showSuccess, showError, showWarning, showInfo, showJobProgress, updateJobStatus, isJobRunning, getActiveJob } = useNotification();
 
   const JOB_TYPE_CONVERSION = 'transaction-conversion';
+  const JOB_TYPE_RECATEGORIZE = 'cashflow-recategorize';
 
   const applyPreset = useCallback((presetValue) => {
     const today = new Date();
@@ -570,11 +578,19 @@ const Cashflow = () => {
     fetchInitialData();
 
     // Check if there's an active conversion job on mount
-    const activeJob = getActiveJob(JOB_TYPE_CONVERSION);
-    if (activeJob && activeJob.jobId) {
+    const activeConversionJob = getActiveJob(JOB_TYPE_CONVERSION);
+    if (activeConversionJob && activeConversionJob.jobId) {
       // Resume the job polling
-      setConversionJobId(activeJob.jobId);
-      conversionNotificationIdRef.current = activeJob.notificationId;
+      setConversionJobId(activeConversionJob.jobId);
+      conversionNotificationIdRef.current = activeConversionJob.notificationId;
+    }
+
+    // Check if there's an active recategorization job on mount
+    const activeRecategorizeJob = getActiveJob(JOB_TYPE_RECATEGORIZE);
+    if (activeRecategorizeJob && activeRecategorizeJob.jobId) {
+      // Resume the job polling
+      setRecategorizeJobId(activeRecategorizeJob.jobId);
+      recategorizeNotificationIdRef.current = activeRecategorizeJob.notificationId;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -737,8 +753,18 @@ const Cashflow = () => {
     }
   };
 
+  const clearRecategorizePolling = () => {
+    if (recategorizePollRef.current) {
+      clearInterval(recategorizePollRef.current);
+      recategorizePollRef.current = null;
+    }
+  };
+
   useEffect(() => {
-    return () => clearConversionPolling();
+    return () => {
+      clearConversionPolling();
+      clearRecategorizePolling();
+    };
   }, []);
 
   useEffect(() => {
@@ -829,6 +855,95 @@ const Cashflow = () => {
     return () => clearConversionPolling();
   }, [conversionJobId, updateJobStatus, fetchInitialData]);
 
+  // Recategorize job polling
+  useEffect(() => {
+    if (!recategorizeJobId) {
+      recategorizeJobIdRef.current = null;
+      setRecategorizeJobStatus(null);
+      setRecategorizeStage(null);
+      setIsRecategorizeRunning(false);
+      clearRecategorizePolling();
+      recategorizeNotificationIdRef.current = null;
+      return;
+    }
+
+    setIsRecategorizeRunning(true);
+    recategorizeJobIdRef.current = recategorizeJobId;
+
+    const pollJob = async (jobId) => {
+      try {
+        if (!jobId) return;
+        const response = await expensesAPI.getRecategorizeJobStatus(jobId);
+        const data = response.data;
+        setRecategorizeJobStatus(data.status);
+        setRecategorizeStage(data.meta?.stage || data.status);
+
+        if (data.status === 'finished') {
+          clearRecategorizePolling();
+          setRecategorizeJobId(null);
+          setIsRecategorizeRunning(false);
+
+          // Update notification to success
+          const notifId = recategorizeNotificationIdRef.current;
+          if (notifId !== undefined) {
+            updateJobStatus(notifId, data.result?.message || 'Recategorization completed successfully', 'success', JOB_TYPE_RECATEGORIZE);
+          }
+          recategorizeNotificationIdRef.current = null;
+
+          await fetchInitialData();
+        } else if (data.status === 'failed') {
+          clearRecategorizePolling();
+          setRecategorizeJobId(null);
+          setIsRecategorizeRunning(false);
+
+          // Update notification to error
+          const notifId = recategorizeNotificationIdRef.current;
+          const errorMessage = data.error?.split('\n').slice(-2, -1)[0] || 'Recategorization job failed';
+          if (notifId !== undefined) {
+            updateJobStatus(notifId, errorMessage, 'error', JOB_TYPE_RECATEGORIZE);
+          }
+          recategorizeNotificationIdRef.current = null;
+        }
+      } catch (error) {
+        if (recategorizeJobIdRef.current !== jobId) {
+          // Stale poll result from previous job; ignore.
+          return;
+        }
+
+        if (error.response?.status === 404) {
+          clearRecategorizePolling();
+          setRecategorizeJobId(null);
+          setIsRecategorizeRunning(false);
+
+          // Update notification to warning
+          const notifId = recategorizeNotificationIdRef.current;
+          if (notifId !== undefined) {
+            updateJobStatus(notifId, 'Recategorization job expired or was removed. Please try again.', 'warning', JOB_TYPE_RECATEGORIZE);
+          }
+          recategorizeNotificationIdRef.current = null;
+          return;
+        }
+
+        console.error('Error polling recategorization job:', error);
+        clearRecategorizePolling();
+        setRecategorizeJobId(null);
+        setIsRecategorizeRunning(false);
+
+        // Update notification to error
+        const notifId = recategorizeNotificationIdRef.current;
+        if (notifId !== undefined) {
+          updateJobStatus(notifId, 'Error monitoring recategorization job', 'error', JOB_TYPE_RECATEGORIZE);
+        }
+        recategorizeNotificationIdRef.current = null;
+      }
+    };
+
+    pollJob(recategorizeJobId);
+    recategorizePollRef.current = setInterval(() => pollJob(recategorizeJobIdRef.current), 4000);
+
+    return () => clearRecategorizePolling();
+  }, [recategorizeJobId, updateJobStatus, fetchInitialData]);
+
   const handleConvertTransactions = async () => {
     // Check if a conversion job is already running
     if (isConversionRunning || isJobRunning(JOB_TYPE_CONVERSION)) {
@@ -859,19 +974,35 @@ const Cashflow = () => {
   };
 
   const handleRecategorize = async () => {
-    if (!window.confirm('This will reset all cashflow records to "Uncategorized". Are you sure?')) {
+    if (!window.confirm('This will reset all cashflow records to "Uncategorized" and recategorize them. Are you sure?')) {
+      return;
+    }
+
+    // Check if a recategorization job is already running
+    if (isRecategorizeRunning || isJobRunning(JOB_TYPE_RECATEGORIZE)) {
+      showWarning('A recategorization job is already running. Please wait for it to complete.');
       return;
     }
 
     try {
       const response = await expensesAPI.recategorize();
-      showSuccess(response.data.message || 'All records reset to Uncategorized');
-      await fetchExpenses();
-      await fetchSummary();
-      await fetchMonthlyComparison();
+      const { job_id: jobId, status, meta } = response.data || {};
+
+      if (!jobId) {
+        showError('Unable to start recategorization job');
+        return;
+      }
+
+      setRecategorizeJobId(jobId);
+      setRecategorizeJobStatus(status);
+      setRecategorizeStage(meta?.stage || 'queued');
+
+      // Show persistent notification for background job with jobType
+      const notificationId = showJobProgress('Recategorizing cashflow transactions', jobId, JOB_TYPE_RECATEGORIZE);
+      recategorizeNotificationIdRef.current = notificationId;
     } catch (error) {
-      console.error('Error recategorizing:', error);
-      showError('Error resetting categories');
+      console.error('Error starting recategorization:', error);
+      showError('Error starting recategorization job');
     }
   };
 
@@ -1300,10 +1431,16 @@ const Cashflow = () => {
           <Button
             variant="outlined"
             onClick={handleRecategorize}
+            disabled={isRecategorizeRunning}
             sx={{ mr: 1 }}
           >
-            Recategorize
+            {isRecategorizeRunning ? 'Recategorizing...' : 'Recategorize'}
           </Button>
+          {isRecategorizeRunning && (
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+              Running job ({recategorizeJobStatus || 'queued'}{recategorizeStage ? ` - ${formatStageLabel(recategorizeStage)}` : ''})...
+            </Typography>
+          )}
           <Button
             variant="contained"
             startIcon={<RefreshIcon />}

@@ -273,6 +273,8 @@ export const expensesAPI = {
     api.get(`/cashflow/convert-transactions/jobs/${jobId}`),
   recategorize: () =>
     api.post('/cashflow/recategorize'),
+  getRecategorizeJobStatus: (jobId) =>
+    api.get(`/cashflow/recategorize/jobs/${jobId}`),
 };
 
 export const importAPI = {
