@@ -1417,42 +1417,46 @@ const Cashflow = () => {
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={3}>
         <Typography variant="h4">Cash Flow</Typography>
-        <Box>
-          <Button
-            variant="outlined"
-            startIcon={<CategoryIcon />}
-            onClick={handleOpenCategoryDialog}
-            sx={{ mr: 1 }}
-          >
-            Manage Categories
-          </Button>
-          <Button
-            variant="outlined"
-            onClick={handleRecategorize}
-            disabled={isRecategorizeRunning}
-            sx={{ mr: 1 }}
-          >
-            {isRecategorizeRunning ? 'Recategorizing...' : 'Recategorize'}
-          </Button>
-          {isRecategorizeRunning && (
-            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
-              Running job ({recategorizeJobStatus || 'queued'}{recategorizeStage ? ` - ${formatStageLabel(recategorizeStage)}` : ''})...
-            </Typography>
-          )}
-          <Button
-            variant="contained"
-            startIcon={<RefreshIcon />}
-            onClick={handleConvertTransactions}
-            disabled={isConversionRunning}
-          >
-            {isConversionRunning ? 'Import in Progress' : 'Import from Transactions'}
-          </Button>
-          {isConversionRunning && (
-            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
-              Running job ({conversionJobStatus || 'queued'}{conversionStage ? ` - ${formatStageLabel(conversionStage)}` : ''})...
-            </Typography>
+        <Box display="flex" flexDirection="column" alignItems="flex-end" gap={1}>
+          <Box display="flex" gap={1}>
+            <Button
+              variant="outlined"
+              startIcon={<CategoryIcon />}
+              onClick={handleOpenCategoryDialog}
+            >
+              Manage Categories
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleRecategorize}
+              disabled={isRecategorizeRunning}
+            >
+              {isRecategorizeRunning ? 'Recategorizing...' : 'Recategorize'}
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<RefreshIcon />}
+              onClick={handleConvertTransactions}
+              disabled={isConversionRunning}
+            >
+              {isConversionRunning ? 'Import in Progress' : 'Import from Transactions'}
+            </Button>
+          </Box>
+          {(isRecategorizeRunning || isConversionRunning) && (
+            <Box display="flex" flexDirection="column" alignItems="flex-end" gap={0.5}>
+              {isRecategorizeRunning && (
+                <Typography variant="body2" color="textSecondary">
+                  Recategorizing: {recategorizeJobStatus || 'queued'}{recategorizeStage ? ` - ${formatStageLabel(recategorizeStage)}` : ''}
+                </Typography>
+              )}
+              {isConversionRunning && (
+                <Typography variant="body2" color="textSecondary">
+                  Import: {conversionJobStatus || 'queued'}{conversionStage ? ` - ${formatStageLabel(conversionStage)}` : ''}
+                </Typography>
+              )}
+            </Box>
           )}
         </Box>
       </Box>

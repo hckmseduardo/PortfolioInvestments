@@ -636,7 +636,7 @@ async def update_expense(
 ):
     db = get_db_service(session)
 
-    existing_expense = db.find_one("expenses", {"id": expense_id})
+    existing_expense = db.find_one("cashflow", {"id": expense_id})
     if not existing_expense:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -651,13 +651,13 @@ async def update_expense(
         )
 
     db.update(
-        "expenses",
+        "cashflow",
         {"id": expense_id},
         expense_update.model_dump()
     )
 
     session.commit()
-    updated_expense = db.find_one("expenses", {"id": expense_id})
+    updated_expense = db.find_one("cashflow", {"id": expense_id})
     return Expense(**updated_expense)
 
 @router.delete("/{expense_id}")
@@ -668,7 +668,7 @@ async def delete_expense(
 ):
     db = get_db_service(session)
 
-    existing_expense = db.find_one("expenses", {"id": expense_id})
+    existing_expense = db.find_one("cashflow", {"id": expense_id})
     if not existing_expense:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -862,7 +862,7 @@ async def update_expense_category(
     """
     db = get_db_service(session)
 
-    existing_expense = db.find_one("expenses", {"id": expense_id})
+    existing_expense = db.find_one("cashflow", {"id": expense_id})
     if not existing_expense:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -899,7 +899,7 @@ async def update_expense_category(
 
     # Update expense category with high confidence (user-confirmed)
     db.update(
-        "expenses",
+        "cashflow",
         {"id": expense_id},
         {
             "category": category,
@@ -909,7 +909,7 @@ async def update_expense_category(
     )
 
     session.commit()
-    updated_expense = db.find_one("expenses", {"id": expense_id})
+    updated_expense = db.find_one("cashflow", {"id": expense_id})
     return Expense(**updated_expense)
 
 @router.get("/monthly-comparison")
