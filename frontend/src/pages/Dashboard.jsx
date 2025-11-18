@@ -53,7 +53,9 @@ const GRID_MARGIN = [16, 16];
 const DRAG_START_DELAY = 300;
 const INSIGHT_TABS = [
   { id: 'performance', label: 'Performance', shortLabel: 'Performance' },
-  { id: 'types', label: 'Breakdown by Asset Types', shortLabel: 'Asset Types' },
+  { id: 'types', label: 'Breakdown by Security Types', shortLabel: 'Security Types' },
+  { id: 'subtypes', label: 'Breakdown by Subtypes', shortLabel: 'Subtypes' },
+  { id: 'sectors', label: 'Breakdown by Sectors', shortLabel: 'Sectors' },
   { id: 'industries', label: 'Breakdown by Industries', shortLabel: 'Industries' }
 ];
 const INSIGHT_AUTO_INTERVAL = 10000;
@@ -492,6 +494,8 @@ const Dashboard = () => {
   const [dividendSummary, setDividendSummary] = useState(null);
   const [industryBreakdown, setIndustryBreakdown] = useState([]);
   const [typeBreakdown, setTypeBreakdown] = useState([]);
+  const [sectorBreakdown, setSectorBreakdown] = useState([]);
+  const [subtypeBreakdown, setSubtypeBreakdown] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -682,12 +686,14 @@ const Dashboard = () => {
       setFetching(true);
       try {
         const asOfParam = valuationDate || undefined;
-        const [summaryRes, accountsRes, dividendsRes, industryRes, typeRes] = await Promise.all([
+        const [summaryRes, accountsRes, dividendsRes, industryRes, typeRes, sectorRes, subtypeRes] = await Promise.all([
           positionsAPI.getSummary(asOfParam),
           accountsAPI.getAll(),
           dividendsAPI.getSummary(undefined, undefined, asOfParam),
           positionsAPI.getIndustryBreakdown({ as_of_date: asOfParam }),
-          positionsAPI.getTypeBreakdown({ as_of_date: asOfParam })
+          positionsAPI.getTypeBreakdown({ as_of_date: asOfParam }),
+          positionsAPI.getSectorBreakdown({ as_of_date: asOfParam }),
+          positionsAPI.getSubtypeBreakdown({ as_of_date: asOfParam })
         ]);
 
         setSummary(summaryRes.data);
@@ -695,6 +701,8 @@ const Dashboard = () => {
         setDividendSummary(dividendsRes.data);
         setIndustryBreakdown(industryRes.data || []);
         setTypeBreakdown(typeRes.data || []);
+        setSectorBreakdown(sectorRes.data || []);
+        setSubtypeBreakdown(subtypeRes.data || []);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
@@ -794,8 +802,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
   const totalGains = capitalGains + totalDividends;
 
   const totalAccountsBalance = useMemo(() => {
-    return Object.values(accountBalances).reduce((sum, balance) => sum + balance, 0);
-  }, [accountBalances]);
+    // Exclude mortgage and loan accounts from available balance
+    const loanAccountTypes = ['mortgage', 'auto_loan', 'student_loan', 'personal_loan', 'business_loan'];
+    const filteredAccounts = accounts.filter(account => !loanAccountTypes.includes(account.account_type));
+    return filteredAccounts.reduce((sum, account) => sum + (accountBalances[account.id] || 0), 0);
+  }, [accountBalances, accounts]);
 
   const persistLayout = useCallback(async (profile, layout) => {
     try {
@@ -864,12 +875,14 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
       await positionsAPI.refreshPrices();
       // Refetch all data after refreshing prices
       const asOfParam = valuationDate || undefined;
-      const [summaryRes, accountsRes, dividendsRes, industryRes, typeRes] = await Promise.all([
+      const [summaryRes, accountsRes, dividendsRes, industryRes, typeRes, sectorRes, subtypeRes] = await Promise.all([
         positionsAPI.getSummary(asOfParam),
         accountsAPI.getAll(),
         dividendsAPI.getSummary(undefined, undefined, asOfParam),
         positionsAPI.getIndustryBreakdown({ as_of_date: asOfParam }),
-        positionsAPI.getTypeBreakdown({ as_of_date: asOfParam })
+        positionsAPI.getTypeBreakdown({ as_of_date: asOfParam }),
+        positionsAPI.getSectorBreakdown({ as_of_date: asOfParam }),
+        positionsAPI.getSubtypeBreakdown({ as_of_date: asOfParam })
       ]);
 
       setSummary(summaryRes.data);
@@ -877,6 +890,8 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
       setDividendSummary(dividendsRes.data);
       setIndustryBreakdown(industryRes.data || []);
       setTypeBreakdown(typeRes.data || []);
+      setSectorBreakdown(sectorRes.data || []);
+      setSubtypeBreakdown(subtypeRes.data || []);
       await fetchPerformanceSeries();
     } catch (error) {
       console.error('Error refreshing prices:', error);
@@ -1114,7 +1129,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                   mb: 0.5
                 }}
               >
-                Total Accounts Balance
+                Available Balance
               </Typography>
               <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ gap: 0.5 }}>
                 <Box sx={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
@@ -1140,7 +1155,11 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                       lineHeight: 1.2
                     }}
                   >
-                    {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}
+                    {(() => {
+                      const loanAccountTypes = ['mortgage', 'auto_loan', 'student_loan', 'personal_loan', 'business_loan'];
+                      const filteredCount = accounts.filter(account => !loanAccountTypes.includes(account.account_type)).length;
+                      return `${filteredCount} ${filteredCount === 1 ? 'account' : 'accounts'} (excl. loans)`;
+                    })()}
                   </Typography>
                 </Box>
                 <Box sx={{
@@ -1320,7 +1339,7 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                   borderColor: 'divider'
                 }}>
                   <Typography variant="subtitle2" sx={{ mb: { xs: 1.5, sm: 2 }, fontWeight: 600, flexShrink: 0, fontSize: { xs: '0.875rem', sm: '1rem' } }}>
-                    Asset Types Breakdown
+                    Security Types Breakdown
                   </Typography>
                   <Stack spacing={{ xs: 1, sm: 1.5 }} sx={{
                     flexGrow: 1,
@@ -1359,6 +1378,232 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
                             }}
                           >
                             {slice.type_name}
+                          </Typography>
+                        </Box>
+                        <Box textAlign="right" sx={{ flexShrink: 0, ml: 2 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap', fontSize: { xs: '0.8125rem', sm: '0.875rem' } }}>
+                            {formatCurrency(slice.market_value)}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary" sx={{ fontSize: { xs: '0.6875rem', sm: '0.75rem' } }}>
+                            {formatPercent(slice.percentage)}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Box>
+              </Grid>
+            </Grid>
+          );
+        } else if (insightActiveTab === 'sectors') {
+          insightBody = sectorBreakdown.length === 0 ? (
+            <Box display="flex" alignItems="center" justifyContent="center" height="100%" minHeight={200}>
+              <Typography color="textSecondary">Sector information will appear when available from position data.</Typography>
+            </Box>
+          ) : (
+            <Grid container spacing={{ xs: 2, sm: 3 }} sx={{ height: '100%' }}>
+              <Grid item xs={12} md={6} sx={{ height: { xs: 280, sm: 320, md: '100%' }, minWidth: 0 }}>
+                <Box sx={{ height: '100%', minHeight: { xs: 250, sm: 280 } }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={sectorBreakdown}
+                        dataKey="market_value"
+                        nameKey="sector_name"
+                        innerRadius={isMobile ? "35%" : "25%"}
+                        outerRadius={isMobile ? "75%" : "90%"}
+                        paddingAngle={1}
+                        cx="50%"
+                        cy="50%"
+                      >
+                        {sectorBreakdown.map((slice, index) => (
+                          <Cell
+                            key={`sector-${slice.sector_name}-${index}`}
+                            fill={slice.color || '#b0bec5'}
+                          />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip
+                        formatter={(value, name, payload) => [
+                          `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
+                          payload?.payload?.sector_name || name
+                        ]}
+                        contentStyle={{
+                          fontSize: isMobile ? 12 : 14,
+                          borderRadius: 8,
+                          border: '1px solid #e0e0e0'
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Grid>
+              <Grid item xs={12} md={6} sx={{ minWidth: 0, height: { xs: 'auto', md: '100%' } }}>
+                <Box sx={{
+                  height: { xs: 'auto', md: '100%' },
+                  maxHeight: { xs: 400, md: '100%' },
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minHeight: 0,
+                  p: { xs: 1.5, sm: 2 },
+                  bgcolor: 'background.default',
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: 'divider'
+                }}>
+                  <Typography variant="subtitle2" sx={{ mb: { xs: 1.5, sm: 2 }, fontWeight: 600, flexShrink: 0, fontSize: { xs: '0.875rem', sm: '1rem' } }}>
+                    Sector Breakdown
+                  </Typography>
+                  <Stack spacing={{ xs: 1, sm: 1.5 }} sx={{
+                    flexGrow: 1,
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                    pr: 1,
+                    minHeight: 0,
+                    maxHeight: { xs: 350, md: 'none' }
+                  }}>
+                    {sectorBreakdown.map((slice, index) => (
+                      <Box
+                        key={`sector-list-${slice.sector_name}-${index}`}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexShrink: 0,
+                          p: { xs: 1, sm: 1.5 },
+                          bgcolor: 'background.paper',
+                          borderRadius: 1,
+                          '&:hover': {
+                            bgcolor: 'action.hover'
+                          }
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 1.5 }, minWidth: 0, flexShrink: 1 }}>
+                          {renderColorSwatch(slice.color)}
+                          <Typography
+                            variant="body2"
+                            noWrap
+                            sx={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+                              fontWeight: 500
+                            }}
+                          >
+                            {slice.sector_name}
+                          </Typography>
+                        </Box>
+                        <Box textAlign="right" sx={{ flexShrink: 0, ml: 2 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap', fontSize: { xs: '0.8125rem', sm: '0.875rem' } }}>
+                            {formatCurrency(slice.market_value)}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary" sx={{ fontSize: { xs: '0.6875rem', sm: '0.75rem' } }}>
+                            {formatPercent(slice.percentage)}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Box>
+              </Grid>
+            </Grid>
+          );
+        } else if (insightActiveTab === 'subtypes') {
+          insightBody = subtypeBreakdown.length === 0 ? (
+            <Box display="flex" alignItems="center" justifyContent="center" height="100%" minHeight={200}>
+              <Typography color="textSecondary">Subtype information will appear when available from position data.</Typography>
+            </Box>
+          ) : (
+            <Grid container spacing={{ xs: 2, sm: 3 }} sx={{ height: '100%' }}>
+              <Grid item xs={12} md={6} sx={{ height: { xs: 280, sm: 320, md: '100%' }, minWidth: 0 }}>
+                <Box sx={{ height: '100%', minHeight: { xs: 250, sm: 280 } }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={subtypeBreakdown}
+                        dataKey="market_value"
+                        nameKey="subtype_name"
+                        innerRadius={isMobile ? "35%" : "25%"}
+                        outerRadius={isMobile ? "75%" : "90%"}
+                        paddingAngle={1}
+                        cx="50%"
+                        cy="50%"
+                      >
+                        {subtypeBreakdown.map((slice, index) => (
+                          <Cell
+                            key={`subtype-${slice.subtype_name}-${index}`}
+                            fill={slice.color || '#b0bec5'}
+                          />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip
+                        formatter={(value, name, payload) => [
+                          `${formatCurrency(value)} (${formatPercent(payload?.payload?.percentage || 0)})`,
+                          payload?.payload?.subtype_name || name
+                        ]}
+                        contentStyle={{
+                          fontSize: isMobile ? 12 : 14,
+                          borderRadius: 8,
+                          border: '1px solid #e0e0e0'
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Grid>
+              <Grid item xs={12} md={6} sx={{ minWidth: 0, height: { xs: 'auto', md: '100%' } }}>
+                <Box sx={{
+                  height: { xs: 'auto', md: '100%' },
+                  maxHeight: { xs: 400, md: '100%' },
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minHeight: 0,
+                  p: { xs: 1.5, sm: 2 },
+                  bgcolor: 'background.default',
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: 'divider'
+                }}>
+                  <Typography variant="subtitle2" sx={{ mb: { xs: 1.5, sm: 2 }, fontWeight: 600, flexShrink: 0, fontSize: { xs: '0.875rem', sm: '1rem' } }}>
+                    Subtype Breakdown
+                  </Typography>
+                  <Stack spacing={{ xs: 1, sm: 1.5 }} sx={{
+                    flexGrow: 1,
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                    pr: 1,
+                    minHeight: 0,
+                    maxHeight: { xs: 350, md: 'none' }
+                  }}>
+                    {subtypeBreakdown.map((slice, index) => (
+                      <Box
+                        key={`subtype-list-${slice.subtype_name}-${index}`}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexShrink: 0,
+                          p: { xs: 1, sm: 1.5 },
+                          bgcolor: 'background.paper',
+                          borderRadius: 1,
+                          '&:hover': {
+                            bgcolor: 'action.hover'
+                          }
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 1.5 }, minWidth: 0, flexShrink: 1 }}>
+                          {renderColorSwatch(slice.color)}
+                          <Typography
+                            variant="body2"
+                            noWrap
+                            sx={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+                              fontWeight: 500
+                            }}
+                          >
+                            {slice.subtype_name}
                           </Typography>
                         </Box>
                         <Box textAlign="right" sx={{ flexShrink: 0, ml: 2 }}>
@@ -1495,8 +1740,12 @@ const formatPercent = (value) => `${(value ?? 0).toFixed(1)}%`;
           insightActiveTab === 'performance'
             ? 'Values are sampled at closing balances for the selected period.'
             : insightActiveTab === 'types'
-              ? 'Allocation based on the instrument type assigned to each position.'
-              : 'Breakdown based on industry classifications.';
+              ? 'Breakdown by security type from Plaid (equity, ETF, cryptocurrency, etc.).'
+              : insightActiveTab === 'sectors'
+                ? 'Breakdown by market sector (e.g., Technology, Finance, Healthcare).'
+                : insightActiveTab === 'subtypes'
+                  ? 'Breakdown by security subtype (e.g., Common Stock, Preferred Stock, ETF).'
+                  : 'Breakdown by industry from Plaid data.';
 
         return (
           <Paper

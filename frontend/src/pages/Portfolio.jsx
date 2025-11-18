@@ -295,27 +295,32 @@ const Portfolio = () => {
     return result;
   };
 
-  // Fetch available snapshot dates
+  // Fetch available snapshot dates (refetch when account changes)
   useEffect(() => {
     const fetchSnapshotDates = async () => {
       try {
-        const response = await positionsAPI.getSnapshotDates();
+        const response = await positionsAPI.getSnapshotDates(selectedAccountId || null);
         const dates = response.data.snapshot_dates || [];
         setSnapshotDates(dates);
-        // Default to the latest snapshot (first in the list)
-        if (dates.length > 0 && !selectedSnapshotDate) {
+
+        // Reset to the latest snapshot when account changes or on initial load
+        if (dates.length > 0) {
           setSelectedSnapshotDate(dates[0]);
+        } else {
+          setSelectedSnapshotDate(null);
         }
-        console.log('Loaded snapshot dates:', dates);
+
+        console.log('Loaded snapshot dates for account:', selectedAccountId || 'all', '- found', dates.length, 'dates');
       } catch (error) {
         console.error('Error fetching snapshot dates:', error);
         console.error('Error details:', error.response);
         // If auth fails, snapshots just won't be available - that's ok
         setSnapshotDates([]);
+        setSelectedSnapshotDate(null);
       }
     };
     fetchSnapshotDates();
-  }, []);
+  }, [selectedAccountId]);
 
   const typeLookup = useMemo(() => {
     const map = {};
@@ -383,13 +388,42 @@ const Portfolio = () => {
         const data = positionsRes.data || [];
         console.log('Snapshot data received:', data.length, 'positions');
 
+        // Aggregate positions by ticker when viewing all accounts
+        let aggregatedData = data;
+        if (!selectedAccountId && data.length > 0) {
+          const tickerMap = new Map();
+
+          data.forEach(pos => {
+            const ticker = pos.ticker;
+            if (tickerMap.has(ticker)) {
+              // Aggregate existing position
+              const existing = tickerMap.get(ticker);
+              existing.quantity += pos.quantity || 0;
+              existing.book_value += pos.book_value || 0;
+              existing.market_value += pos.market_value || 0;
+              // Recalculate average price
+              existing.price = existing.quantity > 0 ? existing.market_value / existing.quantity : 0;
+            } else {
+              // Add new position (create a copy to avoid mutating original)
+              tickerMap.set(ticker, {
+                ...pos,
+                account_id: 'aggregated', // Mark as aggregated
+                account_name: 'All Accounts'
+              });
+            }
+          });
+
+          aggregatedData = Array.from(tickerMap.values());
+          console.log('Aggregated positions:', aggregatedData.length, 'unique tickers');
+        }
+
         // Calculate summary from snapshot data
-        const totalMarketValue = data.reduce((sum, pos) => sum + (pos.market_value || 0), 0);
-        const totalBookValue = data.reduce((sum, pos) => sum + (pos.book_value || 0), 0);
+        const totalMarketValue = aggregatedData.reduce((sum, pos) => sum + (pos.market_value || 0), 0);
+        const totalBookValue = aggregatedData.reduce((sum, pos) => sum + (pos.book_value || 0), 0);
         const totalGainLoss = totalMarketValue - totalBookValue;
         const totalGainLossPercent = totalBookValue !== 0 ? (totalGainLoss / totalBookValue) * 100 : 0;
 
-        setPositions(data);
+        setPositions(aggregatedData);
         setSummary({
           total_market_value: totalMarketValue,
           total_book_value: totalBookValue,
@@ -404,7 +438,7 @@ const Portfolio = () => {
         const subtypeMap = {};
         const sectorMap = {};
 
-        data.forEach(pos => {
+        aggregatedData.forEach(pos => {
           if (pos.industry) {
             if (!industryMap[pos.industry]) {
               industryMap[pos.industry] = {
@@ -1797,7 +1831,7 @@ const Portfolio = () => {
                   const priceFailed = position.price_failed && position.ticker !== 'CASH';
 
                   return (
-                  <TableRow key={position.ticker}>
+                  <TableRow key={`${position.ticker}-${position.account_id}`}>
                     <TableCell>
                       <Chip
                         label={position.ticker}

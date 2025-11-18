@@ -31,7 +31,9 @@ import {
   TableSortLabel,
   Checkbox,
   useMediaQuery,
-  useTheme
+  useTheme,
+  Card,
+  CardContent
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -85,6 +87,7 @@ const TABLE_FILTER_DEFAULTS = {
   date: '',
   description: '',
   account: '',
+  category: '',
   amountMin: '',
   amountMax: '',
   notes: ''
@@ -1058,10 +1061,9 @@ const Cashflow = () => {
     return category?.type || 'money_out';
   };
 
-  // Filter out transfer-related categories from Money In/Out graphs
-  const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
-  const moneyInData = categoryData.filter(item => getCategoryType(item.name) === 'money_in' && !transferCategories.includes(item.name));
-  const moneyOutData = categoryData.filter(item => getCategoryType(item.name) === 'money_out' && !transferCategories.includes(item.name));
+  // Prepare Money In and Money Out pie chart data
+  const moneyInData = categoryData.filter(item => getCategoryType(item.name) === 'money_in');
+  const moneyOutData = categoryData.filter(item => getCategoryType(item.name) === 'money_out');
 
   const totalMoneyIn = moneyInData.reduce((sum, item) => sum + item.value, 0);
   const totalMoneyOut = moneyOutData.reduce((sum, item) => sum + item.value, 0);
@@ -1121,6 +1123,20 @@ const Cashflow = () => {
     const filtered = expenses.filter((expense) => {
       const expenseDate = formatDateToInput(new Date(expense.date));
 
+      // Filter by transaction type based on active tab (not for Transfers tab)
+      if (tabValue === 1) {
+        // Money Out tab: show only Money Out transactions
+        if (expense.type !== 'Money Out') {
+          return false;
+        }
+      } else if (tabValue === 2) {
+        // Money In tab: show only Money In transactions
+        if (expense.type !== 'Money In') {
+          return false;
+        }
+      }
+      // Note: For Transfers tab (tabValue === 3), filtering is handled separately in the Transfers tab code
+
       // Filter by selected category (if any)
       if (activeCategory && (expense.category || 'Uncategorized') !== activeCategory) {
         return false;
@@ -1179,6 +1195,24 @@ const Cashflow = () => {
 
     return sorted;
   }, [expenses, moneyOutFilters, moneyInFilters, moneyOutSortConfig, moneyInSortConfig, moneyOutCategory, moneyInCategory, accounts, tabValue]);
+
+  // Calculate filtered transaction statistics
+  const transactionStats = useMemo(() => {
+    const moneyInCount = expenses.filter(expense =>
+      expense.type === 'Money In'
+    ).length;
+
+    const moneyOutCount = expenses.filter(expense =>
+      expense.type === 'Money Out'
+    ).length;
+
+    // Only count Transfer category
+    const transferCount = expenses.filter(expense =>
+      expense.category === 'Transfer'
+    ).length;
+
+    return { moneyInCount, moneyOutCount, transferCount };
+  }, [expenses]);
 
   useEffect(() => {
     setSelectedExpenseIds((prev) =>
@@ -1247,7 +1281,7 @@ const Cashflow = () => {
 
       {/* Filter Cards */}
       <Grid container spacing={isMobile ? 2 : 3} sx={{ mb: 3 }}>
-        <Grid item xs={12}>
+        <Grid item xs={12} md={3}>
           <Paper sx={{ p: isMobile ? 2 : 3 }}>
             <Typography
               color="textSecondary"
@@ -1285,6 +1319,57 @@ const Cashflow = () => {
                 ))}
               </Select>
             </FormControl>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Paper sx={{ p: isMobile ? 2 : 3, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <Typography
+              color="textSecondary"
+              sx={{
+                fontWeight: 600,
+                fontSize: isMobile ? '0.75rem' : '0.75rem',
+                mb: 0.5
+              }}
+            >
+              Money In
+            </Typography>
+            <Typography variant={isMobile ? 'h5' : 'h4'} sx={{ color: '#4CAF50', fontWeight: 600 }}>
+              {transactionStats.moneyInCount.toLocaleString()}
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Paper sx={{ p: isMobile ? 2 : 3, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <Typography
+              color="textSecondary"
+              sx={{
+                fontWeight: 600,
+                fontSize: isMobile ? '0.75rem' : '0.75rem',
+                mb: 0.5
+              }}
+            >
+              Money Out
+            </Typography>
+            <Typography variant={isMobile ? 'h5' : 'h4'} sx={{ color: '#F44336', fontWeight: 600 }}>
+              {transactionStats.moneyOutCount.toLocaleString()}
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Paper sx={{ p: isMobile ? 2 : 3, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <Typography
+              color="textSecondary"
+              sx={{
+                fontWeight: 600,
+                fontSize: isMobile ? '0.75rem' : '0.75rem',
+                mb: 0.5
+              }}
+            >
+              Transfers
+            </Typography>
+            <Typography variant={isMobile ? 'h5' : 'h4'} sx={{ color: '#2196F3', fontWeight: 600 }}>
+              {transactionStats.transferCount.toLocaleString()}
+            </Typography>
           </Paper>
         </Grid>
       </Grid>
@@ -1750,7 +1835,6 @@ const Cashflow = () => {
                       Notes
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell align="center">Actions</TableCell>
                 </TableRow>
                 <TableRow sx={stickyFilterRowSx}>
                   <TableCell />
@@ -1872,7 +1956,7 @@ const Cashflow = () => {
                       )}
                     </Stack>
                   </TableCell>
-                  <TableCell align="center">
+                  <TableCell>
                     <Button
                       variant="text"
                       size="small"
@@ -1888,11 +1972,7 @@ const Cashflow = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {displayedExpenses.filter(exp => {
-                  const category = exp.category || 'Uncategorized';
-                  const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
-                  return getCategoryType(category) === 'money_out' && !transferCategories.includes(category);
-                }).length === 0 ? (
+                {displayedExpenses.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} align="center">
                       <Typography color="textSecondary" py={3}>
@@ -1901,11 +1981,7 @@ const Cashflow = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  displayedExpenses.filter(exp => {
-                    const category = exp.category || 'Uncategorized';
-                    const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
-                    return getCategoryType(category) === 'money_out' && !transferCategories.includes(category);
-                  }).map((expense) => {
+                  displayedExpenses.map((expense) => {
                     const accountLabel = getAccountLabel(expense.account_id);
                     const isSelected = selectedExpenseIds.includes(expense.id);
                     return (
@@ -1974,15 +2050,6 @@ const Cashflow = () => {
                           </Box>
                         </TableCell>
                         <TableCell>{expense.notes || '-'}</TableCell>
-                        <TableCell align="center">
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => handleDeleteExpense(expense.id)}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </TableCell>
                       </TableRow>
                     );
                   })
@@ -2143,7 +2210,6 @@ const Cashflow = () => {
                       Notes
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell align="center">Actions</TableCell>
                 </TableRow>
                 <TableRow sx={stickyFilterRowSx}>
                   <TableCell />
@@ -2265,7 +2331,7 @@ const Cashflow = () => {
                       )}
                     </Stack>
                   </TableCell>
-                  <TableCell align="center">
+                  <TableCell>
                     <Button
                       variant="text"
                       size="small"
@@ -2281,11 +2347,7 @@ const Cashflow = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {displayedExpenses.filter(exp => {
-                  const category = exp.category || 'Uncategorized';
-                  const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
-                  return getCategoryType(category) === 'money_in' && !transferCategories.includes(category);
-                }).length === 0 ? (
+                {displayedExpenses.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} align="center">
                       <Typography color="textSecondary" py={3}>
@@ -2294,11 +2356,7 @@ const Cashflow = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  displayedExpenses.filter(exp => {
-                    const category = exp.category || 'Uncategorized';
-                    const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
-                    return getCategoryType(category) === 'money_in' && !transferCategories.includes(category);
-                  }).map((expense) => {
+                  displayedExpenses.map((expense) => {
                     const accountLabel = getAccountLabel(expense.account_id);
                     const isSelected = selectedIncomeIds.includes(expense.id);
                     return (
@@ -2367,15 +2425,6 @@ const Cashflow = () => {
                           </Box>
                         </TableCell>
                         <TableCell>{expense.notes || '-'}</TableCell>
-                        <TableCell align="center">
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => handleDeleteExpense(expense.id)}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </TableCell>
                       </TableRow>
                     );
                   })
@@ -2457,10 +2506,10 @@ const Cashflow = () => {
       {tabValue === 3 && (
         <Paper sx={{ p: { xs: 2, md: 3 } }}>
           <Typography variant="h5" gutterBottom>
-            Transfers Between Accounts
+            Transfers
           </Typography>
           <Typography variant="body2" color="textSecondary" gutterBottom sx={{ mb: 3 }}>
-            Inter-account transfers, credit card payments, and other payment transactions. Money out shows source account with negative amount, money in shows destination account with positive amount.
+            All transactions categorized as "Transfer" from Money In and Money Out tabs.
           </Typography>
 
           <TableContainer>
@@ -2492,10 +2541,19 @@ const Cashflow = () => {
                       direction={transfersSortConfig.field === 'account' ? transfersSortConfig.direction : 'asc'}
                       onClick={() => handleTableSort('account')}
                     >
-                      From Account
+                      Source Account
                     </TableSortLabel>
                   </TableCell>
-                  <TableCell>To Account</TableCell>
+                  <TableCell>Destination Account</TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={transfersSortConfig.field === 'category'}
+                      direction={transfersSortConfig.field === 'category' ? transfersSortConfig.direction : 'asc'}
+                      onClick={() => handleTableSort('category')}
+                    >
+                      Category
+                    </TableSortLabel>
+                  </TableCell>
                   <TableCell align="right">
                     <TableSortLabel
                       active={transfersSortConfig.field === 'amount'}
@@ -2506,7 +2564,6 @@ const Cashflow = () => {
                     </TableSortLabel>
                   </TableCell>
                   <TableCell>Notes</TableCell>
-                  <TableCell align="center">Actions</TableCell>
                 </TableRow>
 
                 {/* Filter Row */}
@@ -2548,7 +2605,7 @@ const Cashflow = () => {
                     <Stack direction="row" spacing={0.5} alignItems="center">
                       <TextField
                         size="small"
-                        placeholder="Search account"
+                        placeholder="Search source"
                         value={transfersFilters.account}
                         onChange={(e) => handleTableFilterChange('account', e.target.value)}
                         fullWidth
@@ -2561,6 +2618,22 @@ const Cashflow = () => {
                     </Stack>
                   </TableCell>
                   <TableCell />
+                  <TableCell>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TextField
+                        size="small"
+                        placeholder="Search category"
+                        value={transfersFilters.category}
+                        onChange={(e) => handleTableFilterChange('category', e.target.value)}
+                        fullWidth
+                      />
+                      {transfersFilters.category && (
+                        <IconButton size="small" onClick={() => handleTableFilterChange('category', '')} title="Clear category filter">
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Stack>
+                  </TableCell>
                   <TableCell align="right">
                     <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
                       <TextField
@@ -2597,7 +2670,7 @@ const Cashflow = () => {
                       )}
                     </Stack>
                   </TableCell>
-                  <TableCell align="center">
+                  <TableCell>
                     <Button
                       variant="text"
                       size="small"
@@ -2611,25 +2684,25 @@ const Cashflow = () => {
               </TableHead>
               <TableBody>
                 {(() => {
-                  // Get all transfer-related transactions (transfers, payments, credit card payments)
-                  const transferCategories = ['Transfer', 'Payment', 'Credit Card Payment'];
-                  const transferTransactions = expenses.filter(exp => transferCategories.includes(exp.category));
-
-                  // Map to display format
-                  let displayTransfers = transferTransactions.map(t => ({
-                    date: t.date,
-                    description: t.description,
-                    fromAccount: t.amount < 0 ? t.account_id : null,
-                    toAccount: t.amount > 0 ? t.account_id : null,
-                    amount: t.amount, // Keep original sign (negative for money out, positive for money in)
-                    notes: t.notes || '',
-                    id: t.id
-                  }));
+                  // Get all transactions with Transfer category from Money In or Money Out tabs
+                  let displayTransfers = expenses
+                    .filter(exp => exp.category === 'Transfer')
+                    .map(t => ({
+                      id: t.id,
+                      date: t.date,
+                      description: t.description,
+                      account_id: t.account_id,
+                      category: t.category,
+                      type: t.type, // Money In or Money Out
+                      amount: t.transaction_amount != null ? t.transaction_amount : 0,
+                      notes: t.notes || ''
+                    }));
 
                   // Apply filters
                   const normalizedFilters = {
                     description: transfersFilters.description.trim().toLowerCase(),
                     account: transfersFilters.account.trim().toLowerCase(),
+                    category: transfersFilters.category.trim().toLowerCase(),
                     notes: transfersFilters.notes.trim().toLowerCase()
                   };
 
@@ -2648,18 +2721,24 @@ const Cashflow = () => {
                     }
 
                     if (normalizedFilters.account) {
-                      const fromAccountLabel = transfer.fromAccount ? getAccountLabel(transfer.fromAccount).toLowerCase() : '';
-                      const toAccountLabel = transfer.toAccount ? getAccountLabel(transfer.toAccount).toLowerCase() : '';
-                      if (!fromAccountLabel.includes(normalizedFilters.account) && !toAccountLabel.includes(normalizedFilters.account)) {
+                      const accountLabel = getAccountLabel(transfer.account_id).toLowerCase();
+                      if (!accountLabel.includes(normalizedFilters.account)) {
                         return false;
                       }
                     }
 
-                    if (transfersFilters.amountMin && Number(transfer.amount) < Number(transfersFilters.amountMin)) {
+                    if (normalizedFilters.category) {
+                      const category = String(transfer.category || 'Uncategorized').toLowerCase();
+                      if (!category.includes(normalizedFilters.category)) {
+                        return false;
+                      }
+                    }
+
+                    if (transfersFilters.amountMin && Math.abs(Number(transfer.amount)) < Number(transfersFilters.amountMin)) {
                       return false;
                     }
 
-                    if (transfersFilters.amountMax && Number(transfer.amount) > Number(transfersFilters.amountMax)) {
+                    if (transfersFilters.amountMax && Math.abs(Number(transfer.amount)) > Number(transfersFilters.amountMax)) {
                       return false;
                     }
 
@@ -2687,8 +2766,12 @@ const Cashflow = () => {
                         valueB = String(b.description || '').toLowerCase();
                         break;
                       case 'account':
-                        valueA = a.fromAccount ? getAccountLabel(a.fromAccount).toLowerCase() : (a.toAccount ? getAccountLabel(a.toAccount).toLowerCase() : '');
-                        valueB = b.fromAccount ? getAccountLabel(b.fromAccount).toLowerCase() : (b.toAccount ? getAccountLabel(b.toAccount).toLowerCase() : '');
+                        valueA = getAccountLabel(a.account_id).toLowerCase();
+                        valueB = getAccountLabel(b.account_id).toLowerCase();
+                        break;
+                      case 'category':
+                        valueA = String(a.category || 'Uncategorized').toLowerCase();
+                        valueB = String(b.category || 'Uncategorized').toLowerCase();
                         break;
                       case 'amount':
                         valueA = Number(a.amount);
@@ -2710,32 +2793,68 @@ const Cashflow = () => {
                   if (displayTransfers.length === 0) {
                     return (
                       <TableRow>
-                        <TableCell colSpan={7} align="center">
+                        <TableCell colSpan={8} align="center">
                           <Typography color="textSecondary" py={3}>
-                            No transfer or payment transactions found. Transfers, credit card payments, and other payments between accounts will appear here.
+                            No transfer transactions found. Transactions categorized as "Transfer" in Money In or Money Out tabs will appear here.
                           </Typography>
                         </TableCell>
                       </TableRow>
                     );
                   }
 
-                  return displayTransfers.map((transfer) => (
-                    <TableRow key={transfer.id}>
-                      <TableCell>{formatDate(transfer.date)}</TableCell>
-                      <TableCell>{transfer.description}</TableCell>
-                      <TableCell>
-                        {transfer.fromAccount ? getAccountLabel(transfer.fromAccount) : '-'}
-                      </TableCell>
-                      <TableCell>
-                        {transfer.toAccount ? getAccountLabel(transfer.toAccount) : '-'}
-                      </TableCell>
-                      <TableCell align="right" sx={{ color: transfer.amount < 0 ? 'error.main' : 'success.main' }}>
-                        {formatCurrency(transfer.amount)}
-                      </TableCell>
-                      <TableCell>{transfer.notes}</TableCell>
-                      <TableCell />
-                    </TableRow>
-                  ));
+                  return displayTransfers.map((transfer) => {
+                    // Money Out (negative amount) shows in Source Account
+                    // Money In (positive amount) shows in Destination Account
+                    const isMoneyOut = transfer.amount < 0;
+
+                    // Determine which category type to show based on transfer type
+                    const categoryType = transfer.type === 'Money In' ? 'money_in' : 'money_out';
+
+                    return (
+                      <TableRow key={transfer.id}>
+                        <TableCell>{formatDate(transfer.date)}</TableCell>
+                        <TableCell>{transfer.description}</TableCell>
+                        <TableCell>
+                          {isMoneyOut ? getAccountLabel(transfer.account_id) : '-'}
+                        </TableCell>
+                        <TableCell>
+                          {!isMoneyOut ? getAccountLabel(transfer.account_id) : '-'}
+                        </TableCell>
+                        <TableCell>
+                          <FormControl size="small" fullWidth>
+                            <Select
+                              value={transfer.category || 'Uncategorized'}
+                              onChange={(e) => handleCategoryChange(transfer.id, e.target.value)}
+                              sx={{
+                                bgcolor: getCategoryColor(transfer.category),
+                                color: 'white',
+                                '& .MuiOutlinedInput-notchedOutline': {
+                                  borderColor: 'transparent'
+                                },
+                                '&:hover .MuiOutlinedInput-notchedOutline': {
+                                  borderColor: 'rgba(255,255,255,0.5)'
+                                }
+                              }}
+                              renderValue={(value) => renderCategoryLabel(value, 'Uncategorized')}
+                            >
+                              <MenuItem key="uncategorized-category" value="Uncategorized">
+                                {renderCategoryLabel('Uncategorized', 'Uncategorized')}
+                              </MenuItem>
+                              {categories.filter(cat => cat.type === categoryType).map(cat => (
+                                <MenuItem key={cat.id} value={cat.name}>
+                                  {renderCategoryLabel(cat.name, cat.name)}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </TableCell>
+                        <TableCell align="right" sx={{ color: transfer.amount < 0 ? 'error.main' : 'success.main', fontWeight: 600 }}>
+                          {formatCurrency(transfer.amount)}
+                        </TableCell>
+                        <TableCell>{transfer.notes}</TableCell>
+                      </TableRow>
+                    );
+                  });
                 })()}
               </TableBody>
             </Table>

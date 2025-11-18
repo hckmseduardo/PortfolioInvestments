@@ -28,7 +28,7 @@ import {
   ListItemIcon,
   ListItemText
 } from '@mui/material';
-import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History, FilterList, MoreVert, DeleteSweep, VpnKey } from '@mui/icons-material';
+import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History, FilterList, MoreVert, DeleteSweep, VpnKey, Replay } from '@mui/icons-material';
 import { accountsAPI, transactionsAPI, plaidAPI } from '../services/api';
 import { stickyTableHeadSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
@@ -531,6 +531,45 @@ const AccountManagement = () => {
   const handleFullResyncCancel = () => {
     setResyncDialogOpen(false);
     setResyncItem(null);
+  };
+
+  const handleReplaySync = async () => {
+    handleActionMenuClose();
+    if (!selectedAccount || !selectedAccount.plaid_item_id) return;
+
+    const itemId = selectedAccount.plaid_item_id;
+    const institutionName = selectedAccount.plaid_institution_name;
+
+    setSyncingItems(prev => ({ ...prev, [itemId]: true }));
+    setError('');
+
+    try {
+      const response = await plaidAPI.replaySync(itemId);
+      const jobId = response.data.job_id;
+
+      setSyncJobIds(prev => ({ ...prev, [itemId]: jobId }));
+      setSyncJobStatuses(prev => ({ ...prev, [itemId]: 'queued' }));
+
+      // Show notification with job progress
+      const notifId = showJobProgress(
+        `Replaying sync from saved data for ${institutionName}...`,
+        jobId,
+        JOB_TYPE_PLAID_SYNC
+      );
+      syncNotificationIds.current[itemId] = notifId;
+
+      // Start polling for job status
+      const pollInterval = setInterval(() => {
+        pollSyncJob(itemId, jobId, institutionName);
+      }, 4000);
+      syncPollRefs.current[itemId] = pollInterval;
+
+      // Do initial poll after 2 seconds
+      setTimeout(() => pollSyncJob(itemId, jobId, institutionName), 2000);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to start replay sync. Make sure debug mode was enabled during the original sync.');
+      setSyncingItems(prev => ({ ...prev, [itemId]: false }));
+    }
   };
 
   const handleDisconnect = async (itemId, institutionName) => {
@@ -1122,6 +1161,18 @@ const AccountManagement = () => {
             <ListItemText
               primary="Update Permissions"
               secondary="Add investment access without disconnecting"
+            />
+          </MenuItem>
+        )}
+
+        {selectedAccount?.is_plaid_linked && (
+          <MenuItem onClick={handleReplaySync}>
+            <ListItemIcon>
+              <Replay fontSize="small" color="secondary" />
+            </ListItemIcon>
+            <ListItemText
+              primary="Replay Last Sync"
+              secondary="Reprocess saved sync data without calling Plaid API"
             />
           </MenuItem>
         )}

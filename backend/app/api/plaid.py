@@ -505,6 +505,40 @@ async def full_resync_transactions(
     )
 
 
+@router.post("/replay-sync/{plaid_item_id}", response_model=SyncResponse)
+async def replay_sync_from_debug(
+    plaid_item_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Replay the last sync using saved debug data instead of calling Plaid API.
+    This requires PLAID_DEBUG_MODE to have been enabled during the original sync.
+    Useful for testing sync logic changes without hitting API rate limits.
+    """
+    # Verify the item belongs to the user
+    plaid_item = db.query(PlaidItem).filter(
+        PlaidItem.id == plaid_item_id,
+        PlaidItem.user_id == current_user.id
+    ).first()
+
+    if not plaid_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plaid item not found"
+        )
+
+    # Enqueue replay job
+    job = enqueue_plaid_sync_job(current_user.id, plaid_item_id, full_resync=False, replay_mode=True)
+
+    logger.info(f"Replay sync job {job.id} enqueued for Plaid item {plaid_item_id}")
+
+    return SyncResponse(
+        job_id=job.id,
+        status="queued"
+    )
+
+
 @router.get("/sync-status/{job_id}")
 async def get_sync_status(
     job_id: str,

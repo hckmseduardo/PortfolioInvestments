@@ -140,7 +140,7 @@ def get_plaid_queue() -> Queue:
     return _plaid_queue
 
 
-def enqueue_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = False) -> Job:
+def enqueue_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = False, replay_mode: bool = False) -> Job:
     from app.tasks.plaid_sync import run_plaid_sync_job
 
     queue = get_plaid_queue()
@@ -148,7 +148,8 @@ def enqueue_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool =
         run_plaid_sync_job,
         user_id,
         plaid_item_id,
-        full_resync,
+        full_resync=full_resync,
+        replay_mode=replay_mode,
         job_timeout=settings.PLAID_JOB_TIMEOUT,
     )
     job.meta = job.meta or {}
@@ -157,10 +158,16 @@ def enqueue_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool =
             "user_id": user_id,
             "plaid_item_id": plaid_item_id,
             "full_resync": full_resync,
+            "replay_mode": replay_mode,
         }
     )
     job.save_meta()
-    sync_type = "FULL RESYNC" if full_resync else "incremental sync"
+    if replay_mode:
+        sync_type = "REPLAY from saved data"
+    elif full_resync:
+        sync_type = "FULL RESYNC"
+    else:
+        sync_type = "incremental sync"
     logger.info("Enqueued Plaid %s job %s for user %s, item %s", sync_type, job.id, user_id, plaid_item_id)
     return job
 

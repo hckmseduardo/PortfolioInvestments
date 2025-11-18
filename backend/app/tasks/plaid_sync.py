@@ -18,6 +18,7 @@ from app.services.plaid_client import plaid_client
 from app.services.plaid_transaction_mapper import create_mapper
 from app.services.encryption import encryption_service
 from app.services.transaction_classifier import transaction_classifier
+from app.services import plaid_replay
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ PLAID_DEBUG_DIR = Path("/app/logs/plaid_debug")
 PLAID_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = False):
+def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = False, replay_mode: bool = False):
     """
     Background job to sync transactions from Plaid
 
@@ -35,6 +36,7 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
         user_id: User ID
         plaid_item_id: Plaid item ID to sync
         full_resync: If True, fetch all available historical transactions
+        replay_mode: If True, use saved debug data instead of calling Plaid API
 
     Returns:
         Dictionary with sync results
@@ -51,9 +53,23 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
             logger.info(f"Plaid sync job {job.id} stage: {stage} progress: {progress}")
 
     try:
-        sync_mode = "FULL RESYNC" if full_resync else "incremental sync"
-        update_stage("starting", {"message": f"Initializing Plaid {sync_mode}...", "current": 0, "total": 0})
-        logger.info(f"Starting Plaid sync job - mode: {sync_mode}, user: {user_id}, item: {plaid_item_id}")
+        # Determine sync mode and load replay data if needed
+        replay_data = None
+        if replay_mode:
+            sync_mode = "REPLAY from saved data"
+            update_stage("starting", {"message": f"Initializing Plaid {sync_mode}...", "current": 0, "total": 0})
+            logger.info(f"Starting Plaid REPLAY job - user: {user_id}, item: {plaid_item_id}")
+
+            # Load saved debug data
+            replay_data = plaid_replay.get_latest_sync_data(user_id, plaid_item_id)
+            if not replay_data:
+                raise ValueError(f"No replay data found for user {user_id}, item {plaid_item_id}. Make sure PLAID_DEBUG_MODE was enabled during the original sync.")
+
+            logger.info(f"[REPLAY] Loaded replay data with: {list(replay_data.keys())}")
+        else:
+            sync_mode = "FULL RESYNC" if full_resync else "incremental sync"
+            update_stage("starting", {"message": f"Initializing Plaid {sync_mode}...", "current": 0, "total": 0})
+            logger.info(f"Starting Plaid sync job - mode: {sync_mode}, user: {user_id}, item: {plaid_item_id}")
 
         with get_db_context() as db:
             # Get Plaid item
@@ -68,8 +84,21 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
             # Security: Decrypt access token before using
             access_token = encryption_service.decrypt(plaid_item.access_token)
 
-            # Handle full resync vs incremental sync
-            if full_resync:
+            # Handle full resync vs incremental sync vs replay
+            if replay_mode and replay_data and 'transactions' in replay_data:
+                # REPLAY MODE: Use saved transaction data
+                logger.info(f"[REPLAY] Using saved transaction data instead of calling Plaid API")
+
+                transaction_debug_data = replay_data['transactions']
+                sync_result = plaid_replay.extract_transactions_from_debug_data(transaction_debug_data)
+
+                logger.info(
+                    f"[REPLAY] Extracted {len(sync_result['added'])} added, "
+                    f"{len(sync_result['modified'])} modified, "
+                    f"{len(sync_result['removed'])} removed transactions from debug data"
+                )
+
+            elif full_resync:
                 logger.info(f"[FULL RESYNC] Fetching historical transactions for item {plaid_item_id}")
                 update_stage("fetching_historical", {
                     "message": f"Fetching all transaction history from {plaid_item.institution_name}...",
@@ -388,7 +417,8 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                     expense_data = mapper.map_to_expense(
                         plaid_txn,
                         account_id,
-                        transaction.id
+                        transaction.id,
+                        txn_data['type']  # Pass transaction type
                     )
 
                     if expense_data:
@@ -397,6 +427,7 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                             account_id=account_id,
                             transaction_id=transaction.id,
                             date=expense_data['date'],
+                            type=expense_data['type'],  # Store transaction type
                             description=expense_data['description'],
                             amount=expense_data['amount'],
                             category=expense_data.get('category'),
@@ -572,6 +603,11 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 "total": 0
             })
 
+            # Pass replay data if available
+            investment_replay_data = None
+            if replay_mode and replay_data and 'investment_transactions' in replay_data:
+                investment_replay_data = replay_data['investment_transactions']
+
             investment_added = _sync_investment_transactions(
                 db=db,
                 plaid_item=plaid_item,
@@ -579,13 +615,26 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 plaid_account_map=plaid_account_map,
                 mapper=mapper,
                 update_stage=update_stage,
-                full_resync=full_resync
+                full_resync=full_resync,
+                replay_data=investment_replay_data
             )
 
             # Commit investment transaction changes
             db.commit()
 
             added_count += investment_added
+
+            # Fetch investment holdings once and reuse for multiple operations
+            # This avoids making 3 separate API calls to Plaid
+            # In replay mode, use saved data instead
+            if replay_mode and replay_data and 'holdings' in replay_data:
+                logger.info("[REPLAY] Using saved holdings data instead of calling Plaid API")
+                holdings_debug_data = replay_data['holdings']
+                holdings_data = plaid_replay.extract_holdings_from_debug_data(holdings_debug_data)
+            else:
+                logger.info("[HOLDINGS] Fetching investment holdings data (will be reused for sync, validation, and balance updates)")
+                access_token = encryption_service.decrypt(plaid_item.access_token)
+                holdings_data = plaid_client.get_investment_holdings(access_token)
 
             # Sync investment holdings/positions for investment accounts
             update_stage("syncing_holdings", {
@@ -599,7 +648,8 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 plaid_item=plaid_item,
                 plaid_accounts=plaid_accounts,
                 plaid_account_map=plaid_account_map,
-                update_stage=update_stage
+                update_stage=update_stage,
+                holdings_data=holdings_data  # Pass pre-fetched data
             )
 
             # Commit holdings changes
@@ -618,7 +668,8 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 db=db,
                 plaid_item=plaid_item,
                 plaid_accounts=plaid_accounts,
-                plaid_account_map=plaid_account_map
+                plaid_account_map=plaid_account_map,
+                holdings_data=holdings_data  # Pass pre-fetched data
             )
 
             # Update first Plaid transaction date for accounts (only during full resync or if not set)
@@ -642,7 +693,8 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 plaid_item=plaid_item,
                 plaid_accounts=plaid_accounts,
                 plaid_account_map=plaid_account_map,
-                update_stage=update_stage
+                update_stage=update_stage,
+                holdings_data=holdings_data  # Pass pre-fetched data
             )
 
             db.commit()
@@ -700,7 +752,7 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
         raise exc
 
 
-def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_map, mapper, update_stage, full_resync=False):
+def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_map, mapper, update_stage, full_resync=False, replay_data=None):
     """
     Sync investment transactions for investment accounts
 
@@ -712,6 +764,7 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
         mapper: Transaction mapper
         update_stage: Function to update job stage
         full_resync: If True, fetch 2 years of historical data instead of 90 days
+        replay_data: Optional debug data for replay mode (if provided, won't call Plaid API)
 
     Returns:
         Number of investment transactions added
@@ -737,97 +790,120 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
     for inv_acc in investment_accounts:
         logger.info(f"  - {inv_acc.name} ({inv_acc.type}/{inv_acc.subtype})")
 
-    # Get investment transactions
-    # For full resync: fetch 2 years of history (matching regular transaction behavior)
-    # For incremental: fetch last 90 days to avoid API timeouts
-    end_date = datetime.now().date()
-    if full_resync:
-        start_date = end_date - timedelta(days=730)  # 2 years for full resync
-        logger.info(f"[INVESTMENT SYNC] Full resync mode - fetching 2 years of investment transactions")
+    # Get investment transactions - either from replay data or from Plaid API
+    if replay_data:
+        # REPLAY MODE: Use saved data
+        logger.info(f"[REPLAY] Using saved investment transaction data instead of calling Plaid API")
+
+        investment_result = plaid_replay.extract_investment_transactions_from_debug_data(replay_data)
+
+        transactions = investment_result.get('transactions', [])
+        securities = {sec['security_id']: sec for sec in investment_result.get('securities', [])}
+        investment_accounts_data = investment_result.get('accounts', [])
+
+        logger.info(
+            f"[REPLAY] Extracted {len(transactions)} investment transactions, "
+            f"{len(securities)} securities, {len(investment_accounts_data)} accounts from debug data"
+        )
+
+        # Skip to processing transactions
+        all_transactions = transactions
+        all_securities = securities
+        all_raw_responses = []  # No raw responses in replay mode
+
     else:
-        start_date = end_date - timedelta(days=90)  # 90 days for incremental sync
-        logger.info(f"[INVESTMENT SYNC] Incremental mode - fetching 90 days of investment transactions")
+        # NORMAL MODE: Fetch from Plaid API
+        # For full resync: fetch 2 years of history (matching regular transaction behavior)
+        # For incremental: fetch last 90 days to avoid API timeouts
+        end_date = datetime.now().date()
+        if full_resync:
+            start_date = end_date - timedelta(days=730)  # 2 years for full resync
+            logger.info(f"[INVESTMENT SYNC] Full resync mode - fetching 2 years of investment transactions")
+        else:
+            start_date = end_date - timedelta(days=90)  # 90 days for incremental sync
+            logger.info(f"[INVESTMENT SYNC] Incremental mode - fetching 90 days of investment transactions")
 
-    start_date_str = start_date.strftime('%Y-%m-%d')
-    end_date_str = end_date.strftime('%Y-%m-%d')
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
 
-    logger.info(f"[INVESTMENT SYNC DEBUG] Fetching investment transactions from {start_date_str} to {end_date_str}")
-    logger.info(f"[INVESTMENT SYNC] Calling plaid_client.get_investment_transactions()...")
+        logger.info(f"[INVESTMENT SYNC DEBUG] Fetching investment transactions from {start_date_str} to {end_date_str}")
+        logger.info(f"[INVESTMENT SYNC] Calling plaid_client.get_investment_transactions()...")
 
-    # Fetch investment transactions with pagination
-    # Security: Decrypt access token before using
-    access_token = encryption_service.decrypt(plaid_item.access_token)
+        # Fetch investment transactions with pagination
+        # Security: Decrypt access token before using
+        access_token = encryption_service.decrypt(plaid_item.access_token)
 
-    # Fetch first batch
-    investment_result = plaid_client.get_investment_transactions(
-        access_token=access_token,
-        start_date=start_date_str,
-        end_date=end_date_str,
-        count=500,
-        offset=0
-    )
-
-    logger.info(f"[INVESTMENT SYNC] API call completed, result is: {type(investment_result).__name__ if investment_result else 'None'}")
-
-    if not investment_result:
-        logger.error("[INVESTMENT SYNC] Failed to fetch investment transactions - result is None!")
-        logger.error("[INVESTMENT SYNC] This usually means the Plaid API call failed. Check logs above for Plaid API errors.")
-        return 0
-
-    # Collect all transactions, securities, and accounts
-    # Store BOTH raw Plaid responses AND formatted data
-    all_transactions = investment_result.get('transactions', [])
-    all_securities = {sec['security_id']: sec for sec in investment_result.get('securities', [])}
-    investment_accounts = investment_result.get('accounts', [])
-    total_available = investment_result.get('total_transactions', 0)
-
-    # Collect raw Plaid API responses for debug logging
-    all_raw_responses = [investment_result.get('raw_response', {})]
-
-    # Fetch remaining pages if there are more transactions
-    total_fetched = len(all_transactions)
-
-    while total_fetched < total_available:
-        logger.info(f"[INVESTMENT SYNC] Fetching more investment transactions (offset: {total_fetched}/{total_available})")
-
+        # Fetch first batch
         investment_result = plaid_client.get_investment_transactions(
             access_token=access_token,
             start_date=start_date_str,
             end_date=end_date_str,
             count=500,
-            offset=total_fetched
+            offset=0
         )
 
+        logger.info(f"[INVESTMENT SYNC] API call completed, result is: {type(investment_result).__name__ if investment_result else 'None'}")
+
         if not investment_result:
-            logger.warning(f"[INVESTMENT SYNC] Failed to fetch page at offset {total_fetched}, stopping pagination")
-            break
+            logger.error("[INVESTMENT SYNC] Failed to fetch investment transactions - result is None!")
+            logger.error("[INVESTMENT SYNC] This usually means the Plaid API call failed. Check logs above for Plaid API errors.")
+            return 0
 
-        new_transactions = investment_result.get('transactions', [])
-        if not new_transactions:
-            logger.warning(f"[INVESTMENT SYNC] No more transactions returned at offset {total_fetched}, stopping pagination")
-            break
+        # Collect all transactions, securities, and accounts
+        # Store BOTH raw Plaid responses AND formatted data
+        all_transactions = investment_result.get('transactions', [])
+        all_securities = {sec['security_id']: sec for sec in investment_result.get('securities', [])}
+        investment_accounts_data = investment_result.get('accounts', [])
+        total_available = investment_result.get('total_transactions', 0)
 
-        all_transactions.extend(new_transactions)
+        # Collect raw Plaid API responses for debug logging
+        all_raw_responses = [investment_result.get('raw_response', {})]
 
-        # Merge securities (new ones might appear in later pages)
-        new_securities = {sec['security_id']: sec for sec in investment_result.get('securities', [])}
-        all_securities.update(new_securities)
-
-        # Collect raw response from this page
-        all_raw_responses.append(investment_result.get('raw_response', {}))
-
+        # Fetch remaining pages if there are more transactions
         total_fetched = len(all_transactions)
-        logger.info(f"[INVESTMENT SYNC] Fetched {len(new_transactions)} more transactions, total so far: {total_fetched}/{total_available}")
 
+        while total_fetched < total_available:
+            logger.info(f"[INVESTMENT SYNC] Fetching more investment transactions (offset: {total_fetched}/{total_available})")
+
+            investment_result = plaid_client.get_investment_transactions(
+                access_token=access_token,
+                start_date=start_date_str,
+                end_date=end_date_str,
+                count=500,
+                offset=total_fetched
+            )
+
+            if not investment_result:
+                logger.warning(f"[INVESTMENT SYNC] Failed to fetch page at offset {total_fetched}, stopping pagination")
+                break
+
+            new_transactions = investment_result.get('transactions', [])
+            if not new_transactions:
+                logger.warning(f"[INVESTMENT SYNC] No more transactions returned at offset {total_fetched}, stopping pagination")
+                break
+
+            all_transactions.extend(new_transactions)
+
+            # Merge securities (new ones might appear in later pages)
+            new_securities = {sec['security_id']: sec for sec in investment_result.get('securities', [])}
+            all_securities.update(new_securities)
+
+            # Collect raw response from this page
+            all_raw_responses.append(investment_result.get('raw_response', {}))
+
+            total_fetched = len(all_transactions)
+            logger.info(f"[INVESTMENT SYNC] Fetched {len(new_transactions)} more transactions, total so far: {total_fetched}/{total_available}")
+
+    # Common processing for both replay and normal mode
     transactions = all_transactions
     securities = all_securities
 
     logger.info(f"[INVESTMENT SYNC DEBUG] Retrieved {len(transactions)} investment transactions")
     logger.info(f"[INVESTMENT SYNC DEBUG] Retrieved {len(securities)} securities")
-    logger.info(f"[INVESTMENT SYNC DEBUG] Retrieved {len(investment_accounts)} accounts from investment API")
+    logger.info(f"[INVESTMENT SYNC DEBUG] Retrieved {len(investment_accounts_data)} accounts from investment API")
 
     # Log account balances from investment API
-    for inv_acc in investment_accounts:
+    for inv_acc in investment_accounts_data:
         if inv_acc.get('type') in ['investment', 'brokerage']:
             logger.info(f"[INVESTMENT API ACCOUNT] {inv_acc.get('name')}: balances = {inv_acc.get('balances')}")
 
@@ -910,16 +986,18 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
         plaid_subtype = str(inv_txn.get('subtype', '')).lower()
 
         # Investment transaction amount handling depends on type:
-        # - Cash transactions: positive = deposit (money IN), negative = withdrawal (money OUT)
+        # - Cash deposits/withdrawals: positive = deposit (money IN), negative = withdrawal (money OUT)
         #   Keep amount as-is since it already matches our convention
+        # - Dividends/Interest: Plaid returns negative amounts (credits), negate to make positive
         # - Buy/Sell/Other: positive = debit (money OUT), negative = credit (money IN)
         #   Negate to match our convention
-        if plaid_type == 'cash':
-            # For cash deposits/withdrawals, Plaid's amount already matches our convention
+        if plaid_type == 'cash' and plaid_subtype not in ['dividend', 'interest']:
+            # For cash deposits/withdrawals (excluding dividends and interest)
+            # Plaid's amount already matches our convention:
             # positive = deposit (money in), negative = withdrawal (money out)
             transaction_amount = raw_amount
         else:
-            # For non-cash investment transactions (buy, sell, dividend, etc.), negate the amount
+            # For buy, sell, dividend, interest, etc., negate the amount
             # Plaid: buy=positive (debit), sell=negative (credit), dividend=negative (credit)
             # Ours: money out=negative, money in=positive
             transaction_amount = -raw_amount
@@ -981,7 +1059,7 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
     return added_count
 
 
-def _sync_investment_holdings(db, plaid_item, plaid_accounts, plaid_account_map, update_stage):
+def _sync_investment_holdings(db, plaid_item, plaid_accounts, plaid_account_map, update_stage, holdings_data=None):
     """
     Sync investment holdings (positions) for investment accounts
 
@@ -991,6 +1069,7 @@ def _sync_investment_holdings(db, plaid_item, plaid_accounts, plaid_account_map,
         plaid_accounts: List of PlaidAccount records
         plaid_account_map: Mapping of plaid_account_id to account_id
         update_stage: Function to update job stage
+        holdings_data: Optional pre-fetched holdings data from Plaid (if None, will fetch)
 
     Returns:
         Number of holdings synced
@@ -1009,18 +1088,18 @@ def _sync_investment_holdings(db, plaid_item, plaid_accounts, plaid_account_map,
         logger.warning("[HOLDINGS SYNC] No investment accounts found, skipping holdings sync")
         return 0
 
-    # Get access token (decrypt it)
-    access_token = encryption_service.decrypt(plaid_item.access_token)
-
-    # Fetch investment holdings from Plaid
-    logger.info(f"[HOLDINGS SYNC] Calling plaid_client.get_investment_holdings()...")
-
-    try:
-        holdings_data = plaid_client.get_investment_holdings(access_token)
-    except Exception as e:
-        logger.warning(f"[HOLDINGS SYNC] Could not fetch investment holdings: {e}")
-        logger.info("[HOLDINGS SYNC] This is normal if the institution doesn't support investments product")
-        return 0
+    # Fetch investment holdings from Plaid if not already provided
+    if holdings_data is None:
+        logger.info(f"[HOLDINGS SYNC] Calling plaid_client.get_investment_holdings()...")
+        access_token = encryption_service.decrypt(plaid_item.access_token)
+        try:
+            holdings_data = plaid_client.get_investment_holdings(access_token)
+        except Exception as e:
+            logger.warning(f"[HOLDINGS SYNC] Could not fetch investment holdings: {e}")
+            logger.info("[HOLDINGS SYNC] This is normal if the institution doesn't support investments product")
+            return 0
+    else:
+        logger.info(f"[HOLDINGS SYNC] Using pre-fetched holdings data (avoiding redundant API call)")
 
     if not holdings_data:
         logger.warning("[HOLDINGS SYNC] No holdings data returned from Plaid")
@@ -1327,7 +1406,7 @@ def _map_investment_type(plaid_type) -> str:
     return type_mapping.get(type_str, 'TRANSFER')  # Default to TRANSFER for unmapped types
 
 
-def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account_map, update_stage):
+def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account_map, update_stage, holdings_data=None):
     """
     Validate transaction balances after import by calculating expected balances
     and comparing with Plaid current balance.
@@ -1344,6 +1423,7 @@ def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account
         plaid_accounts: List of PlaidAccount records
         plaid_account_map: Mapping of plaid_account_id to account_id
         update_stage: Function to update job stage
+        holdings_data: Optional pre-fetched holdings data from Plaid (if None, will fetch)
     """
     try:
         update_stage("validating_balances", {
@@ -1361,9 +1441,12 @@ def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account
             return
 
         # Get investment holdings to extract cash balances
-        # Security: Use already-decrypted access token
-        holdings_data = plaid_client.get_investment_holdings(access_token)
         investment_cash_balances = {}
+        if holdings_data is None:
+            logger.info("[VALIDATE BALANCES] Fetching investment holdings data...")
+            holdings_data = plaid_client.get_investment_holdings(access_token)
+        else:
+            logger.info("[VALIDATE BALANCES] Using pre-fetched holdings data (avoiding redundant API call)")
 
         if holdings_data:
             # Use calculated cash balances (Total Account Value - Holdings Value)
@@ -1485,7 +1568,7 @@ def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account
         # Don't raise - this is not critical enough to fail the entire sync
 
 
-def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
+def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map, holdings_data=None):
     """
     Update opening balances for accounts after first sync
 
@@ -1497,6 +1580,7 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
         plaid_item: PlaidItem record
         plaid_accounts: List of PlaidAccount records
         plaid_account_map: Mapping of plaid_account_id to account_id
+        holdings_data: Optional pre-fetched holdings data from Plaid (if None, will fetch)
     """
     try:
         # Security: Decrypt access token before using
@@ -1509,8 +1593,12 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map):
             return
 
         # Get investment holdings to extract cash balances
-        holdings_data = plaid_client.get_investment_holdings(access_token)
         investment_cash_balances = {}
+        if holdings_data is None:
+            logger.info("[UPDATE BALANCES] Fetching investment holdings data...")
+            holdings_data = plaid_client.get_investment_holdings(access_token)
+        else:
+            logger.info("[UPDATE BALANCES] Using pre-fetched holdings data (avoiding redundant API call)")
 
         if holdings_data:
             # Use calculated cash balances (Total Account Value - Holdings Value)

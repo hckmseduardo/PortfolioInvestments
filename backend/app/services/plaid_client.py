@@ -503,29 +503,30 @@ class PlaidClient:
 
             logger.info(f"[PLAID HOLDINGS] Retrieved {len(holdings)} holdings, {len(securities)} securities, {len(accounts)} accounts")
 
-            # Save holdings debug data
-            try:
-                from pathlib import Path
-                debug_dir = Path("/app/logs/plaid_debug")
-                debug_dir.mkdir(parents=True, exist_ok=True)
-                timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-                debug_file = debug_dir / f"holdings_{timestamp}.json"
+            # Save holdings debug data only if debug mode is enabled
+            if settings.PLAID_DEBUG_MODE:
+                try:
+                    from pathlib import Path
+                    debug_dir = Path("/app/logs/plaid_debug")
+                    debug_dir.mkdir(parents=True, exist_ok=True)
+                    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                    debug_file = debug_dir / f"holdings_{timestamp}.json"
 
-                import json
-                debug_data = {
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "holdings_count": len(holdings),
-                    "securities_count": len(securities),
-                    "accounts_count": len(accounts),
-                    "holdings": holdings,
-                    "securities": securities,
-                    "accounts": accounts
-                }
-                with open(debug_file, 'w') as f:
-                    json.dump(debug_data, f, indent=2, default=str)
-                logger.info(f"[PLAID HOLDINGS] Saved full holdings data to {debug_file}")
-            except Exception as e:
-                logger.warning(f"[PLAID HOLDINGS] Failed to save holdings debug data: {e}")
+                    import json
+                    debug_data = {
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "holdings_count": len(holdings),
+                        "securities_count": len(securities),
+                        "accounts_count": len(accounts),
+                        "holdings": holdings,
+                        "securities": securities,
+                        "accounts": accounts
+                    }
+                    with open(debug_file, 'w') as f:
+                        json.dump(debug_data, f, indent=2, default=str)
+                    logger.info(f"[PLAID HOLDINGS] Saved full holdings data to {debug_file}")
+                except Exception as e:
+                    logger.warning(f"[PLAID HOLDINGS] Failed to save holdings debug data: {e}")
 
             # Calculate cash balances by subtracting holdings value from total account value
             # Cash = Total Account Value - Sum(Holding Values)

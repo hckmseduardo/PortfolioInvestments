@@ -12,6 +12,8 @@ from app.models.schemas import (
     AggregatedPosition,
     IndustryBreakdownSlice,
     TypeBreakdownSlice,
+    SectorBreakdownSlice,
+    SubtypeBreakdownSlice,
 )
 from app.api.auth import get_current_user
 from app.database.postgres_db import get_db as get_session
@@ -97,7 +99,11 @@ def _compute_account_positions_from_transactions(
                 "name": "Cash",
                 "quantity": 0.0,
                 "book_value": 0.0,
-                "market_value": 0.0
+                "market_value": 0.0,
+                "security_type": None,
+                "security_subtype": None,
+                "sector": None,
+                "industry": None
             }
         }
 
@@ -111,7 +117,11 @@ def _compute_account_positions_from_transactions(
         "name": "Cash",
         "quantity": 0.0,
         "book_value": 0.0,
-        "market_value": 0.0
+        "market_value": 0.0,
+        "security_type": None,
+        "security_subtype": None,
+        "sector": None,
+        "industry": None
     }
 
     for txn in transactions:
@@ -157,7 +167,11 @@ def _compute_account_positions_from_transactions(
                 "name": inferred_name,
                 "quantity": 0.0,
                 "book_value": 0.0,
-                "market_value": 0.0
+                "market_value": 0.0,
+                "security_type": None,
+                "security_subtype": None,
+                "sector": None,
+                "industry": None
             }
         )
 
@@ -285,17 +299,41 @@ def _build_aggregated_positions(
 
     if as_of:
         name_lookup: Dict[str, str] = {}
+        plaid_metadata_lookup: Dict[str, Dict] = {}
         for acc_id in account_ids:
             for pos in db.find("positions", {"account_id": acc_id}):
                 ticker = pos.get("ticker")
                 name = pos.get("name")
                 if ticker and name and ticker not in name_lookup:
                     name_lookup[ticker] = name
+                # Store Plaid metadata for enrichment
+                if ticker and ticker not in plaid_metadata_lookup:
+                    plaid_metadata_lookup[ticker] = {
+                        "security_type": pos.get("security_type"),
+                        "security_subtype": pos.get("security_subtype"),
+                        "sector": pos.get("sector"),
+                        "industry": pos.get("industry")
+                    }
 
         for acc_id in account_ids:
             position_maps.append(
                 _compute_account_positions_from_transactions(db, acc_id, as_of, name_lookup)
             )
+
+        # Enrich transaction-based positions with Plaid metadata from current positions
+        for position_map in position_maps:
+            for compound_key, position in position_map.items():
+                ticker = position.get("ticker")
+                if ticker and ticker in plaid_metadata_lookup:
+                    metadata = plaid_metadata_lookup[ticker]
+                    if not position.get("security_type"):
+                        position["security_type"] = metadata.get("security_type")
+                    if not position.get("security_subtype"):
+                        position["security_subtype"] = metadata.get("security_subtype")
+                    if not position.get("sector"):
+                        position["sector"] = metadata.get("sector")
+                    if not position.get("industry"):
+                        position["industry"] = metadata.get("industry")
     else:
         for acc_id in account_ids:
             account_positions = db.find("positions", {"account_id": acc_id})
@@ -380,6 +418,8 @@ def _build_aggregated_positions(
     metadata_lookup: Dict[str, Dict] = {}
     type_lookup: Dict[str, Dict] = {}
     industry_lookup: Dict[str, Dict] = {}
+    sector_lookup: Dict[str, Dict] = {}
+    subtype_lookup: Dict[str, Dict] = {}
 
     if user_id:
         for record in db.find("instrument_types", {"user_id": user_id}):
@@ -390,6 +430,15 @@ def _build_aggregated_positions(
             ticker_key = (record.get("ticker") or "").upper()
             if ticker_key:
                 metadata_lookup[ticker_key] = record
+
+    # Load all security metadata (these are global, not user-specific)
+    security_type_lookup: Dict[str, Dict] = {}
+    for record in db.find("security_types", {}):
+        security_type_lookup[record["name"]] = record
+    for record in db.find("sectors", {}):
+        sector_lookup[record["name"]] = record
+    for record in db.find("security_subtypes", {}):
+        subtype_lookup[record["name"]] = record
 
     for position in aggregated:
         ticker_key = (position.get("ticker") or "").upper()
@@ -405,6 +454,21 @@ def _build_aggregated_positions(
         position["instrument_industry_id"] = industry_id
         position["instrument_industry_name"] = industry_info.get("name") if industry_info else None
         position["instrument_industry_color"] = industry_info.get("color") if industry_info else None
+
+        # Enrich with Plaid field colors from metadata tables (for Portfolio-style breakdowns)
+        security_type_name = position.get("security_type")
+        sector_name = position.get("sector")
+        subtype_name = position.get("security_subtype")
+        industry_name = position.get("industry")
+
+        security_type_info = security_type_lookup.get(security_type_name) if security_type_name else None
+        sector_info = sector_lookup.get(sector_name) if sector_name else None
+        subtype_info = subtype_lookup.get(subtype_name) if subtype_name else None
+        # Note: industry uses the raw Plaid field, no color lookup needed as it's not in metadata
+
+        position["security_type_color"] = security_type_info.get("color") if security_type_info else None
+        position["sector_color"] = sector_info.get("color") if sector_info else None
+        position["security_subtype_color"] = subtype_info.get("color") if subtype_info else None
 
     if missing_tickers:
         unique = sorted({t.upper() for t in missing_tickers})
@@ -466,6 +530,70 @@ def _build_breakdown_slices(
         })
         entry["market_value"] += market_value
         entry["position_count"] += 1
+
+    if total_market_value <= 0:
+        return []
+
+    for entry in slices.values():
+        entry["percentage"] = (entry["market_value"] / total_market_value) * 100
+
+    ordered = sorted(slices.values(), key=lambda item: item["market_value"], reverse=True)
+    return ordered
+
+def _build_simple_breakdown_slices(
+    positions: List[Dict[str, float]],
+    key_name: str,
+    key_color: str,
+    use_hash_colors: bool = False,
+) -> List[Dict[str, float]]:
+    """Build breakdown slices for fields that get colors from metadata tables.
+
+    Similar to _build_breakdown_slices but for fields without IDs (like sector and subtype).
+    Colors are pulled from metadata tables (sectors, security_subtypes, security_types).
+    If use_hash_colors is True, generates consistent colors based on name hash (for fields without metadata).
+    """
+    slices: Dict[str, Dict] = {}
+    total_market_value = 0.0
+
+    # Color palette for hash-based coloring (used for industry field)
+    color_palette = [
+        "#1976d2", "#9c27b0", "#f57c00", "#388e3c", "#d32f2f",
+        "#0097a7", "#7b1fa2", "#fbc02d", "#689f38", "#c2185b",
+        "#0288d1", "#512da8", "#ffa726", "#7cb342", "#e91e63",
+        "#03a9f4", "#673ab7", "#ff9800", "#8bc34a", "#f06292"
+    ]
+
+    for position in positions:
+        if position.get("ticker") == "CASH":
+            continue
+        market_value = float(position.get("market_value") or 0.0)
+        if market_value == 0:
+            continue
+        total_market_value += market_value
+        slice_name = position.get(key_name) or UNCLASSIFIED_LABEL
+
+        if slice_name not in slices:
+            if use_hash_colors:
+                # Generate consistent color from name hash
+                if slice_name == UNCLASSIFIED_LABEL:
+                    color = UNCLASSIFIED_COLOR
+                else:
+                    hash_value = hash(slice_name) % len(color_palette)
+                    color = color_palette[hash_value]
+            else:
+                # Use color from metadata table
+                color = position.get(key_color) or UNCLASSIFIED_COLOR
+
+            slices[slice_name] = {
+                "name": slice_name,
+                "color": color,
+                "market_value": 0.0,
+                "percentage": 0.0,
+                "position_count": 0
+            }
+
+        slices[slice_name]["market_value"] += market_value
+        slices[slice_name]["position_count"] += 1
 
     if total_market_value <= 0:
         return []
@@ -660,15 +788,11 @@ async def get_industry_breakdown(
     aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
     filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
 
-    ordered = _build_breakdown_slices(
-        filtered,
-        "instrument_industry_id",
-        "instrument_industry_name",
-        "instrument_industry_color",
-    )
+    # Use Plaid's industry field to match Portfolio section (with hash-based colors)
+    ordered = _build_simple_breakdown_slices(filtered, "industry", "industry_color", use_hash_colors=True)
     return [
         IndustryBreakdownSlice(
-            industry_id=entry["id"],
+            industry_id=None,  # Plaid industry doesn't have IDs
             industry_name=entry["name"],
             color=entry["color"],
             market_value=entry["market_value"],
@@ -714,16 +838,106 @@ async def get_type_breakdown(
     aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
     filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
 
-    ordered = _build_breakdown_slices(
-        filtered,
-        "instrument_type_id",
-        "instrument_type_name",
-        "instrument_type_color",
-    )
+    # Use Plaid's security_type field to match Portfolio section
+    ordered = _build_simple_breakdown_slices(filtered, "security_type", "security_type_color")
     return [
         TypeBreakdownSlice(
-            type_id=entry["id"],
+            type_id=None,  # security_type doesn't have IDs
             type_name=entry["name"],
+            color=entry["color"],
+            market_value=entry["market_value"],
+            percentage=entry["percentage"],
+            position_count=entry["position_count"],
+        )
+        for entry in ordered
+    ]
+
+@router.get("/sector-breakdown", response_model=List[SectorBreakdownSlice])
+async def get_sector_breakdown(
+    account_id: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+    instrument_type_id: Optional[str] = None,
+    instrument_industry_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    db = get_db_service(session)
+
+    if account_id:
+        account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+        if not account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+        account_ids = [account_id]
+    else:
+        user_accounts = db.find("accounts", {"user_id": current_user.id})
+        account_ids = [acc["id"] for acc in user_accounts]
+
+    if not account_ids:
+        return []
+
+    as_of: Optional[datetime] = None
+    if as_of_date:
+        as_of = _parse_iso_datetime(as_of_date)
+        if not as_of:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
+            )
+
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
+
+    ordered = _build_simple_breakdown_slices(filtered, "sector", "sector_color")
+    return [
+        SectorBreakdownSlice(
+            sector_name=entry["name"],
+            color=entry["color"],
+            market_value=entry["market_value"],
+            percentage=entry["percentage"],
+            position_count=entry["position_count"],
+        )
+        for entry in ordered
+    ]
+
+@router.get("/subtype-breakdown", response_model=List[SubtypeBreakdownSlice])
+async def get_subtype_breakdown(
+    account_id: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+    instrument_type_id: Optional[str] = None,
+    instrument_industry_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    db = get_db_service(session)
+
+    if account_id:
+        account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+        if not account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+        account_ids = [account_id]
+    else:
+        user_accounts = db.find("accounts", {"user_id": current_user.id})
+        account_ids = [acc["id"] for acc in user_accounts]
+
+    if not account_ids:
+        return []
+
+    as_of: Optional[datetime] = None
+    if as_of_date:
+        as_of = _parse_iso_datetime(as_of_date)
+        if not as_of:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
+            )
+
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
+
+    ordered = _build_simple_breakdown_slices(filtered, "security_subtype", "security_subtype_color")
+    return [
+        SubtypeBreakdownSlice(
+            subtype_name=entry["name"],
             color=entry["color"],
             market_value=entry["market_value"],
             percentage=entry["percentage"],
@@ -859,20 +1073,31 @@ async def recalculate_positions(
 
 @router.get("/snapshots/dates")
 async def get_snapshot_dates(
+    account_id: Optional[str] = None,  # Optional account filter
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
     """Get list of available position snapshot dates for the current user's accounts"""
     db = get_db_service(session)
 
-    # Get all user's account IDs
-    accounts = db.find("accounts", {"user_id": current_user.id})
-    if not accounts:
-        return []
+    # Get account IDs based on filter
+    if account_id:
+        # Verify account belongs to user
+        account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+        if not account:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Account not found"
+            )
+        account_ids = [account_id]
+    else:
+        # Get all user's account IDs
+        accounts = db.find("accounts", {"user_id": current_user.id})
+        if not accounts:
+            return {"snapshot_dates": []}
+        account_ids = [acc["id"] for acc in accounts]
 
-    account_ids = [acc["id"] for acc in accounts]
-
-    # Query distinct snapshot dates for user's accounts
+    # Query distinct snapshot dates for the specified account(s)
     from sqlalchemy import select, func, and_
     from app.database.models import PositionSnapshot as PositionSnapshotModel
 
@@ -919,6 +1144,7 @@ async def get_positions_by_snapshot(
                 detail="Account not found"
             )
         account_ids = [account_id]
+        accounts = [account]  # Store as list for later use
     else:
         # Get all user's account IDs
         accounts = db.find("accounts", {"user_id": current_user.id})

@@ -249,6 +249,7 @@ class Dividend(DividendBase):
 
 class ExpenseBase(BaseModel):
     date: datetime
+    type: Optional[str] = None  # Money In or Money Out (from transaction type)
     description: str
     amount: float
     category: Optional[str] = None
@@ -263,6 +264,8 @@ class ExpenseBase(BaseModel):
     pfc_primary: Optional[str] = None
     pfc_detailed: Optional[str] = None
     pfc_confidence: Optional[str] = None
+    # Transaction amount with proper sign (computed field, not stored in expense table)
+    transaction_amount: Optional[float] = None  # Signed amount from linked transaction
 
 class ExpenseCreate(ExpenseBase):
     account_id: str
@@ -382,6 +385,20 @@ class IndustryBreakdownSlice(BaseModel):
 class TypeBreakdownSlice(BaseModel):
     type_id: Optional[str] = None
     type_name: str
+    color: str
+    market_value: float
+    percentage: float
+    position_count: int
+
+class SectorBreakdownSlice(BaseModel):
+    sector_name: str
+    color: str
+    market_value: float
+    percentage: float
+    position_count: int
+
+class SubtypeBreakdownSlice(BaseModel):
+    subtype_name: str
     color: str
     market_value: float
     percentage: float

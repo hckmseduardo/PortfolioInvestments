@@ -167,7 +167,30 @@ export const positionsAPI = {
         ...(params.instrument_industry_id ? { instrument_industry_id: params.instrument_industry_id } : {})
       }
     }),
-  getSnapshotDates: () => api.get('/positions/snapshots/dates'),
+  getSectorBreakdown: (params = {}) =>
+    api.get('/positions/sector-breakdown', {
+      params: {
+        ...(params.account_id ? { account_id: params.account_id } : {}),
+        ...(params.as_of_date ? { as_of_date: params.as_of_date } : {}),
+        ...(params.instrument_type_id ? { instrument_type_id: params.instrument_type_id } : {}),
+        ...(params.instrument_industry_id ? { instrument_industry_id: params.instrument_industry_id } : {})
+      }
+    }),
+  getSubtypeBreakdown: (params = {}) =>
+    api.get('/positions/subtype-breakdown', {
+      params: {
+        ...(params.account_id ? { account_id: params.account_id } : {}),
+        ...(params.as_of_date ? { as_of_date: params.as_of_date } : {}),
+        ...(params.instrument_type_id ? { instrument_type_id: params.instrument_type_id } : {}),
+        ...(params.instrument_industry_id ? { instrument_industry_id: params.instrument_industry_id } : {})
+      }
+    }),
+  getSnapshotDates: (accountId = null) =>
+    api.get('/positions/snapshots/dates', {
+      params: {
+        ...(accountId && { account_id: accountId })
+      }
+    }),
   getBySnapshotDate: (snapshotDate, accountId = null) =>
     api.get('/positions/snapshots/by-date', {
       params: {
@@ -347,6 +370,7 @@ export const plaidAPI = {
   getItems: () => api.get('/plaid/items'),
   syncTransactions: (itemId) => api.post(`/plaid/sync/${itemId}`),
   fullResync: (itemId) => api.post(`/plaid/full-resync/${itemId}`),
+  replaySync: (itemId) => api.post(`/plaid/replay-sync/${itemId}`),
   getSyncStatus: (jobId) => api.get(`/plaid/sync-status/${jobId}`),
   disconnectItem: (itemId) => api.delete(`/plaid/disconnect/${itemId}`),
 };

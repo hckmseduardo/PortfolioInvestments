@@ -127,7 +127,8 @@ class PlaidTransactionMapper:
         self,
         plaid_txn: Dict[str, Any],
         account_id: str,
-        transaction_id: str
+        transaction_id: str,
+        transaction_type: str
     ) -> Optional[Dict[str, Any]]:
         """
         Map a Plaid transaction to an Expense for tracking in the Cashflow page
@@ -139,6 +140,7 @@ class PlaidTransactionMapper:
             plaid_txn: Plaid transaction object
             account_id: Our account ID
             transaction_id: Associated transaction ID
+            transaction_type: Transaction type (Money In or Money Out)
 
         Returns:
             Dictionary for Expense model creation
@@ -164,6 +166,7 @@ class PlaidTransactionMapper:
 
         return {
             "date": date,
+            "type": transaction_type,  # Store transaction type for filtering
             "description": description,
             "amount": amount,
             "category": category,

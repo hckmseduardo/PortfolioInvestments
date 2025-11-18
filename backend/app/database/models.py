@@ -318,6 +318,7 @@ class Expense(Base):
     statement_id = Column(String, ForeignKey("statements.id", ondelete="CASCADE"), nullable=True, index=True)
     transaction_id = Column(String, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True, index=True)
     date = Column(DateTime, nullable=False, index=True)
+    type = Column(String(20), nullable=True, index=True)  # Money In or Money Out
     description = Column(Text, nullable=False)
     amount = Column(Float, nullable=False)
     category = Column(String, nullable=True, index=True)

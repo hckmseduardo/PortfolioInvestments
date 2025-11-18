@@ -9,6 +9,7 @@ from app.models.schemas import Expense, ExpenseCreate, Category, CategoryCreate,
 from app.api.auth import get_current_user
 from app.database.postgres_db import get_db as get_session
 from app.database.db_service import get_db_service
+from app.database.models import Expense as ExpenseModel, Transaction as TransactionModel
 from app.services.job_queue import enqueue_expense_conversion_job, get_job_info
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
@@ -455,7 +456,7 @@ def detect_transfers(user_id: str, db, days_tolerance: int = 3) -> List[Tuple[st
 
                 if not _dates_within_tolerance(txn_a.get("date"), txn_b.get("date"), days_tolerance):
                     continue
-
+                    
                 if not _looks_like_transfer_pair(txn_a, txn_b, account_lookup):
                     continue
 
@@ -498,6 +499,11 @@ async def get_expenses(
 ):
     db = get_db_service(session)
 
+    # Build base query using SQLAlchemy with left join to get transaction amounts
+    query = session.query(ExpenseModel, TransactionModel.total).outerjoin(
+        TransactionModel, ExpenseModel.transaction_id == TransactionModel.id
+    )
+
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
         if not account:
@@ -512,51 +518,53 @@ async def get_expenses(
                 detail="Cashflow tracking is only available for checking and credit card accounts"
             )
 
-        query = {"account_id": account_id}
+        query = query.filter(ExpenseModel.account_id == account_id)
         if category:
-            query["category"] = category
-
-        expenses = db.find("expenses", query)
+            query = query.filter(ExpenseModel.category == category)
     else:
         user_accounts = _get_expense_accounts(db, current_user.id)
         if not user_accounts:
             return []
         account_ids = [acc["id"] for acc in user_accounts]
+        query = query.filter(ExpenseModel.account_id.in_(account_ids))
+        if category:
+            query = query.filter(ExpenseModel.category == category)
 
-        expenses = []
-        for acc_id in account_ids:
-            query = {"account_id": acc_id}
-            if category:
-                query["category"] = category
-            expenses.extend(db.find("expenses", query))
+    # Apply date filters at query level for better performance
+    if start_date:
+        start_dt = datetime.fromisoformat(start_date + "T00:00:00")
+        query = query.filter(ExpenseModel.date >= start_dt)
+    if end_date:
+        end_dt = datetime.fromisoformat(end_date + "T23:59:59")
+        query = query.filter(ExpenseModel.date <= end_dt)
 
-    # Filter by date range if provided
-    if start_date or end_date:
-        filtered_expenses = []
-        for exp in expenses:
-            try:
-                exp_date = datetime.fromisoformat(exp.get("date", "").replace('Z', '+00:00'))
-                include = True
+    # Execute query and build response with transaction amounts
+    results = query.all()
+    expenses = []
+    for expense_model, transaction_total in results:
+        expense_dict = {
+            "id": expense_model.id,
+            "account_id": expense_model.account_id,
+            "date": expense_model.date,
+            "type": expense_model.type,  # Money In or Money Out
+            "description": expense_model.description,
+            "amount": expense_model.amount,
+            "category": expense_model.category,
+            "notes": expense_model.notes,
+            "transaction_id": expense_model.transaction_id,
+            "paired_transaction_id": expense_model.paired_transaction_id,
+            "paired_account_id": expense_model.paired_account_id,
+            "is_transfer_primary": expense_model.is_transfer_primary,
+            "confidence": expense_model.confidence,
+            "suggested_category": expense_model.suggested_category,
+            "pfc_primary": expense_model.pfc_primary,
+            "pfc_detailed": expense_model.pfc_detailed,
+            "pfc_confidence": expense_model.pfc_confidence,
+            "transaction_amount": transaction_total  # Include signed amount from transaction
+        }
+        expenses.append(Expense(**expense_dict))
 
-                if start_date:
-                    start_dt = datetime.fromisoformat(start_date + "T00:00:00")
-                    if exp_date < start_dt:
-                        include = False
-
-                if end_date and include:
-                    end_dt = datetime.fromisoformat(end_date + "T23:59:59")
-                    if exp_date > end_dt:
-                        include = False
-
-                if include:
-                    filtered_expenses.append(exp)
-            except:
-                # Include expenses with invalid dates
-                filtered_expenses.append(exp)
-
-        expenses = filtered_expenses
-
-    return [Expense(**exp) for exp in expenses]
+    return expenses
 
 @router.get("/summary")
 async def get_expense_summary(
