@@ -1082,20 +1082,23 @@ async def update_expense_category(
         # Continue with category update even if merchant memory fails
 
     # Save user categorization rule for future automated categorization
-    try:
-        save_user_categorization_rule(
-            user_id=current_user.id,
-            description=existing_expense.get("description", ""),
-            account_id=existing_expense.get("account_id"),
-            transaction_type=existing_expense.get("type"),
-            amount=abs(existing_expense.get("amount", 0)),
-            category_name=category,
-            db=db
-        )
-    except Exception as e:
-        import logging
-        logging.warning(f"Failed to save user categorization rule: {e}")
-        # Continue with category update even if rule saving fails
+    # Skip saving rules for transfer categories as they are automatically detected
+    transfer_categories = ["Transfer", "Credit Card Payment", "Investment In", "Investment Out"]
+    if category not in transfer_categories:
+        try:
+            save_user_categorization_rule(
+                user_id=current_user.id,
+                description=existing_expense.get("description", ""),
+                account_id=existing_expense.get("account_id"),
+                transaction_type=existing_expense.get("type"),
+                amount=abs(existing_expense.get("amount", 0)),
+                category_name=category,
+                db=db
+            )
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to save user categorization rule: {e}")
+            # Continue with category update even if rule saving fails
 
     # Update expense category with high confidence (user-confirmed)
     db.update(
