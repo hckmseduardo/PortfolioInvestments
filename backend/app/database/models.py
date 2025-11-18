@@ -102,6 +102,7 @@ class User(Base):
     accounts = relationship("Account", back_populates="user", cascade="all, delete-orphan")
     categories = relationship("Category", back_populates="user", cascade="all, delete-orphan")
     merchant_memories = relationship("MerchantMemory", back_populates="user", cascade="all, delete-orphan")
+    categorization_rules = relationship("UserCategorizationRule", back_populates="user", cascade="all, delete-orphan")
     dashboard_layouts = relationship("DashboardLayout", back_populates="user", cascade="all, delete-orphan")
 
 
@@ -379,6 +380,27 @@ class MerchantMemory(Base):
     __table_args__ = (
         Index('idx_user_merchant', 'user_id', 'merchant_name'),
     )
+
+
+class UserCategorizationRule(Base):
+    """Stores user-specific categorization rules learned from manual category changes."""
+    __tablename__ = "user_categorization_rules"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    description_pattern = Column(String, nullable=False, index=True)  # Transaction description pattern
+    account_id = Column(String, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True)
+    transaction_type = Column(String, nullable=True)  # e.g., 'debit', 'credit'
+    amount_min = Column(Float, nullable=True)  # Minimum amount for this rule
+    amount_max = Column(Float, nullable=True)  # Maximum amount for this rule
+    category_name = Column(String, nullable=False)  # Target category
+    match_count = Column(Integer, default=1)  # Number of times this rule has been applied
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="categorization_rules")
+    account = relationship("Account")
 
 
 class Statement(Base):

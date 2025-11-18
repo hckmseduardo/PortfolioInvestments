@@ -211,20 +211,149 @@ def _dates_within_tolerance(date_a: Optional[str], date_b: Optional[str], tolera
     return abs((parsed_a - parsed_b).days) <= tolerance_days
 
 
+def save_user_categorization_rule(
+    user_id: str,
+    description: str,
+    account_id: str,
+    transaction_type: Optional[str],
+    amount: float,
+    category_name: str,
+    db
+):
+    """
+    Save or update a user categorization rule based on manual category assignment.
+
+    This creates a personalized rule that will be applied in future categorizations.
+    If a similar rule exists, it updates the match_count instead of creating a duplicate.
+    """
+    import uuid
+    from datetime import datetime, timezone
+
+    # Check if a similar rule already exists (same description pattern, account, and category)
+    existing_rule = db.find_one("user_categorization_rules", {
+        "user_id": user_id,
+        "description_pattern": description.lower(),  # Store lowercase for case-insensitive matching
+        "account_id": account_id,
+        "category_name": category_name
+    })
+
+    if existing_rule:
+        # Update existing rule: increment match_count and update amount range if needed
+        amount_min = existing_rule.get("amount_min")
+        amount_max = existing_rule.get("amount_max")
+
+        # Expand amount range to include this transaction
+        new_amount_min = min(amount_min, amount) if amount_min is not None else amount
+        new_amount_max = max(amount_max, amount) if amount_max is not None else amount
+
+        db.update("user_categorization_rules", {"id": existing_rule["id"]}, {
+            "match_count": existing_rule.get("match_count", 0) + 1,
+            "amount_min": new_amount_min,
+            "amount_max": new_amount_max,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        })
+    else:
+        # Create new rule
+        now = datetime.now(timezone.utc).isoformat()
+        rule = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "description_pattern": description.lower(),
+            "account_id": account_id,
+            "transaction_type": transaction_type,
+            "amount_min": amount,
+            "amount_max": amount,
+            "category_name": category_name,
+            "match_count": 1,
+            "created_at": now,
+            "updated_at": now
+        }
+        db.insert("user_categorization_rules", rule)
+
+
+def match_user_categorization_rule(
+    description: str,
+    user_id: str,
+    account_id: Optional[str],
+    transaction_type: Optional[str],
+    amount: Optional[float],
+    db
+) -> Optional[tuple[str, float]]:
+    """
+    Match transaction against user's personal categorization rules.
+
+    Returns (category_name, confidence) if a rule matches, None otherwise.
+    """
+    if not description:
+        return None
+
+    # Get all user rules
+    user_rules = db.find("user_categorization_rules", {"user_id": user_id})
+
+    if not user_rules:
+        return None
+
+    description_lower = description.lower()
+    best_match = None
+    best_score = 0
+
+    for rule in user_rules:
+        score = 0
+        pattern = rule.get("description_pattern", "").lower()
+
+        # Check if description matches the pattern
+        if pattern in description_lower:
+            score += 10  # Base score for description match
+
+            # Bonus if description is exact match
+            if pattern == description_lower:
+                score += 5
+
+            # Check account match
+            if rule.get("account_id") and rule.get("account_id") == account_id:
+                score += 3
+
+            # Check transaction type match
+            if rule.get("transaction_type") and rule.get("transaction_type") == transaction_type:
+                score += 2
+
+            # Check amount range match
+            if amount is not None:
+                amount_min = rule.get("amount_min")
+                amount_max = rule.get("amount_max")
+                if amount_min is not None and amount_max is not None:
+                    if amount_min <= abs(amount) <= amount_max:
+                        score += 2
+
+            # Prioritize rules with higher match counts (more established patterns)
+            match_count = rule.get("match_count", 1)
+            if match_count > 1:
+                score += min(match_count * 0.5, 3)  # Max 3 bonus points for match history
+
+            if score > best_score:
+                best_score = score
+                best_match = (rule.get("category_name"), 0.95)  # High confidence for user rules
+
+    return best_match
+
+
 def auto_categorize_expense(
     description: str,
     user_id: str,
     db,
     skip_special_categories: bool = False,
     transaction_amount: Optional[float] = None,
+    account_id: Optional[str] = None,
+    transaction_type: Optional[str] = None,
     account_type: Optional[str] = None,
     use_llm: bool = True
 ) -> tuple[Optional[str], float, str]:
     """
     Intelligently auto-categorize a transaction using hybrid approach:
-    1. Merchant memory (learned from user's past categorizations)
-    2. Keyword matching (fast, rule-based)
-    3. LLM semantic understanding (optional, for ambiguous cases)
+    1. User categorization rules (highest priority - learned from manual changes)
+    2. Merchant memory (learned from user's past categorizations)
+    3. Keyword matching (fast, rule-based)
+    4. LLM semantic understanding (optional, for ambiguous cases)
 
     Args:
         description: Transaction description
@@ -232,6 +361,8 @@ def auto_categorize_expense(
         db: Database service instance
         skip_special_categories: If True, skip Transfer/Income/Investment categories
         transaction_amount: Transaction amount (for direction-based categorization)
+        account_id: Account ID (for rule matching)
+        transaction_type: Transaction type (for rule matching)
         account_type: Account type (checking, credit_card, investment, savings)
         use_llm: If True, use LLM for semantic understanding
 
@@ -239,10 +370,24 @@ def auto_categorize_expense(
         Tuple of (category, confidence, source)
         - category: Categorized name or None
         - confidence: Float between 0.0 and 1.0
-        - source: 'merchant_memory', 'keyword', 'llm', 'unknown'
+        - source: 'user_rule', 'merchant_memory', 'keyword', 'llm', 'unknown'
     """
     if not description:
         return None, 0.0, "unknown"
+
+    # STEP 1: Check user categorization rules first (highest priority)
+    user_rule_match = match_user_categorization_rule(
+        description=description,
+        user_id=user_id,
+        account_id=account_id,
+        transaction_type=transaction_type,
+        amount=transaction_amount,
+        db=db
+    )
+
+    if user_rule_match:
+        category, confidence = user_rule_match
+        return category, confidence, "user_rule"
 
     description_lower = description.lower()
 
@@ -954,6 +1099,22 @@ async def update_expense_category(
         logging.warning(f"Failed to update merchant memory: {e}")
         # Continue with category update even if merchant memory fails
 
+    # Save user categorization rule for future automated categorization
+    try:
+        save_user_categorization_rule(
+            user_id=current_user.id,
+            description=existing_expense.get("description", ""),
+            account_id=existing_expense.get("account_id"),
+            transaction_type=existing_expense.get("type"),
+            amount=abs(existing_expense.get("amount", 0)),
+            category_name=category,
+            db=db
+        )
+    except Exception as e:
+        import logging
+        logging.warning(f"Failed to save user categorization rule: {e}")
+        # Continue with category update even if rule saving fails
+
     # Update expense category with high confidence (user-confirmed)
     db.update(
         "cashflow",
@@ -1210,6 +1371,8 @@ def categorize_transaction(
             db,
             skip_special_categories=False,  # Allow specific income categories (Dividends, Interest, Bonus)
             transaction_amount=txn_amount,
+            account_id=txn.get("account_id"),
+            transaction_type=txn.get("type"),
             account_type=current_account_type,
             use_llm=use_llm
         )
@@ -1631,6 +1794,8 @@ async def reclassify_uncategorized_expenses(
             db,
             skip_special_categories=True,
             transaction_amount=expense_amount,
+            account_id=account_id,
+            transaction_type=expense.get("type"),
             account_type=account_type
         )
 
