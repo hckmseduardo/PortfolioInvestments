@@ -551,9 +551,15 @@ const Dividends = () => {
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" gutterBottom>
-        Dividend Income
-      </Typography>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" gutterBottom>
+          Dividend Income
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+          Dividends are automatically tracked from cashflow transactions categorized as "Dividends".
+          To add or modify dividend transactions, categorize them in the <a href="/cashflow" style={{ color: 'inherit', textDecoration: 'underline' }}>Cashflow section</a>.
+        </Typography>
+      </Box>
 
       <Grid container spacing={3}>
         <Grid item xs={12}>

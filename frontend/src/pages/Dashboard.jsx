@@ -746,9 +746,19 @@ const Dashboard = () => {
         setDividendSummary(dividendsRes.data);
 
         // Calculate breakdowns client-side from positions (same as Portfolio section)
-        const positions = positionsRes.data || [];
-        console.log('Dashboard fetchData - positions:', positions);
+        let positions = positionsRes.data || [];
+        console.log('Dashboard fetchData - positions (first try):', positions);
         console.log('Dashboard fetchData - positions.length:', positions.length);
+
+        // If no positions for the requested date and we're looking at current, fetch the last available positions
+        if (positions.length === 0 && !valuationDate) {
+          console.log('Dashboard fetchData - No current positions, fetching last available...');
+          const lastPositionsRes = await positionsAPI.getAggregated(null, undefined);
+          positions = lastPositionsRes.data || [];
+          console.log('Dashboard fetchData - last positions:', positions);
+          console.log('Dashboard fetchData - last positions.length:', positions.length);
+        }
+
         const totalMarketValue = positions.reduce((sum, pos) => sum + (pos.market_value || 0), 0);
         console.log('Dashboard fetchData - totalMarketValue:', totalMarketValue);
 

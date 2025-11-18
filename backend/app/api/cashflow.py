@@ -46,11 +46,21 @@ CATEGORY_KEYWORDS = {
         "employment income", "regular pay", "net pay", "gross pay"
     ],
 
+    "Refund": [
+        "refund", "tax refund", "revenue refund", "cra refund", "irs refund",
+        "gov. of canada", "gouv. du canada", "government refund", "revenue agency",
+        "canada revenue", "tax return", "rebate", "reimbursement",
+        "hst refund", "gst refund", "vat refund", "sales tax refund",
+        "insurance refund", "insurance reimbursement", "claim payment", "claim refund",
+        "health insurance refund", "dental refund", "medical reimbursement",
+        "coverage reimbursement", "premium refund", "policy refund"
+    ],
+
     # === GENERAL INCOME KEYWORDS (Amount > 0) ===
     "Income": [
-        "deposit", "refund",
-        "transfer from", "payment received", "reimbursement", "cashback", "rebate",
-        "tax refund", "income", "earnings", "commission"
+        "deposit",
+        "transfer from", "payment received", "cashback",
+        "income", "earnings", "commission"
     ],
 
     # === INVESTMENT KEYWORDS ===
@@ -244,7 +254,7 @@ def auto_categorize_expense(
     cleaned_words = [w for w in description_lower.split() if w not in noise_words and len(w) > 2]
 
     # Intelligent keyword-based categorization with weighted scoring
-    # Priority order: Credit Card Payment > Transfer > Specific Income (Dividends/Interest/Bonus/Salary) > General Income/Investment > Expense categories
+    # Priority order: Credit Card Payment > Transfer > Specific Income (Dividends/Interest/Bonus/Salary/Refund) > General Income/Investment > Expense categories
     category_scores = {}
 
     # Define priority tiers (higher number = higher priority)
@@ -255,13 +265,14 @@ def auto_categorize_expense(
         "Interest": 45,
         "Bonus": 45,
         "Salary": 45,
+        "Refund": 45,
         "Income": 40,
         "Investment": 40,
     }
 
     for category, keywords in CATEGORY_KEYWORDS.items():
         # Skip special categories if requested
-        if skip_special_categories and category in ["Transfer", "Income", "Investment", "Credit Card Payment", "Dividends", "Interest", "Bonus", "Salary"]:
+        if skip_special_categories and category in ["Transfer", "Income", "Investment", "Credit Card Payment", "Dividends", "Interest", "Bonus", "Salary", "Refund"]:
             continue
 
         score = 0
@@ -289,17 +300,17 @@ def auto_categorize_expense(
     if transaction_amount is not None and category_scores:
         if transaction_amount > 0:
             # Positive amount: Income categories (including specific types), Transfer In
-            # Keep only Income, Dividends, Interest, Bonus, Salary, Transfer, and Credit Card Payment categories
+            # Keep only Income, Dividends, Interest, Bonus, Salary, Refund, Transfer, and Credit Card Payment categories
             category_scores = {
                 cat: score for cat, score in category_scores.items()
-                if cat in ["Income", "Dividends", "Interest", "Bonus", "Salary", "Transfer", "Credit Card Payment", "Investment"]
+                if cat in ["Income", "Dividends", "Interest", "Bonus", "Salary", "Refund", "Transfer", "Credit Card Payment", "Investment"]
             }
         else:
             # Negative amount: Expense, Transfer Out, or Investment
             # Exclude all Income categories (general and specific)
             category_scores = {
                 cat: score for cat, score in category_scores.items()
-                if cat not in ["Income", "Dividends", "Interest", "Bonus", "Salary"]
+                if cat not in ["Income", "Dividends", "Interest", "Bonus", "Salary", "Refund"]
             }
 
     # Get best keyword match
@@ -832,7 +843,7 @@ async def initialize_default_categories(
         {"name": "Freelance", "type": "money_in", "color": "#A5D6A7", "budget_limit": None},
         {"name": "Dividends", "type": "money_in", "color": "#C8E6C9", "budget_limit": None, "is_protected": True},  # Protected category
         {"name": "Interest", "type": "money_in", "color": "#8BC34A", "budget_limit": None, "is_protected": True},  # Protected category
-        {"name": "Refund", "type": "money_in", "color": "#CDDC39", "budget_limit": None},
+        {"name": "Refund", "type": "money_in", "color": "#CDDC39", "budget_limit": None, "is_protected": True},  # Protected category
         {"name": "Investment Out", "type": "money_in", "color": "#0D47A1", "budget_limit": None},
         {"name": "Stock Sale", "type": "money_in", "color": "#1E88E5", "budget_limit": None},
         {"name": "ETF Sale", "type": "money_in", "color": "#1976D2", "budget_limit": None},
@@ -1376,6 +1387,7 @@ def run_expense_conversion(
         {"name": "Interest", "type": "income", "color": "#8BC34A", "is_protected": True},
         {"name": "Bonus", "type": "income", "color": "#81C784", "is_protected": True},
         {"name": "Salary", "type": "income", "color": "#66BB6A", "is_protected": True},
+        {"name": "Refund", "type": "income", "color": "#CDDC39", "is_protected": True},
         {"name": "Investment", "type": "investment", "color": "#1976D2"},
         {"name": "Investment In", "type": "investment", "color": "#2196F3"},
         {"name": "Investment Out", "type": "investment", "color": "#0D47A1"},

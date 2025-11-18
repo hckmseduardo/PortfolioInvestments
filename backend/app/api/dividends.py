@@ -3,12 +3,50 @@ from typing import List, Optional
 from datetime import datetime
 from collections import defaultdict
 from sqlalchemy.orm import Session
+import re
 from app.models.schemas import Dividend, DividendCreate, DividendSummary, User
 from app.api.auth import get_current_user
 from app.database.postgres_db import get_db as get_session
 from app.database.db_service import get_db_service
 
 router = APIRouter(prefix="/dividends", tags=["dividends"])
+
+def _extract_ticker_from_description(description: str) -> Optional[str]:
+    """
+    Extract stock ticker from transaction description.
+    Common patterns:
+    - "AAPL DIVIDEND"
+    - "Dividend - MSFT"
+    - "DIV GOOGL"
+    - "TSLA DIV PAYMENT"
+    """
+    if not description:
+        return None
+
+    # Common ticker patterns (2-5 uppercase letters)
+    # Look for standalone uppercase words that could be tickers
+    words = description.upper().split()
+
+    # Filter out common non-ticker words
+    excluded_words = {
+        'DIV', 'DIVIDEND', 'DIVIDENDS', 'PAYMENT', 'INCOME', 'DISTRIBUTION',
+        'DIST', 'REINVEST', 'REINVESTMENT', 'STOCK', 'EQUITY', 'QUARTERLY',
+        'ANNUAL', 'MONTHLY', 'ETF', 'FUND', 'FROM', 'TO', 'AT', 'THE', 'A',
+        'AN', 'IN', 'ON', 'FOR', 'WITH', 'AND', 'OR'
+    }
+
+    for word in words:
+        # Remove punctuation
+        clean_word = re.sub(r'[^\w]', '', word)
+
+        # Check if it's a potential ticker (2-5 uppercase letters, not in excluded list)
+        if (2 <= len(clean_word) <= 5 and
+            clean_word.isalpha() and
+            clean_word.isupper() and
+            clean_word not in excluded_words):
+            return clean_word
+
+    return None
 
 def _parse_date(value: Optional[str], *, end_of_day: bool = False) -> Optional[datetime]:
     if not value:
@@ -61,20 +99,14 @@ async def create_dividend(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
-    db = get_db_service(session)
-
-    account = db.find_one("accounts", {"id": dividend.account_id, "user_id": current_user.id})
-    if not account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found"
-        )
-
-    dividend_doc = dividend.model_dump()
-    created_dividend = db.insert("dividends", dividend_doc)
-    session.commit()
-
-    return Dividend(**created_dividend)
+    """
+    Dividends are now automatically tracked from cashflow transactions.
+    This endpoint is deprecated. To add a dividend, categorize a cashflow transaction as 'Dividends'.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Dividends are now tracked from cashflow transactions. Categorize transactions as 'Dividends' in the Cashflow section."
+    )
 
 @router.get("", response_model=List[Dividend])
 async def get_dividends(
@@ -87,6 +119,9 @@ async def get_dividends(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
+    """
+    Get dividend transactions from cashflow classified as 'Dividends' category.
+    """
     db = get_db_service(session)
     start_dt = _parse_date(start_date, end_of_day=False)
     end_dt = _parse_date(end_date, end_of_day=True)
@@ -107,6 +142,7 @@ async def get_dividends(
         if not allowed_tickers:
             return []
 
+    # Query cashflow transactions with category="Dividends"
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
         if not account:
@@ -115,27 +151,51 @@ async def get_dividends(
                 detail="Account not found"
             )
 
-        query = {"account_id": account_id}
-        if ticker:
-            query["ticker"] = ticker
-
-        dividends = db.find("dividends", query)
+        cashflow_transactions = db.find("cashflow", {
+            "account_id": account_id,
+            "category": "Dividends"
+        })
     else:
         user_accounts = db.find("accounts", {"user_id": current_user.id})
         account_ids = [acc["id"] for acc in user_accounts]
 
-        dividends = []
+        cashflow_transactions = []
         for acc_id in account_ids:
-            query = {"account_id": acc_id}
-            if ticker:
-                query["ticker"] = ticker
-            dividends.extend(db.find("dividends", query))
+            cashflow_transactions.extend(db.find("cashflow", {
+                "account_id": acc_id,
+                "category": "Dividends"
+            }))
 
-    # Filter by instrument classification tickers
-    if allowed_tickers is not None:
-        dividends = [d for d in dividends if d.get("ticker") in allowed_tickers]
+    # Transform cashflow transactions to dividend format
+    dividends = []
+    for txn in cashflow_transactions:
+        # Extract ticker from description
+        extracted_ticker = _extract_ticker_from_description(txn.get("description", ""))
 
+        # Filter by ticker if specified
+        if ticker and extracted_ticker != ticker:
+            continue
+
+        # Filter by instrument classification tickers
+        if allowed_tickers is not None and extracted_ticker not in allowed_tickers:
+            continue
+
+        # Create dividend record from cashflow transaction
+        dividend_record = {
+            "id": txn.get("id"),
+            "account_id": txn.get("account_id"),
+            "date": txn.get("date"),
+            "ticker": extracted_ticker or "UNKNOWN",
+            "amount": txn.get("amount", 0),
+            "currency": "CAD",  # Default currency, could be enhanced later
+            "description": txn.get("description", "")
+        }
+        dividends.append(dividend_record)
+
+    # Filter by date
     dividends = _filter_dividends_by_date(dividends, start_dt, end_dt)
+
+    # Sort by date
     dividends = sorted(dividends, key=lambda item: item.get("date", ""), reverse=True)
 
     return [Dividend(**div) for div in dividends]
@@ -150,6 +210,9 @@ async def get_dividend_summary(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
+    """
+    Get dividend summary from cashflow transactions classified as 'Dividends' category.
+    """
     db = get_db_service(session)
     start_dt = _parse_date(start_date, end_of_day=False)
     end_dt = _parse_date(end_date, end_of_day=True)
@@ -176,6 +239,7 @@ async def get_dividend_summary(
                 period_end=end_dt.isoformat() if end_dt else None
             )
 
+    # Query cashflow transactions with category="Dividends"
     if account_id:
         account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
         if not account:
@@ -183,19 +247,38 @@ async def get_dividend_summary(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Account not found"
             )
-        dividends = db.find("dividends", {"account_id": account_id})
+        cashflow_transactions = db.find("cashflow", {
+            "account_id": account_id,
+            "category": "Dividends"
+        })
     else:
         user_accounts = db.find("accounts", {"user_id": current_user.id})
         account_ids = [acc["id"] for acc in user_accounts]
 
-        dividends = []
+        cashflow_transactions = []
         for acc_id in account_ids:
-            dividends.extend(db.find("dividends", {"account_id": acc_id}))
+            cashflow_transactions.extend(db.find("cashflow", {
+                "account_id": acc_id,
+                "category": "Dividends"
+            }))
 
-    # Filter by instrument classification tickers
-    if allowed_tickers is not None:
-        dividends = [d for d in dividends if d.get("ticker") in allowed_tickers]
+    # Transform cashflow transactions to dividend format
+    dividends = []
+    for txn in cashflow_transactions:
+        extracted_ticker = _extract_ticker_from_description(txn.get("description", ""))
 
+        # Filter by instrument classification tickers
+        if allowed_tickers is not None and extracted_ticker not in allowed_tickers:
+            continue
+
+        dividend_record = {
+            "ticker": extracted_ticker or "UNKNOWN",
+            "amount": txn.get("amount", 0),
+            "date": txn.get("date")
+        }
+        dividends.append(dividend_record)
+
+    # Filter by date
     dividends = _filter_dividends_by_date(dividends, start_dt, end_dt)
 
     total_dividends = sum(div.get("amount", 0) for div in dividends)
@@ -260,23 +343,11 @@ async def delete_dividend(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
-    db = get_db_service(session)
-
-    existing_dividend = db.find_one("dividends", {"id": dividend_id})
-    if not existing_dividend:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Dividend not found"
-        )
-
-    account = db.find_one("accounts", {"id": existing_dividend["account_id"], "user_id": current_user.id})
-    if not account:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this dividend"
-        )
-
-    db.delete("dividends", {"id": dividend_id})
-    session.commit()
-
-    return {"message": "Dividend deleted successfully"}
+    """
+    Dividends are now automatically tracked from cashflow transactions.
+    This endpoint is deprecated. To remove a dividend, recategorize the cashflow transaction.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Dividends are now tracked from cashflow transactions. To remove, recategorize the transaction in the Cashflow section."
+    )
