@@ -18,6 +18,7 @@ from app.models.schemas import (
 from app.api.auth import get_current_user
 from app.database.postgres_db import get_db as get_session
 from app.database.db_service import get_db_service
+from app.database.models import SecurityType, SecuritySubtype, Sector
 from app.config import settings
 from app.services.market_data import market_service, PriceQuote
 from app.services.job_queue import enqueue_price_fetch_job
@@ -293,7 +294,8 @@ def _build_aggregated_positions(
     db,
     account_ids: List[str],
     as_of: Optional[datetime],
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    session: Optional[Session] = None
 ) -> List[Dict[str, float]]:
     position_maps: List[Dict[str, Dict[str, float]]] = []
 
@@ -432,13 +434,15 @@ def _build_aggregated_positions(
                 metadata_lookup[ticker_key] = record
 
     # Load all security metadata (these are global, not user-specific)
+    # Use SQLAlchemy ORM queries if session is available
     security_type_lookup: Dict[str, Dict] = {}
-    for record in db.find("security_types", {}):
-        security_type_lookup[record["name"]] = record
-    for record in db.find("sectors", {}):
-        sector_lookup[record["name"]] = record
-    for record in db.find("security_subtypes", {}):
-        subtype_lookup[record["name"]] = record
+    if session:
+        for record in session.query(SecurityType).all():
+            security_type_lookup[record.name] = {"name": record.name, "color": record.color}
+        for record in session.query(Sector).all():
+            sector_lookup[record.name] = {"name": record.name, "color": record.color}
+        for record in session.query(SecuritySubtype).all():
+            subtype_lookup[record.name] = {"name": record.name, "color": record.color}
 
     for position in aggregated:
         ticker_key = (position.get("ticker") or "").upper()
@@ -664,7 +668,7 @@ async def get_aggregated_positions(
         as_of = _normalize_future_as_current(as_of)
         as_of = _normalize_future_as_current(as_of)
 
-    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id, session)
     filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
     return [AggregatedPosition(**position) for position in filtered]
 
@@ -734,7 +738,7 @@ async def get_portfolio_summary(
                 detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
             )
 
-    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id, session)
     filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
 
     total_market_value = sum((pos.get("market_value") or 0) for pos in filtered)
@@ -785,7 +789,7 @@ async def get_industry_breakdown(
                 detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
             )
 
-    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id, session)
     filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
 
     # Use Plaid's industry field to match Portfolio section (with hash-based colors)
@@ -835,7 +839,7 @@ async def get_type_breakdown(
                 detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
             )
 
-    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id, session)
     filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
 
     # Use Plaid's security_type field to match Portfolio section
@@ -884,7 +888,7 @@ async def get_sector_breakdown(
                 detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
             )
 
-    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id, session)
     filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
 
     ordered = _build_simple_breakdown_slices(filtered, "sector", "sector_color")
@@ -931,7 +935,7 @@ async def get_subtype_breakdown(
                 detail="Invalid as_of_date format. Use YYYY-MM-DD or ISO 8601 datetime."
             )
 
-    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id)
+    aggregated = _build_aggregated_positions(db, account_ids, as_of, current_user.id, session)
     filtered = _filter_positions_by_classification(aggregated, instrument_type_id, instrument_industry_id)
 
     ordered = _build_simple_breakdown_slices(filtered, "security_subtype", "security_subtype_color")
