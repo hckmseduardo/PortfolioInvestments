@@ -28,7 +28,7 @@ import {
   ListItemIcon,
   ListItemText
 } from '@mui/material';
-import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History, FilterList, MoreVert, DeleteSweep, VpnKey, Replay } from '@mui/icons-material';
+import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History, FilterList, MoreVert, DeleteSweep, VpnKey, Replay, Error as ErrorIcon, Link as LinkIcon } from '@mui/icons-material';
 import { accountsAPI, transactionsAPI, plaidAPI } from '../services/api';
 import { stickyTableHeadSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
@@ -713,6 +713,69 @@ const AccountManagement = () => {
     }
   };
 
+  const handleEnableInvestments = async () => {
+    handleActionMenuClose();
+    if (!selectedAccount || !selectedAccount.plaid_item_id) return;
+
+    const plaidItem = plaidItems.find(item => item.id === selectedAccount.plaid_item_id);
+    if (!plaidItem) {
+      setError('Could not find Plaid connection details');
+      return;
+    }
+
+    if (!plaidItem.supports_investments) {
+      setError(`${plaidItem.institution_name} does not support investment tracking via Plaid`);
+      return;
+    }
+
+    if (plaidItem.investments_enabled) {
+      setError('Investment tracking is already enabled for this connection');
+      return;
+    }
+
+    setPlaidLoading(true);
+    setError('');
+
+    try {
+      // Get update mode link token from backend
+      const response = await plaidAPI.createUpdateLinkToken(selectedAccount.plaid_item_id);
+      const { link_token } = response.data;
+
+      // Open Plaid Link in update mode to add investments product
+      const plaidHandler = window.Plaid.create({
+        token: link_token,
+        onSuccess: async (public_token, metadata) => {
+          setSuccess(`Investment tracking enabled for ${plaidItem.institution_name}! Syncing holdings...`);
+
+          try {
+            // Mark investments as enabled
+            await plaidAPI.enableInvestments(selectedAccount.plaid_item_id);
+
+            // Trigger sync to fetch investment holdings
+            await plaidAPI.syncTransactions(selectedAccount.plaid_item_id);
+            setSuccess(`Investment tracking enabled and sync started for ${plaidItem.institution_name}`);
+          } catch (err) {
+            setError('Investment tracking enabled but sync failed. Please try manual sync.');
+          }
+
+          loadPlaidItems();
+          loadAccounts();
+        },
+        onExit: (err, metadata) => {
+          if (err != null) {
+            setError(`Failed to enable investment tracking: ${err.error_message}`);
+          }
+          setPlaidLoading(false);
+        },
+      });
+
+      plaidHandler.open();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to enable investment tracking');
+      setPlaidLoading(false);
+    }
+  };
+
   const handleDeletePlaidTransactionsClick = () => {
     // Close menu but keep selectedAccount for the dialog
     setActionMenuAnchor(null);
@@ -768,6 +831,66 @@ const AccountManagement = () => {
   const handleDeletePlaidTransactionsCancel = () => {
     setDeletePlaidDialogOpen(false);
     setSelectedAccount(null);
+  };
+
+  const handleRelink = async () => {
+    handleActionMenuClose();
+    if (!selectedAccount || !selectedAccount.plaid_item_id) return;
+
+    const itemId = selectedAccount.plaid_item_id;
+    const institutionName = selectedAccount.plaid_institution_name;
+
+    console.log('[RELINK] Starting relink for:', institutionName, 'Item ID:', itemId);
+
+    setPlaidLoading(true);
+    setError('');
+
+    try {
+      // Get update mode link token from backend
+      console.log('[RELINK] Requesting update link token...');
+      const response = await plaidAPI.createUpdateLinkToken(itemId);
+      const { link_token } = response.data;
+      console.log('[RELINK] Got link token, opening Plaid Link...');
+
+      // Open Plaid Link in update mode to relink
+      const plaidHandler = window.Plaid.create({
+        token: link_token,
+        onSuccess: async (public_token, metadata) => {
+          console.log('[RELINK] Plaid Link success, calling relink endpoint...');
+          try {
+            // Call relink endpoint to clear error status
+            await plaidAPI.relink(itemId);
+            console.log('[RELINK] Relink successful!');
+            setSuccess(`Successfully relinked ${institutionName}! The connection is now active.`);
+
+            // Reload data to show updated status
+            loadPlaidItems();
+            loadAccounts();
+          } catch (relinkErr) {
+            console.error('[RELINK] Error calling relink endpoint:', relinkErr);
+            setError(`Relink completed but failed to update status: ${relinkErr.response?.data?.detail || relinkErr.message}`);
+          }
+          setPlaidLoading(false);
+        },
+        onExit: (err, metadata) => {
+          console.log('[RELINK] Plaid Link exited', err ? `with error: ${err.error_message}` : 'by user');
+          if (err != null) {
+            // Provide helpful message with alternative solution
+            setError(
+              `Failed to relink: ${err.error_message || 'Connection error'}. ` +
+              `Try disconnecting this account (via Actions menu → Disconnect from Plaid) and then linking it again.`
+            );
+          }
+          setPlaidLoading(false);
+        },
+      });
+
+      plaidHandler.open();
+    } catch (err) {
+      console.error('[RELINK] Error during relink:', err);
+      setError(err.response?.data?.detail || err.message || 'Failed to create relink token');
+      setPlaidLoading(false);
+    }
   };
 
   const getAccountTypeColor = (type) => {
@@ -1078,41 +1201,86 @@ const AccountManagement = () => {
                       <TableCell>{account.account_number}</TableCell>
                       <TableCell align="right">{formatCurrency(derivedBalance)}</TableCell>
                       <TableCell align="center">
-                        {account.is_plaid_linked && (
-                          <Tooltip
-                            title={
-                              <Box>
-                                <Typography variant="caption" display="block">
-                                  Last Sync: {formatLastSyncTime(
-                                    plaidItems.find(item => item.item_id === account.plaid_item_id)?.last_synced
-                                  )}
-                                </Typography>
-                              </Box>
-                            }
-                            arrow
-                          >
-                            <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center', alignItems: 'center' }}>
-                              <IconButton
-                                size="small"
-                                color="primary"
-                                onClick={() => handleSync(account.plaid_item_id, account.plaid_institution_name)}
-                                disabled={syncingItems[account.plaid_item_id]}
-                                title="Sync Now"
-                              >
-                                {syncingItems[account.plaid_item_id] ? <CircularProgress size={16} /> : <Sync />}
-                              </IconButton>
-                              <IconButton
-                                size="small"
-                                color="primary"
-                                onClick={() => handleFullResyncClick(account.plaid_item_id, account.plaid_institution_name)}
-                                disabled={syncingItems[account.plaid_item_id]}
-                                title="Full Resync - Import All History"
-                              >
-                                <History />
-                              </IconButton>
+                        {account.is_plaid_linked && (() => {
+                          const plaidItem = plaidItems.find(item => item.id === account.plaid_item_id);
+                          const supportsInvestments = plaidItem?.supports_investments;
+                          const investmentsEnabled = plaidItem?.investments_enabled;
+                          const hasError = plaidItem?.status === 'login_required' || plaidItem?.status === 'error';
+
+                          return (
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, alignItems: 'center' }}>
+                              {hasError ? (
+                                // Show error state with relink option
+                                <Tooltip
+                                  title={
+                                    <Box>
+                                      <Typography variant="caption" display="block" color="error.light">
+                                        Connection Error: {plaidItem?.error_message || 'Please relink your account'}
+                                      </Typography>
+                                    </Box>
+                                  }
+                                  arrow
+                                >
+                                  <Chip
+                                    icon={<ErrorIcon />}
+                                    label="Needs Relink"
+                                    color="error"
+                                    size="small"
+                                    variant="outlined"
+                                  />
+                                </Tooltip>
+                              ) : (
+                                // Show normal sync buttons
+                                <Tooltip
+                                  title={
+                                    <Box>
+                                      <Typography variant="caption" display="block">
+                                        Last Sync: {formatLastSyncTime(plaidItem?.last_synced)}
+                                      </Typography>
+                                      {supportsInvestments && (
+                                        <Typography variant="caption" display="block">
+                                          {investmentsEnabled ? '✓ Investment Tracking Enabled' : '○ Investment Tracking Available'}
+                                        </Typography>
+                                      )}
+                                    </Box>
+                                  }
+                                  arrow
+                                >
+                                  <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center', alignItems: 'center' }}>
+                                    <IconButton
+                                      size="small"
+                                      color="primary"
+                                      onClick={() => handleSync(account.plaid_item_id, account.plaid_institution_name)}
+                                      disabled={syncingItems[account.plaid_item_id]}
+                                      title="Sync Now"
+                                    >
+                                      {syncingItems[account.plaid_item_id] ? <CircularProgress size={16} /> : <Sync />}
+                                    </IconButton>
+                                    <IconButton
+                                      size="small"
+                                      color="primary"
+                                      onClick={() => handleFullResyncClick(account.plaid_item_id, account.plaid_institution_name)}
+                                      disabled={syncingItems[account.plaid_item_id]}
+                                      title="Full Resync - Import All History"
+                                    >
+                                      <History />
+                                    </IconButton>
+                                  </Box>
+                                </Tooltip>
+                              )}
+                              {/* Investment Tracking Status Badge */}
+                              {!hasError && supportsInvestments && (
+                                <Chip
+                                  label={investmentsEnabled ? "Investments" : "Inv. Available"}
+                                  color={investmentsEnabled ? "success" : "default"}
+                                  size="small"
+                                  variant={investmentsEnabled ? "filled" : "outlined"}
+                                  sx={{ fontSize: '0.7rem', height: '18px' }}
+                                />
+                              )}
                             </Box>
-                          </Tooltip>
-                        )}
+                          );
+                        })()}
                       </TableCell>
                       <TableCell align="center">
                         <Tooltip title="Actions">
@@ -1143,6 +1311,31 @@ const AccountManagement = () => {
           sx: { width: 320 }
         }}
       >
+        {/* Show Relink option first if account has error */}
+        {selectedAccount?.is_plaid_linked && (() => {
+          const plaidItem = plaidItems.find(item => item.id === selectedAccount.plaid_item_id);
+          const hasError = plaidItem?.status === 'login_required' || plaidItem?.status === 'error';
+
+          if (hasError) {
+            return (
+              <>
+                <MenuItem onClick={handleRelink}>
+                  <ListItemIcon>
+                    <LinkIcon fontSize="small" color="error" />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary="Relink Account"
+                    secondary="Reconnect with your bank. If this fails, try Disconnect from Plaid instead."
+                    primaryTypographyProps={{ color: 'error' }}
+                  />
+                </MenuItem>
+                <Divider />
+              </>
+            );
+          }
+          return null;
+        })()}
+
         <MenuItem onClick={handleEditFromMenu}>
           <ListItemIcon>
             <Edit fontSize="small" />
@@ -1153,17 +1346,45 @@ const AccountManagement = () => {
           />
         </MenuItem>
 
-        {selectedAccount?.is_plaid_linked && (
-          <MenuItem onClick={handleUpdatePermissions}>
-            <ListItemIcon>
-              <VpnKey fontSize="small" color="primary" />
-            </ListItemIcon>
-            <ListItemText
-              primary="Update Permissions"
-              secondary="Add investment access without disconnecting"
-            />
-          </MenuItem>
-        )}
+        {selectedAccount?.is_plaid_linked && (() => {
+          const plaidItem = plaidItems.find(item => item.id === selectedAccount.plaid_item_id);
+          const supportsInvestments = plaidItem?.supports_investments;
+          const investmentsEnabled = plaidItem?.investments_enabled;
+
+          // Debug logging
+          console.log('Selected Account:', selectedAccount.label, selectedAccount.plaid_item_id);
+          console.log('Found Plaid Item:', plaidItem);
+          console.log('All Plaid Items:', plaidItems);
+          console.log('Supports Investments:', supportsInvestments, 'Enabled:', investmentsEnabled);
+
+          // Show "Enable Investment Tracking" if supported but not enabled
+          if (supportsInvestments && !investmentsEnabled) {
+            return (
+              <MenuItem onClick={handleEnableInvestments}>
+                <ListItemIcon>
+                  <AccountBalanceWallet fontSize="small" color="success" />
+                </ListItemIcon>
+                <ListItemText
+                  primary="Enable Investment Tracking"
+                  secondary="Add access to holdings and investment transactions"
+                />
+              </MenuItem>
+            );
+          }
+
+          // Otherwise show generic "Update Permissions"
+          return (
+            <MenuItem onClick={handleUpdatePermissions}>
+              <ListItemIcon>
+                <VpnKey fontSize="small" color="primary" />
+              </ListItemIcon>
+              <ListItemText
+                primary="Update Permissions"
+                secondary="Modify connection settings"
+              />
+            </MenuItem>
+          );
+        })()}
 
         {selectedAccount?.is_plaid_linked && (
           <MenuItem onClick={handleReplaySync}>

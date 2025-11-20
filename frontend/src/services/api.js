@@ -377,6 +377,8 @@ export const plaidAPI = {
   replaySync: (itemId) => api.post(`/plaid/replay-sync/${itemId}`),
   getSyncStatus: (jobId) => api.get(`/plaid/sync-status/${jobId}`),
   disconnectItem: (itemId) => api.delete(`/plaid/disconnect/${itemId}`),
+  enableInvestments: (itemId) => api.post(`/plaid/items/${itemId}/enable-investments`),
+  relink: (itemId) => api.post(`/plaid/relink/${itemId}`),
 };
 
 // Export convenience methods for PlaidLink component

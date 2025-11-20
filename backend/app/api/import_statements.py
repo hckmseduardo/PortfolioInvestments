@@ -539,55 +539,12 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
         amount = transaction_data.get('total', 0)
         txn_type = transaction_classifier.classify_transaction(amount)
 
-        # Skip transactions from Plaid sync date onwards
-        # If account is synced with Plaid, only import historical transactions before first Plaid transaction
-        txn_date = transaction_data.get('date')
-        if txn_date:
-            try:
-                from app.database.models import Account as AccountModel
-                from sqlalchemy.orm import Session
-
-                # Get session from db object
-                if hasattr(db, 'session'):
-                    session = db.session
-
-                    # Check if account has first_plaid_transaction_date set
-                    account_record = session.query(AccountModel).filter(
-                        AccountModel.id == account_id
-                    ).first()
-
-                    if account_record and account_record.first_plaid_transaction_date:
-                        # Convert transaction date to datetime for comparison
-                        if isinstance(txn_date, datetime):
-                            txn_datetime = txn_date
-                        elif isinstance(txn_date, date):
-                            txn_datetime = datetime.combine(txn_date, datetime.min.time())
-                        else:
-                            txn_datetime = txn_date
-
-                        # Skip if transaction is on or after first Plaid transaction date
-                        if txn_datetime >= account_record.first_plaid_transaction_date:
-                            transactions_skipped += 1
-                            skipped_transactions_details.append({
-                                "date": str(transaction_data.get('date')),
-                                "description": transaction_data.get('description'),
-                                "amount": transaction_data.get('total'),
-                                "type": txn_type,
-                                "reason": f"On or after first Plaid transaction date ({account_record.first_plaid_transaction_date.date()})"
-                            })
-                            logger.info(
-                                f"Skipping transaction from {txn_date} - on or after first Plaid transaction date "
-                                f"({account_record.first_plaid_transaction_date.date()}): {transaction_data.get('description')}"
-                            )
-                            continue
-            except Exception as e:
-                logger.warning(f"Could not check first Plaid transaction date: {e}")
-
         # Enhanced duplicate detection:
-        # 1. Check for Plaid-synced transactions (same account, date, amount)
-        # 2. Check for duplicates from OTHER statements
-        # This prevents importing transactions that already exist from Plaid sync
-        # or from overlapping statement imports
+        # Check for existing transactions (same account, date, type, amount)
+        # This prevents importing:
+        #   1. Transactions already synced from Plaid
+        #   2. Duplicates from overlapping statement imports
+        # But allows importing transactions that Plaid missed (e.g., asset transfers)
 
         # Query for transactions with same account, type, and amount
         # We'll filter by date separately to handle time component differences

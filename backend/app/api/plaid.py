@@ -49,6 +49,9 @@ class PlaidItemResponse(BaseModel):
     created_at: str
     last_synced: Optional[str]
     accounts: List[Dict[str, Any]]
+    supports_investments: bool
+    investments_enabled: bool
+    investments_enabled_at: Optional[str]
 
 
 class PlaidAccountResponse(BaseModel):
@@ -78,8 +81,7 @@ async def create_link_token(current_user: User = Depends(get_current_user)):
         )
 
     result = plaid_client.create_link_token(
-        user_id=current_user.id,
-        client_name="Portfolio Investments"
+        user_id=current_user.id
     )
 
     if not result:
@@ -125,7 +127,6 @@ async def create_update_link_token(
     # Create link token in update mode with the existing access token
     result = plaid_client.create_link_token(
         user_id=current_user.id,
-        client_name="Portfolio Investments",
         access_token=decrypted_access_token
     )
 
@@ -136,6 +137,47 @@ async def create_update_link_token(
         )
 
     return LinkTokenResponse(**result)
+
+
+@router.post("/relink/{plaid_item_id}")
+async def relink_item(
+    plaid_item_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Relink an existing Plaid item after credentials have expired or changed.
+    This clears the error status and returns success after user completes Plaid Link update mode.
+
+    Note: The actual relinking happens in the frontend via Plaid Link update mode.
+    This endpoint is called AFTER the user successfully completes the relink flow
+    to clear the error status and restore the connection to active.
+    """
+    # Get the PlaidItem
+    plaid_item = db.query(PlaidItem).filter(
+        PlaidItem.id == plaid_item_id,
+        PlaidItem.user_id == current_user.id
+    ).first()
+
+    if not plaid_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plaid connection not found"
+        )
+
+    # Clear error status and restore to active
+    plaid_item.status = "active"
+    plaid_item.error_message = None
+    db.commit()
+
+    logger.info(f"Relinked Plaid item {plaid_item_id} for user {current_user.id}")
+
+    return {
+        "success": True,
+        "message": f"Successfully relinked {plaid_item.institution_name}",
+        "plaid_item_id": plaid_item_id,
+        "institution_name": plaid_item.institution_name
+    }
 
 
 @router.post("/exchange-token")
@@ -215,6 +257,16 @@ async def exchange_public_token(
             detail=f"Error during Plaid token exchange: {str(e)}"
         )
 
+    # Check if institution supports investments product
+    supports_investments = False
+    try:
+        inst_info = plaid_client.check_institution_products(institution_id)
+        if inst_info:
+            supports_investments = inst_info.get('supports_investments', False)
+            logger.info(f"Institution {institution_name} supports investments: {supports_investments}")
+    except Exception as e:
+        logger.warning(f"Could not check institution products: {e}")
+
     # Create PlaidItem record
     # Security: Encrypt access token before storing
     encrypted_access_token = encryption_service.encrypt(access_token)
@@ -229,6 +281,8 @@ async def exchange_public_token(
         status="active",
         created_at=datetime.utcnow(),
         last_synced=None,
+        supports_investments=supports_investments,
+        investments_enabled=False,
         error_message=None
     )
     db.add(plaid_item)
@@ -423,7 +477,10 @@ async def get_plaid_items(
             status=item.status,
             created_at=item.created_at.isoformat() if item.created_at else "",
             last_synced=item.last_synced.isoformat() if item.last_synced else None,
-            accounts=accounts
+            accounts=accounts,
+            supports_investments=item.supports_investments,
+            investments_enabled=item.investments_enabled,
+            investments_enabled_at=item.investments_enabled_at.isoformat() if item.investments_enabled_at else None
         ))
 
     return result
@@ -823,3 +880,62 @@ def _map_plaid_account_type(plaid_type: str, plaid_subtype: Optional[str]) -> Ac
     else:
         # Other or unknown types
         return AccountTypeEnum.OTHER
+
+
+@router.post("/items/{plaid_item_id}/enable-investments")
+async def enable_investments(
+    plaid_item_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark investments as enabled for a Plaid item after user completes update mode
+    """
+    plaid_item = db.query(PlaidItem).filter(
+        PlaidItem.id == plaid_item_id,
+        PlaidItem.user_id == current_user.id
+    ).first()
+
+    if not plaid_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plaid connection not found"
+        )
+
+    if not plaid_item.supports_investments:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This institution does not support investment tracking"
+        )
+
+    # Mark investments as enabled
+    plaid_item.investments_enabled = True
+    plaid_item.investments_enabled_at = datetime.utcnow()
+    db.commit()
+
+    logger.info(f"Enabled investments for Plaid item {plaid_item_id} ({plaid_item.institution_name})")
+
+    return {
+        "success": True,
+        "message": "Investment tracking enabled",
+        "plaid_item_id": plaid_item_id
+    }
+
+
+@router.get("/institution/{institution_id}/products")
+async def get_institution_products(
+    institution_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Check which products an institution supports
+    """
+    inst_info = plaid_client.check_institution_products(institution_id)
+
+    if not inst_info:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Institution not found or unable to retrieve products"
+        )
+
+    return inst_info
