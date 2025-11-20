@@ -81,12 +81,12 @@ def run_delete_plaid_transactions_job(user_id: str, account_id: str):
                 "total": total_plaid_txns
             })
 
-            # Delete expenses associated with Plaid transactions
+            # Delete cashflow/expenses associated with Plaid transactions
             expenses_deleted = 0
             for idx, txn in enumerate(plaid_transactions):
-                expenses = db.find("expenses", {"transaction_id": txn["id"]})
+                expenses = db.find("cashflow", {"transaction_id": txn["id"]})
                 for expense in expenses:
-                    db.delete("expenses", expense["id"])
+                    db.delete("cashflow", expense["id"])
                     expenses_deleted += 1
 
                 if (idx + 1) % 10 == 0 or (idx + 1) == total_plaid_txns:
@@ -140,27 +140,27 @@ def run_delete_plaid_transactions_job(user_id: str, account_id: str):
             # Recalculate account balance from remaining transactions
             account = db.find_one("accounts", {"id": account_id})
 
-            # Get all remaining transactions
-            remaining_transactions = db.find("transactions", {"account_id": account_id})
+            # Get all remaining transactions sorted by date
+            from app.database.models import Transaction
+            from sqlalchemy import cast, Date
+            remaining_transactions = session.query(Transaction).filter(
+                Transaction.account_id == account_id
+            ).order_by(
+                cast(Transaction.date, Date).asc(),
+                Transaction.total.desc(),
+                Transaction.id.asc()
+            ).all()
 
-            # Check if any remaining Plaid transactions exist
-            remaining_plaid_txns = [txn for txn in remaining_transactions if txn.get('plaid_transaction_id')]
-
-            # If NO Plaid transactions remain, reset opening_balance to 0
-            # The opening_balance only makes sense when there are Plaid transactions
-            if not remaining_plaid_txns:
-                logger.info(f"No Plaid transactions remain, resetting opening_balance to 0")
-                opening_balance = 0.0
-                db.update("accounts", {"id": account_id}, {
-                    "opening_balance": 0.0,
-                    "opening_balance_date": None
-                })
+            # Update account balance based on remaining transactions
+            if remaining_transactions:
+                # Set account balance to the last transaction's expected_balance
+                last_transaction = remaining_transactions[-1]
+                new_balance = last_transaction.expected_balance if last_transaction.expected_balance is not None else 0.0
+                logger.info(f"Setting balance to last transaction's expected_balance: {new_balance}")
             else:
-                opening_balance = account.get('opening_balance', 0.0) or 0.0
-
-            # Calculate new balance: opening_balance + sum of all transactions
-            new_balance = opening_balance + sum(txn.get('total', 0.0) for txn in remaining_transactions)
-            new_balance = round(new_balance, 2)
+                # No transactions remain, set balance to 0
+                new_balance = 0.0
+                logger.info(f"No transactions remain, setting balance to 0")
 
             # Update account balance
             db.update("accounts", {"id": account_id}, {"balance": new_balance})

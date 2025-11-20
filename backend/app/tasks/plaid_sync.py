@@ -18,6 +18,7 @@ from app.services.plaid_client import plaid_client
 from app.services.plaid_transaction_mapper import create_mapper
 from app.services.encryption import encryption_service
 from app.services.transaction_classifier import transaction_classifier
+from app.services.plaid_audit_logger import PlaidAuditLogger
 from app.services import plaid_replay
 from app.config import settings
 
@@ -199,52 +200,14 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                     except Exception as debug_error:
                         logger.warning(f"Failed to save debug payload: {debug_error}")
 
-                # Delete existing Plaid-imported transactions for this Plaid item's accounts
-                plaid_accounts = db.query(PlaidAccount).filter(
-                    PlaidAccount.plaid_item_id == plaid_item_id
-                ).all()
-                account_ids = [pa.account_id for pa in plaid_accounts]
-
-                if account_ids:
-                    update_stage("cleaning", {
-                        "message": f"Removing old Plaid transactions for {len(account_ids)} accounts...",
-                        "current": 0,
-                        "total": len(account_ids)
-                    })
-
-                    # Delete only Plaid-imported transactions (those with plaid_transaction_id)
-                    # First, get all Plaid transaction IDs to delete associated expenses
-                    plaid_transactions = db.query(Transaction).filter(
-                        Transaction.account_id.in_(account_ids),
-                        Transaction.plaid_transaction_id.isnot(None)
-                    ).all()
-                    plaid_transaction_ids = [txn.id for txn in plaid_transactions]
-
-                    # Delete expenses for Plaid transactions (they reference transactions)
-                    deleted_expenses = 0
-                    if plaid_transaction_ids:
-                        deleted_expenses = db.query(Expense).filter(
-                            Expense.transaction_id.in_(plaid_transaction_ids)
-                        ).delete(synchronize_session=False)
-
-                    # Delete dividends imported from Plaid (those without statement_id)
-                    deleted_dividends = db.query(Dividend).filter(
-                        Dividend.account_id.in_(account_ids),
-                        Dividend.statement_id.is_(None)
-                    ).delete(synchronize_session=False)
-
-                    # Delete Plaid-imported transactions only
-                    deleted_transactions = db.query(Transaction).filter(
-                        Transaction.account_id.in_(account_ids),
-                        Transaction.plaid_transaction_id.isnot(None)
-                    ).delete(synchronize_session=False)
-
-                    db.commit()
-                    logger.info(
-                        f"[FULL RESYNC] Deleted {deleted_transactions} Plaid-imported transactions, "
-                        f"{deleted_expenses} expenses, and {deleted_dividends} dividends "
-                        f"for {len(account_ids)} accounts"
-                    )
+                # IMPORTANT: For full resync, we DO NOT delete existing Plaid transactions
+                # Instead, we upsert them during processing (update if exists, insert if new)
+                # This preserves older transactions that Plaid's historical API no longer returns
+                # but were previously synced via the incremental sync API
+                logger.info(
+                    f"[FULL RESYNC] Will upsert transactions (update existing, insert new) "
+                    f"to preserve older Plaid transactions that may not be returned by historical API"
+                )
             else:
                 # Regular incremental sync using cursor
                 cursor_record = db.query(PlaidSyncCursor).filter(
@@ -383,34 +346,54 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
 
                 account_type = account.account_type.value
 
-                # Check for duplicates
-                if mapper.is_duplicate(plaid_txn, account_id):
-                    duplicate_count += 1
-                    logger.debug(f"Skipping duplicate transaction: {plaid_txn['transaction_id']}")
-                    continue
-
                 # Map to our transaction format
                 txn_data = mapper.map_transaction(plaid_txn, account_id, account_type)
 
-                # Create transaction
-                transaction = Transaction(
-                    id=str(uuid.uuid4()),
-                    account_id=account_id,
-                    date=txn_data['date'],
-                    type=txn_data['type'],
-                    total=txn_data['total'],
-                    description=txn_data.get('description'),
-                    source=txn_data['source'],
-                    plaid_transaction_id=txn_data['plaid_transaction_id'],
-                    pfc_primary=txn_data.get('pfc_primary'),
-                    pfc_detailed=txn_data.get('pfc_detailed'),
-                    pfc_confidence=txn_data.get('pfc_confidence'),
-                    import_sequence=idx  # Preserve order from Plaid API
-                )
-                db.add(transaction)
-                added_count += 1
+                # Check if transaction already exists by plaid_transaction_id (upsert logic)
+                existing_txn = db.query(Transaction).filter(
+                    Transaction.plaid_transaction_id == txn_data['plaid_transaction_id']
+                ).first()
 
-                # Create expense records only for checking and credit card accounts
+                if existing_txn:
+                    # Update existing transaction
+                    existing_txn.date = txn_data['date']
+                    existing_txn.type = txn_data['type']
+                    existing_txn.total = txn_data['total']
+                    existing_txn.description = txn_data.get('description')
+                    existing_txn.pfc_primary = txn_data.get('pfc_primary')
+                    existing_txn.pfc_detailed = txn_data.get('pfc_detailed')
+                    existing_txn.pfc_confidence = txn_data.get('pfc_confidence')
+                    existing_txn.import_sequence = idx
+                    transaction = existing_txn
+                    modified_count += 1
+                    logger.debug(f"Updated existing transaction: {plaid_txn['transaction_id']}")
+                else:
+                    # Check for duplicates by other criteria (e.g., amount/date/description)
+                    if mapper.is_duplicate(plaid_txn, account_id):
+                        duplicate_count += 1
+                        logger.debug(f"Skipping duplicate transaction: {plaid_txn['transaction_id']}")
+                        continue
+
+                    # Create new transaction
+                    transaction = Transaction(
+                        id=str(uuid.uuid4()),
+                        account_id=account_id,
+                        date=txn_data['date'],
+                        type=txn_data['type'],
+                        total=txn_data['total'],
+                        description=txn_data.get('description'),
+                        source=txn_data['source'],
+                        plaid_transaction_id=txn_data['plaid_transaction_id'],
+                        pfc_primary=txn_data.get('pfc_primary'),
+                        pfc_detailed=txn_data.get('pfc_detailed'),
+                        pfc_confidence=txn_data.get('pfc_confidence'),
+                        import_sequence=idx  # Preserve order from Plaid API
+                    )
+                    db.add(transaction)
+                    added_count += 1
+                    logger.debug(f"Created new transaction: {plaid_txn['transaction_id']}")
+
+                # Create or update expense records only for checking and credit card accounts
                 # These appear in the Cashflow section for expense/income tracking
                 expense_account_types = ['checking', 'credit_card']
                 if account_type in expense_account_types:
@@ -422,22 +405,41 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                     )
 
                     if expense_data:
-                        expense = Expense(
-                            id=str(uuid.uuid4()),
-                            account_id=account_id,
-                            transaction_id=transaction.id,
-                            date=expense_data['date'],
-                            type=expense_data['type'],  # Store transaction type
-                            description=expense_data['description'],
-                            amount=expense_data['amount'],
-                            category=expense_data.get('category'),
-                            notes=None,
-                            pfc_primary=expense_data.get('pfc_primary'),
-                            pfc_detailed=expense_data.get('pfc_detailed'),
-                            pfc_confidence=expense_data.get('pfc_confidence')
-                        )
-                        db.add(expense)
-                        expense_count += 1
+                        # Check if expense already exists for this transaction
+                        existing_expense = db.query(Expense).filter(
+                            Expense.transaction_id == transaction.id
+                        ).first()
+
+                        if existing_expense:
+                            # Update existing expense
+                            existing_expense.date = expense_data['date']
+                            existing_expense.type = expense_data['type']
+                            existing_expense.description = expense_data['description']
+                            existing_expense.amount = expense_data['amount']
+                            # Don't overwrite category if user has manually set it
+                            if not existing_expense.category or existing_expense.category == 'Uncategorized':
+                                existing_expense.category = expense_data.get('category')
+                            existing_expense.pfc_primary = expense_data.get('pfc_primary')
+                            existing_expense.pfc_detailed = expense_data.get('pfc_detailed')
+                            existing_expense.pfc_confidence = expense_data.get('pfc_confidence')
+                        else:
+                            # Create new expense
+                            expense = Expense(
+                                id=str(uuid.uuid4()),
+                                account_id=account_id,
+                                transaction_id=transaction.id,
+                                date=expense_data['date'],
+                                type=expense_data['type'],  # Store transaction type
+                                description=expense_data['description'],
+                                amount=expense_data['amount'],
+                                category=expense_data.get('category'),
+                                notes=None,
+                                pfc_primary=expense_data.get('pfc_primary'),
+                                pfc_detailed=expense_data.get('pfc_detailed'),
+                                pfc_confidence=expense_data.get('pfc_confidence')
+                            )
+                            db.add(expense)
+                            expense_count += 1
 
                 # Update progress every 10 transactions or at milestones
                 if idx % 10 == 0 or idx == len(sync_result['added']):
@@ -672,29 +674,20 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 holdings_data=holdings_data  # Pass pre-fetched data
             )
 
-            # Update first Plaid transaction date for accounts (only during full resync or if not set)
-            if full_resync:
-                _update_first_plaid_transaction_date(
-                    db=db,
-                    plaid_accounts=plaid_accounts,
-                    plaid_account_map=plaid_account_map
-                )
-
-                # Clean up overlapping non-Plaid transactions after updating first Plaid transaction date
-                _cleanup_overlapping_transactions(
-                    db=db,
-                    plaid_accounts=plaid_accounts,
-                    plaid_account_map=plaid_account_map
-                )
-
-            # Validate transaction balances and flag inconsistencies
-            _validate_transaction_balances(
+            # Update first Plaid transaction date for accounts
+            # This runs on every sync to ensure the field is up-to-date
+            _update_first_plaid_transaction_date(
                 db=db,
-                plaid_item=plaid_item,
                 plaid_accounts=plaid_accounts,
-                plaid_account_map=plaid_account_map,
-                update_stage=update_stage,
-                holdings_data=holdings_data  # Pass pre-fetched data
+                plaid_account_map=plaid_account_map
+            )
+
+            # Clean up overlapping non-Plaid transactions after updating first Plaid transaction date
+            # This ensures Plaid data takes precedence over statement imports for the covered period
+            _cleanup_overlapping_transactions(
+                db=db,
+                plaid_accounts=plaid_accounts,
+                plaid_account_map=plaid_account_map
             )
 
             db.commit()
@@ -955,15 +948,6 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
             logger.warning(f"Account not found for Plaid account {plaid_account_id}")
             continue
 
-        # Check for duplicates using the investment_transaction_id
-        existing = db.query(Transaction).filter(
-            Transaction.plaid_transaction_id == inv_txn['transaction_id']
-        ).first()
-
-        if existing:
-            logger.debug(f"Skipping duplicate investment transaction: {inv_txn['transaction_id']}")
-            continue
-
         # Get security info
         security = securities.get(inv_txn.get('security_id'))
         ticker = None
@@ -985,20 +969,30 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
         plaid_type = str(inv_txn.get('type', '')).lower()
         plaid_subtype = str(inv_txn.get('subtype', '')).lower()
 
-        # Investment transaction amount handling depends on type:
-        # - Cash deposits/withdrawals: positive = deposit (money IN), negative = withdrawal (money OUT)
-        #   Keep amount as-is since it already matches our convention
-        # - Dividends/Interest: Plaid returns negative amounts (credits), negate to make positive
-        # - Buy/Sell/Other: positive = debit (money OUT), negative = credit (money IN)
-        #   Negate to match our convention
-        if plaid_type == 'cash' and plaid_subtype not in ['dividend', 'interest']:
-            # For cash deposits/withdrawals (excluding dividends and interest)
-            # Plaid's amount already matches our convention:
-            # positive = deposit (money in), negative = withdrawal (money out)
-            transaction_amount = raw_amount
+        # Investment transaction amount handling depends on type and subtype:
+        # Plaid often sends deposits/earnings with negative amounts, but we need to trust the subtype
+        #
+        # IMPORTANT: For cash transactions, trust the subtype field, not the amount sign:
+        # - subtype "deposit" or contains earnings/income keywords → always POSITIVE (money IN)
+        # - subtype "withdrawal" → keep as-is or make NEGATIVE (money OUT)
+        # - Other types (buy/sell/dividend/interest) → negate the amount
+
+        if plaid_type == 'cash':
+            # Check subtype to determine if it's money in or out
+            income_keywords = ['deposit', 'earning', 'income', 'interest', 'dividend', 'refund', 'rebate']
+            is_income = any(keyword in plaid_subtype for keyword in income_keywords)
+
+            if is_income:
+                # Deposits, earnings, dividends, interest should always be positive (money IN)
+                # If Plaid sends negative amount, negate it to make positive
+                transaction_amount = abs(raw_amount)
+            else:
+                # Withdrawals, fees should always be negative (money OUT)
+                # If Plaid sends positive amount, negate it to make negative
+                transaction_amount = -abs(raw_amount)
         else:
-            # For buy, sell, dividend, interest, etc., negate the amount
-            # Plaid: buy=positive (debit), sell=negative (credit), dividend=negative (credit)
+            # For buy, sell, transfer, etc., negate the amount
+            # Plaid: buy=positive (debit), sell=negative (credit)
             # Ours: money out=negative, money in=positive
             transaction_amount = -raw_amount
 
@@ -1006,20 +1000,36 @@ def _sync_investment_transactions(db, plaid_item, plaid_accounts, plaid_account_
         from app.services.transaction_classifier import transaction_classifier
         txn_type = transaction_classifier.classify_transaction(transaction_amount)
 
-        # Create transaction
-        transaction = Transaction(
-            id=str(uuid.uuid4()),
-            account_id=account_id,
-            date=txn_date,
-            type=txn_type,
-            total=transaction_amount,
-            description=inv_txn.get('name'),
-            source='plaid',
-            plaid_transaction_id=inv_txn['transaction_id'],
-            import_sequence=idx  # Preserve order from Plaid API
-        )
-        db.add(transaction)
-        added_count += 1
+        # Check if transaction already exists (upsert logic)
+        existing_txn = db.query(Transaction).filter(
+            Transaction.plaid_transaction_id == inv_txn['transaction_id']
+        ).first()
+
+        if existing_txn:
+            # Update existing transaction
+            existing_txn.date = txn_date
+            existing_txn.type = txn_type
+            existing_txn.total = transaction_amount
+            existing_txn.description = inv_txn.get('name')
+            existing_txn.import_sequence = idx
+            transaction = existing_txn
+            logger.debug(f"Updated existing investment transaction: {inv_txn['transaction_id']}")
+        else:
+            # Create new transaction
+            transaction = Transaction(
+                id=str(uuid.uuid4()),
+                account_id=account_id,
+                date=txn_date,
+                type=txn_type,
+                total=transaction_amount,
+                description=inv_txn.get('name'),
+                source='plaid',
+                plaid_transaction_id=inv_txn['transaction_id'],
+                import_sequence=idx  # Preserve order from Plaid API
+            )
+            db.add(transaction)
+            added_count += 1
+            logger.debug(f"Created new investment transaction: {inv_txn['transaction_id']}")
 
         # If this is a dividend or cash distribution (Money In with ticker), create a record in the dividends table
         # Dividends from ETFs/stocks appear as Money In transactions with a ticker symbol
@@ -1406,174 +1416,13 @@ def _map_investment_type(plaid_type) -> str:
     return type_mapping.get(type_str, 'TRANSFER')  # Default to TRANSFER for unmapped types
 
 
-def _validate_transaction_balances(db, plaid_item, plaid_accounts, plaid_account_map, update_stage, holdings_data=None):
-    """
-    Validate transaction balances after import by calculating expected balances
-    and comparing with Plaid current balance.
-
-    This function:
-    1. Calculates expected balance for each transaction chronologically
-    2. Stores expected_balance in each transaction record
-    3. Compares final calculated balance with Plaid current balance
-    4. Flags inconsistencies if discrepancy > $1.00
-
-    Args:
-        db: Database session
-        plaid_item: PlaidItem record
-        plaid_accounts: List of PlaidAccount records
-        plaid_account_map: Mapping of plaid_account_id to account_id
-        update_stage: Function to update job stage
-        holdings_data: Optional pre-fetched holdings data from Plaid (if None, will fetch)
-    """
-    try:
-        update_stage("validating_balances", {
-            "message": "Validating transaction balances...",
-            "current": 0,
-            "total": len(plaid_accounts)
-        })
-
-        # Get fresh account data from Plaid
-        # Security: Decrypt access token before using
-        access_token = encryption_service.decrypt(plaid_item.access_token)
-        accounts_data = plaid_client.get_accounts(access_token)
-        if not accounts_data:
-            logger.warning("Could not fetch account data for balance validation")
-            return
-
-        # Get investment holdings to extract cash balances
-        investment_cash_balances = {}
-        if holdings_data is None:
-            logger.info("[VALIDATE BALANCES] Fetching investment holdings data...")
-            holdings_data = plaid_client.get_investment_holdings(access_token)
-        else:
-            logger.info("[VALIDATE BALANCES] Using pre-fetched holdings data (avoiding redundant API call)")
-
-        if holdings_data:
-            # Use calculated cash balances (Total Account Value - Holdings Value)
-            investment_cash_balances = holdings_data.get('cash_balances', {})
-
-        # Create mapping of plaid_account_id to balance
-        # For investment accounts, use available balance (cash only, since holdings are shown in portfolio)
-        # For other accounts, use current balance from accounts API
-        plaid_balances = {}
-        for acc in accounts_data['accounts']:
-            acc_type = acc.get('type')
-            # Extract string value from enum-like objects
-            if acc_type and hasattr(acc_type, 'value'):
-                acc_type = acc_type.value
-            elif acc_type:
-                acc_type = str(acc_type)
-
-            # For investment accounts, use available balance (cash only)
-            # This avoids double-counting holdings which are already shown in portfolio
-            if acc_type == 'investment':
-                balance = acc['balances'].get('available', 0.0) or 0.0
-                total_value = acc['balances'].get('current', 0.0) or 0.0
-                logger.info(
-                    f"[BALANCE] Investment account {acc.get('name')}: "
-                    f"Available (Cash)=${balance:.2f}, Total=${total_value:.2f}"
-                )
-            else:
-                balance = acc['balances'].get('current', 0.0) or 0.0
-
-            plaid_balances[acc['account_id']] = balance
-
-        TOLERANCE = 1.00  # $1.00 tolerance for balance inconsistencies
-
-        # Validate each account
-        for idx, plaid_account in enumerate(plaid_accounts, 1):
-            account_id = plaid_account_map.get(plaid_account.plaid_account_id)
-            if not account_id:
-                continue
-
-            # Get our Account record
-            account = db.query(Account).filter(Account.id == account_id).first()
-            if not account:
-                continue
-
-            # Get all transactions for this account, ordered chronologically
-            # Sort by date (date part only), then by value DESC (credits before debits), then by ID
-            from sqlalchemy import cast, Date
-            transactions = db.query(Transaction).filter(
-                Transaction.account_id == account_id
-            ).order_by(
-                cast(Transaction.date, Date).asc(),
-                Transaction.total.desc(),
-                Transaction.id.asc()
-            ).all()
-
-            if not transactions:
-                logger.info(f"Account {account.label} has no transactions, skipping validation")
-                continue
-
-            # Get opening balance
-            opening_balance = account.opening_balance or 0.0
-
-            # Calculate expected balance for each transaction
-            running_balance = opening_balance
-            for txn in transactions:
-                running_balance += txn.total
-                txn.expected_balance = round(running_balance, 2)
-                # Note: actual_balance will be None for Plaid imports (Plaid doesn't provide it)
-                # It will only be populated for statement imports if available
-                txn.has_balance_inconsistency = False
-                txn.balance_discrepancy = None
-
-            # Get current balance from Plaid
-            current_plaid_balance = plaid_balances.get(plaid_account.plaid_account_id, 0.0)
-
-            # For credit cards and loans, Plaid returns positive balance = amount owed
-            # We need to negate it so owing money = negative balance in our system
-            liability_account_types = ['credit_card', 'mortgage', 'auto_loan', 'student_loan',
-                                      'home_equity', 'personal_loan', 'business_loan', 'line_of_credit']
-            if account.account_type.value in liability_account_types:
-                current_plaid_balance = -current_plaid_balance
-
-            # Compare final calculated balance with Plaid current balance
-            final_expected_balance = running_balance
-            discrepancy = abs(final_expected_balance - current_plaid_balance)
-
-            if discrepancy > TOLERANCE:
-                logger.warning(
-                    f"Balance inconsistency detected for {account.label}: "
-                    f"Expected: ${final_expected_balance:.2f}, "
-                    f"Plaid current: ${current_plaid_balance:.2f}, "
-                    f"Discrepancy: ${discrepancy:.2f}"
-                )
-                # Flag the last transaction as inconsistent since we can't pinpoint which one
-                if transactions:
-                    last_txn = transactions[-1]
-                    last_txn.has_balance_inconsistency = True
-                    last_txn.balance_discrepancy = round(final_expected_balance - current_plaid_balance, 2)
-                    logger.info(
-                        f"Flagged transaction {last_txn.id} as inconsistent "
-                        f"(expected: ${last_txn.expected_balance:.2f}, discrepancy: ${last_txn.balance_discrepancy:.2f})"
-                    )
-            else:
-                logger.info(
-                    f"Balance validation passed for {account.label}: "
-                    f"Expected: ${final_expected_balance:.2f}, "
-                    f"Plaid: ${current_plaid_balance:.2f}, "
-                    f"Discrepancy: ${discrepancy:.2f} (within tolerance)"
-                )
-
-            update_stage("validating_balances", {
-                "message": f"Validating balances ({idx}/{len(plaid_accounts)})...",
-                "current": idx,
-                "total": len(plaid_accounts)
-            })
-
-    except Exception as e:
-        logger.error(f"Error validating transaction balances: {e}", exc_info=True)
-        # Don't raise - this is not critical enough to fail the entire sync
-
-
 def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map, holdings_data=None):
     """
-    Update opening balances for accounts after first sync
+    Update account balances and transaction expected_balances after Plaid sync
 
-    The opening balance is calculated by working backwards from the current Plaid balance:
-    opening_balance = current_plaid_balance - sum(all_transactions)
+    Strategy:
+    - If Plaid provides balance: use it as anchor, set account.balance, calculate backward for expected_balances
+    - If Plaid doesn't provide balance: find last transaction before Plaid sync, calculate forward, set account.balance to last transaction
 
     Args:
         db: Database session
@@ -1657,35 +1506,104 @@ def _update_opening_balances(db, plaid_item, plaid_accounts, plaid_account_map, 
                 logger.info(f"Account {account.label} has no transactions, keeping opening balance")
                 continue
 
-            # Get current balance from Plaid
-            current_plaid_balance = plaid_balances.get(plaid_account.plaid_account_id, 0.0)
+            # Get current balance from Plaid (may be None or 0 if unavailable)
+            current_plaid_balance = plaid_balances.get(plaid_account.plaid_account_id)
 
             # For credit cards and loans, Plaid returns positive balance = amount owed
             # We need to negate it so owing money = negative balance in our system
             liability_account_types = ['credit_card', 'mortgage', 'auto_loan', 'student_loan',
                                       'home_equity', 'personal_loan', 'business_loan', 'line_of_credit']
-            if account.account_type.value in liability_account_types:
+            if current_plaid_balance and account.account_type.value in liability_account_types:
                 logger.info(f"Liability account {account.label} ({account.account_type.value}): negating Plaid balance ${current_plaid_balance:.2f} -> ${-current_plaid_balance:.2f}")
                 current_plaid_balance = -current_plaid_balance
 
-            # Calculate sum of all transactions
-            transaction_sum = sum(txn.total for txn in transactions)
+            # Check if Plaid balance is available (not None and not 0 for investment accounts)
+            is_investment = account.account_type.value in ['investment', 'brokerage', 'rrsp', 'tfsa']
+            plaid_balance_unavailable = (
+                current_plaid_balance is None or
+                (is_investment and current_plaid_balance == 0.0)
+            )
 
-            # Calculate opening balance: current - all transactions
-            opening_balance = current_plaid_balance - transaction_sum
+            if plaid_balance_unavailable:
+                # Plaid balance is unavailable - use last statement transaction balance as anchor
+                logger.info(
+                    f"[BALANCE] Plaid balance unavailable for {account.label} "
+                    f"(is_investment={is_investment}, balance={current_plaid_balance})"
+                )
 
-            # Get the oldest transaction date
-            oldest_transaction_date = transactions[0].date
+                # Find the last transaction BEFORE the first Plaid transaction
+                # This would be a statement-imported transaction with balance info
+                first_plaid_txn = next((txn for txn in transactions if txn.plaid_transaction_id is not None), None)
 
-            # Update the account's opening balance
-            account.opening_balance = opening_balance
-            account.opening_balance_date = datetime.combine(oldest_transaction_date, datetime.min.time())
+                if first_plaid_txn:
+                    # Find last statement transaction before first Plaid transaction
+                    last_statement_txn = None
+                    for txn in reversed(transactions):
+                        if txn.date < first_plaid_txn.date and txn.plaid_transaction_id is None:
+                            last_statement_txn = txn
+                            break
+
+                    if last_statement_txn and (last_statement_txn.actual_balance or last_statement_txn.expected_balance):
+                        # Use the balance from the last statement transaction as anchor
+                        anchor_balance = last_statement_txn.actual_balance or last_statement_txn.expected_balance
+                        logger.info(
+                            f"[BALANCE] Using last statement transaction balance as anchor: "
+                            f"${anchor_balance:.2f} from {last_statement_txn.date}"
+                        )
+
+                        # Calculate FORWARD from anchor for all newer transactions
+                        running_balance = anchor_balance
+                        for txn in transactions:
+                            if txn.date < last_statement_txn.date:
+                                # Keep existing expected_balance for transactions before anchor
+                                continue
+                            elif txn.id == last_statement_txn.id:
+                                # Set anchor transaction expected_balance
+                                txn.expected_balance = round(anchor_balance, 2)
+                            else:
+                                # Calculate forward for transactions after anchor
+                                running_balance += txn.total
+                                txn.expected_balance = round(running_balance, 2)
+
+                        # Set account balance to the last transaction's expected_balance
+                        last_txn = transactions[-1]
+                        account.balance = last_txn.expected_balance
+
+                        logger.info(
+                            f"[BALANCE] Calculated forward from anchor ${anchor_balance:.2f}, "
+                            f"final account balance: ${account.balance:.2f} "
+                            f"({len([t for t in transactions if t.date >= last_statement_txn.date])} transactions processed)"
+                        )
+                        continue
+
+                # No anchor found, calculate from first transaction with 0 starting balance
+                logger.warning(
+                    f"[BALANCE] No statement transaction anchor found for {account.label}, "
+                    f"calculating from first transaction with 0 starting balance"
+                )
+                running_balance = 0.0
+                for txn in transactions:
+                    running_balance += txn.total
+                    txn.expected_balance = round(running_balance, 2)
+
+                # Set account balance to the last transaction's expected_balance
+                account.balance = transactions[-1].expected_balance
+                logger.info(f"[BALANCE] Set account balance to ${account.balance:.2f} from last transaction")
+                continue
+
+            # Plaid balance is available - use it as anchor and calculate backward
+            # Set account balance to current Plaid balance
+            account.balance = current_plaid_balance
+
+            # Calculate BACKWARD from current balance to set expected_balance on all transactions
+            running_balance = current_plaid_balance
+            for txn in reversed(transactions):
+                txn.expected_balance = round(running_balance, 2)
+                running_balance -= txn.total
 
             logger.info(
-                f"Updated opening balance for {account.label}: "
-                f"${opening_balance:.2f} as of {oldest_transaction_date}, "
-                f"current Plaid balance: ${current_plaid_balance:.2f}, "
-                f"sum of {len(transactions)} transactions: ${transaction_sum:.2f}"
+                f"[BALANCE] Set account balance to ${account.balance:.2f} from Plaid, "
+                f"calculated backward for {len(transactions)} transactions"
             )
 
     except Exception as e:

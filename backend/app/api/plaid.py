@@ -20,6 +20,7 @@ from app.database.models import PlaidItem, PlaidAccount, Account, AccountTypeEnu
 from app.services.plaid_client import plaid_client
 from app.services.job_queue import enqueue_plaid_sync_job, get_job_info
 from app.services.encryption import encryption_service
+from app.services.plaid_audit_logger import PlaidAuditLogger
 from app.config import settings
 
 router = APIRouter(prefix="/plaid", tags=["plaid"])
@@ -80,15 +81,26 @@ async def create_link_token(current_user: User = Depends(get_current_user)):
             detail="Plaid is not configured. Please set PLAID_CLIENT_ID and PLAID_SECRET."
         )
 
-    result = plaid_client.create_link_token(
-        user_id=current_user.id
-    )
-
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create link token"
+    with PlaidAuditLogger.log_api_call(
+        user_id=current_user.id,
+        endpoint='/link/token/create',
+        method='POST',
+        sync_type='link_initialization'
+    ) as log_context:
+        result = plaid_client.create_link_token(
+            user_id=current_user.id
         )
+
+        if not result:
+            log_context['status_code'] = 500
+            log_context['error_message'] = "Failed to create link token"
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create link token"
+            )
+
+        log_context['response'] = result
+        log_context['status_code'] = 200
 
     return LinkTokenResponse(**result)
 
@@ -192,33 +204,59 @@ async def exchange_public_token(
     logger.info(f"Starting Plaid token exchange for user {current_user.id}")
 
     try:
-        # Exchange public token for access token
-        exchange_result = plaid_client.exchange_public_token(request.public_token)
-        if not exchange_result:
-            logger.error("Failed to exchange public token - no result returned")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to exchange public token"
-            )
-
-        access_token = exchange_result['access_token']
-        item_id = exchange_result['item_id']
-        logger.info(f"Successfully exchanged token, item_id: {item_id}")
-
-        # Get institution info from metadata
+        # Get institution info from metadata (for audit logging)
         institution = request.metadata.get('institution', {})
-        institution_id = institution.get('institution_id', 'unknown')
         institution_name = institution.get('name', 'Unknown Institution')
+
+        # Exchange public token for access token
+        with PlaidAuditLogger.log_api_call(
+            user_id=current_user.id,
+            endpoint='/item/public_token/exchange',
+            method='POST',
+            sync_type='account_linking',
+            request_params={'institution_name': institution_name}
+        ) as log_context:
+            exchange_result = plaid_client.exchange_public_token(request.public_token)
+            if not exchange_result:
+                log_context['status_code'] = 500
+                log_context['error_message'] = "Failed to exchange public token"
+                logger.error("Failed to exchange public token - no result returned")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to exchange public token"
+                )
+
+            log_context['response'] = exchange_result
+            log_context['status_code'] = 200
+
+            access_token = exchange_result['access_token']
+            item_id = exchange_result['item_id']
+            logger.info(f"Successfully exchanged token, item_id: {item_id}")
+
+        # Get institution details
+        institution_id = institution.get('institution_id', 'unknown')
         logger.info(f"Institution: {institution_name} ({institution_id})")
 
         # Get accounts from Plaid
-        accounts_result = plaid_client.get_accounts(access_token)
-        if not accounts_result:
-            logger.error("Failed to retrieve accounts from Plaid - no result returned")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to retrieve accounts from Plaid"
-            )
+        with PlaidAuditLogger.log_api_call(
+            user_id=current_user.id,
+            endpoint='/accounts/get',
+            method='POST',
+            sync_type='account_linking',
+            plaid_item_id=item_id
+        ) as log_context:
+            accounts_result = plaid_client.get_accounts(access_token)
+            if not accounts_result:
+                log_context['status_code'] = 500
+                log_context['error_message'] = "Failed to retrieve accounts from Plaid"
+                logger.error("Failed to retrieve accounts from Plaid - no result returned")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to retrieve accounts from Plaid"
+                )
+
+            log_context['response'] = accounts_result
+            log_context['status_code'] = 200
 
         logger.info(f"Retrieved {len(accounts_result['accounts'])} accounts from Plaid")
 
@@ -368,12 +406,10 @@ async def exchange_public_token(
                     balance=current_balance,
                     label=plaid_acc['name'],
                     is_plaid_linked=1,
-                    opening_balance=current_balance,  # Set opening balance to current Plaid balance
-                    opening_balance_date=datetime.utcnow(),  # Balance is as of now
                     created_at=datetime.utcnow()
                 )
                 db.add(account)
-                logger.info(f"  Created Account record with ID: {account.id}, opening balance: {current_balance}")
+                logger.info(f"  Created Account record with ID: {account.id}, balance: {current_balance}")
 
                 # Create PlaidAccount mapping
                 # Note: type/subtype should already be converted to strings in plaid_client._format_account()
@@ -939,3 +975,55 @@ async def get_institution_products(
         )
 
     return inst_info
+
+
+@router.get("/audit-logs")
+async def get_audit_logs(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    plaid_item_id: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0
+):
+    """
+    Get Plaid API audit logs for the current user.
+
+    Query params:
+    - plaid_item_id: Filter by specific Plaid item (optional)
+    - limit: Number of records to return (default: 100, max: 500)
+    - offset: Number of records to skip (default: 0)
+    """
+    from app.database.models import PlaidAuditLog
+    from app.database.db_service import get_db_service
+
+    # Limit the maximum number of records
+    limit = min(limit, 500)
+
+    # Build query
+    query = db.query(PlaidAuditLog).filter(
+        PlaidAuditLog.user_id == current_user.id
+    )
+
+    # Optional filter by plaid_item_id
+    if plaid_item_id:
+        query = query.filter(PlaidAuditLog.plaid_item_id == plaid_item_id)
+
+    # Order by timestamp descending (most recent first)
+    query = query.order_by(PlaidAuditLog.timestamp.desc())
+
+    # Get total count before pagination
+    total_count = query.count()
+
+    # Apply pagination
+    logs = query.offset(offset).limit(limit).all()
+
+    # Convert to dictionaries
+    db_service = get_db_service(db)
+    results = [db_service._model_to_dict(log) for log in logs]
+
+    return {
+        "logs": results,
+        "total": total_count,
+        "limit": limit,
+        "offset": offset
+    }

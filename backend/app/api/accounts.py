@@ -238,7 +238,88 @@ async def delete_account(
     db.delete("positions", {"account_id": account_id})
     db.delete("transactions", {"account_id": account_id})
     db.delete("dividends", {"account_id": account_id})
-    db.delete("expenses", {"account_id": account_id})
+    db.delete("cashflow", {"account_id": account_id})
 
     session.commit()
     return {"message": "Account deleted successfully"}
+
+
+class FixBalanceRequest(BaseModel):
+    current_balance: float
+
+
+@router.post("/{account_id}/fix-balance")
+async def fix_account_balance(
+    account_id: str,
+    request: FixBalanceRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """
+    Fix account balance by setting the last transaction's balance and recalculating backward.
+
+    This uses the current available balance from the institution as an anchor point
+    and recalculates all transaction balances working backward chronologically.
+    """
+    from app.database.models import Transaction, Account as AccountModel
+    from sqlalchemy import cast, Date
+
+    db = get_db_service(session)
+
+    # Verify account belongs to user
+    account = db.find_one("accounts", {"id": account_id, "user_id": current_user.id})
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found"
+        )
+
+    # Get all transactions for this account, ordered chronologically
+    transactions = session.query(Transaction).filter(
+        Transaction.account_id == account_id
+    ).order_by(
+        cast(Transaction.date, Date).asc(),
+        Transaction.total.desc(),
+        Transaction.id.asc()
+    ).all()
+
+    if not transactions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account has no transactions to fix"
+        )
+
+    # Set the last transaction's expected_balance to the current balance
+    last_transaction = transactions[-1]
+    last_transaction.expected_balance = round(request.current_balance, 2)
+
+    # Calculate backward from the last transaction
+    running_balance = request.current_balance
+    for txn in reversed(transactions[:-1]):  # Skip the last one we already set
+        running_balance -= txn.total
+        txn.expected_balance = round(running_balance, 2)
+
+    # Update the account's current balance to match the last transaction's expected_balance
+    account_model = session.query(AccountModel).filter(AccountModel.id == account_id).first()
+    if account_model:
+        old_balance = account_model.balance
+        # Set the account balance to the last transaction's expected_balance
+        account_model.balance = last_transaction.expected_balance
+
+        logger.info(
+            f"Fix balance for account {account_id}: "
+            f"Old balance: ${old_balance:.2f} -> New: ${account_model.balance:.2f}"
+        )
+
+    session.commit()
+
+    # Verify the update was saved
+    account_model = session.query(AccountModel).filter(AccountModel.id == account_id).first()
+    logger.info(f"After commit - Account balance: ${account_model.balance:.2f}")
+
+    return {
+        "message": "Balance fixed successfully",
+        "transactions_updated": len(transactions),
+        "current_balance": round(request.current_balance, 2),
+        "anchor_balance": round(request.current_balance, 2)
+    }
