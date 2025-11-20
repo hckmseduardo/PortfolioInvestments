@@ -444,6 +444,50 @@ def remove_duplicate_transactions(account_id: str, db) -> Dict:
     }
 
 
+def get_first_plaid_transaction_date(account_id: str, db) -> Optional[date]:
+    """
+    Get the earliest transaction date from Plaid for an account.
+
+    Args:
+        account_id: The account ID to query
+        db: Database service instance
+
+    Returns:
+        The date of the first Plaid transaction, or None if no Plaid transactions exist
+    """
+    # Query all transactions for the account
+    all_transactions = db.find("transactions", {"account_id": account_id})
+
+    # Filter for Plaid transactions (those with plaid_transaction_id)
+    plaid_transactions = [
+        txn for txn in all_transactions
+        if txn.get('plaid_transaction_id') is not None
+    ]
+
+    if not plaid_transactions:
+        return None
+
+    # Find the earliest date
+    earliest_date = None
+    for txn in plaid_transactions:
+        txn_date = txn.get('date')
+        if txn_date:
+            # Coerce to date object
+            if isinstance(txn_date, datetime):
+                txn_date = txn_date.date()
+            elif isinstance(txn_date, str):
+                try:
+                    parsed = datetime.fromisoformat(txn_date.replace('Z', '+00:00'))
+                    txn_date = parsed.date()
+                except (ValueError, AttributeError):
+                    continue
+
+            if earliest_date is None or txn_date < earliest_date:
+                earliest_date = txn_date
+
+    return earliest_date
+
+
 def detect_statement_type(file_path: str) -> str:
     """
     Detect which bank/institution the statement is from.
@@ -523,6 +567,31 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
             detail="Account ID is required"
         )
 
+    # Get all Plaid transaction dates for this account to check for actual overlaps
+    # Only skip statement transactions if there's an ACTUAL Plaid transaction on that date
+    # This allows filling gaps in Plaid data with statement imports
+    plaid_transaction_dates = set()
+    all_transactions = db.find("transactions", {"account_id": account_id})
+    for txn in all_transactions:
+        if txn.get('plaid_transaction_id'):
+            txn_date = txn.get('date')
+            if txn_date:
+                # Convert to date object
+                if isinstance(txn_date, datetime):
+                    plaid_transaction_dates.add(txn_date.date())
+                elif isinstance(txn_date, date):
+                    plaid_transaction_dates.add(txn_date)
+                elif isinstance(txn_date, str):
+                    try:
+                        parsed = datetime.fromisoformat(txn_date.replace('Z', '+00:00'))
+                        plaid_transaction_dates.add(parsed.date())
+                    except (ValueError, AttributeError):
+                        pass
+
+    if plaid_transaction_dates:
+        logger.info(f"Found {len(plaid_transaction_dates)} unique dates with Plaid transactions for account {account_id}")
+        logger.info(f"Statement transactions will only be skipped if they match an existing Plaid transaction date")
+
     transactions_created = 0
     transactions_skipped = 0
     skipped_transactions_details = []  # Track details of skipped transactions
@@ -533,6 +602,35 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
     for idx, transaction_data in enumerate(parsed_data.get('transactions', []), 1):
         if transaction_data.get('type') is None:
             continue
+
+        # Skip transactions only if there's an ACTUAL Plaid transaction on this date
+        # This allows filling gaps in Plaid data with statement imports
+        if plaid_transaction_dates:
+            txn_date = transaction_data.get('date')
+            txn_date_only = None
+            if isinstance(txn_date, datetime):
+                txn_date_only = txn_date.date()
+            elif isinstance(txn_date, date):
+                txn_date_only = txn_date
+            elif isinstance(txn_date, str):
+                try:
+                    parsed = datetime.fromisoformat(txn_date.replace('Z', '+00:00'))
+                    txn_date_only = parsed.date()
+                except (ValueError, AttributeError):
+                    pass
+
+            # Only skip if there's an actual Plaid transaction on this specific date
+            if txn_date_only and txn_date_only in plaid_transaction_dates:
+                transactions_skipped += 1
+                skipped_transactions_details.append({
+                    "date": str(transaction_data.get('date')),
+                    "description": transaction_data.get('description'),
+                    "amount": transaction_data.get('total'),
+                    "type": transaction_data.get('type'),
+                    "reason": f"Plaid transaction exists on date {txn_date_only}"
+                })
+                logger.debug(f"Skipping transaction - Plaid transaction exists on {txn_date_only}: {transaction_data.get('description')}")
+                continue
 
         # Classify transaction type based on amount (Money In/Money Out)
         from app.services.transaction_classifier import transaction_classifier
