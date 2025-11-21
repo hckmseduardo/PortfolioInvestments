@@ -74,12 +74,13 @@ def validate_and_update_balances(
         logger.info(f"Account {account.get('label')} has no transactions, skipping validation")
         return {"status": "skipped", "message": "No transactions"}
 
-    # Sort transactions chronologically by date (date part only), then by value DESC (credits before debits), then by ID
+    # Sort transactions chronologically by date, then by amount DESC (credits before debits)
+    # Note: Intraday order may vary from statement, but end-of-day balance should match
     sorted_transactions = sorted(
         transactions,
         key=lambda t: (
             _get_date_only(t),
-            -t.get('total', 0.0),  # Negative for descending order
+            -t.get('total', 0.0),  # Sort by amount DESC (larger amounts first)
             t.get('id', '')
         )
     )
@@ -134,24 +135,61 @@ def validate_and_update_balances(
         # FORWARD calculation: start from 0 or from last transaction with actual_balance
         logger.info("No source balance provided, calculating forward from existing balances")
 
+        # Build a set of end-of-day transaction IDs
+        # For transactions with actual_balance: use the one with LOWEST balance (final state after all txns)
+        # For transactions without actual_balance: use the last in sorted order
+        end_of_day_txn_ids = set()
+        date_to_txns = {}
+
+        # Group transactions by date
+        for txn in sorted_transactions:
+            txn_date = _get_date_only(txn)
+            if txn_date not in date_to_txns:
+                date_to_txns[txn_date] = []
+            date_to_txns[txn_date].append(txn)
+
+        # For each date, find the end-of-day transaction
+        for txn_date, txns in date_to_txns.items():
+            # Prefer transaction with lowest actual_balance (final state after all transactions)
+            txns_with_balance = [t for t in txns if t.get('actual_balance') is not None]
+
+            if txns_with_balance:
+                # Find minimum actual_balance
+                min_balance = min(t.get('actual_balance') for t in txns_with_balance)
+
+                # Get all transactions with this minimum balance
+                txns_with_min_balance = [t for t in txns_with_balance
+                                        if t.get('actual_balance') == min_balance]
+
+                # If multiple transactions have the same balance, use the LAST one
+                # (more likely to be the true end-of-day transaction)
+                end_of_day_txn = txns_with_min_balance[-1]
+            else:
+                # No actual_balance available, use last in sorted order
+                end_of_day_txn = txns[-1]
+
+            end_of_day_txn_ids.add(end_of_day_txn['id'])
+
         running_balance = 0.0
         for txn in sorted_transactions:
             running_balance += txn.get('total', 0.0)
             calculated_balance = round(running_balance, 2)
 
-            # Check for inconsistency with actual_balance if provided
+            # Check for inconsistency with actual_balance ONLY for end-of-day transactions
             actual_balance = txn.get('actual_balance')
             has_inconsistency = False
             discrepancy = None
+            is_end_of_day = txn['id'] in end_of_day_txn_ids
 
-            if actual_balance is not None:
+            if actual_balance is not None and is_end_of_day:
+                # Only check end-of-day balances (intra-day order may vary from statement)
                 discrepancy = calculated_balance - actual_balance
                 if abs(discrepancy) > TOLERANCE:
                     has_inconsistency = True
                     if first_inconsistent_txn is None:
                         first_inconsistent_txn = txn
                         logger.warning(
-                            f"Balance inconsistency detected at transaction {txn['id']} "
+                            f"End-of-day balance inconsistency detected at {txn['id']} "
                             f"({txn.get('date')}): Expected: ${calculated_balance:.2f}, "
                             f"Actual: ${actual_balance:.2f}, Discrepancy: ${discrepancy:.2f}"
                         )
