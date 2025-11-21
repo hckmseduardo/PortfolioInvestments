@@ -816,11 +816,34 @@ def process_statement_file(file_path: str, account_id: str, db, current_user: Us
     # This ensures running balances are coherent
     from app.services.balance_validator import validate_and_update_balances
 
-    # Validate and update balances (statement import doesn't fetch from Plaid)
+    # Check if any imported transactions have actual_balance from statement
+    # If so, use the latest transaction's actual_balance as anchor for backward calculation
+    source_current_balance = None
+    if transactions_created > 0:
+        # Get all transactions for this account, sorted chronologically
+        all_account_transactions = db.find("transactions", {"account_id": account_id})
+        if all_account_transactions:
+            # Sort by date (latest first)
+            sorted_txns = sorted(
+                all_account_transactions,
+                key=lambda t: (_get_date_only(t), -t.get('total', 0.0), t.get('id', '')),
+                reverse=True
+            )
+            # Find the latest transaction with actual_balance
+            for txn in sorted_txns:
+                if txn.get('actual_balance') is not None:
+                    source_current_balance = txn.get('actual_balance')
+                    logger.info(
+                        f"Using actual_balance ${source_current_balance:.2f} from latest transaction "
+                        f"as anchor for balance validation"
+                    )
+                    break
+
+    # Validate and update balances
     validation_result = validate_and_update_balances(
         db=db,
         account_id=account_id,
-        source_current_balance=None,
+        source_current_balance=source_current_balance,
         source_name="statement_import"
     )
 

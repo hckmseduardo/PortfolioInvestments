@@ -31,7 +31,8 @@ import {
   Brightness7,
   Menu as MenuIcon,
   Settings as SettingsIcon,
-  Category as CategoryIcon
+  Category as CategoryIcon,
+  History as HistoryIcon
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -153,6 +154,12 @@ const Navbar = () => {
                   <SettingsIcon fontSize="small" />
                 </ListItemIcon>
                 Settings
+              </MenuItem>
+              <MenuItem onClick={() => { navigate('/plaid-audit-logs'); handleClose(); }}>
+                <ListItemIcon>
+                  <HistoryIcon fontSize="small" />
+                </ListItemIcon>
+                Plaid Audit Log
               </MenuItem>
               <MenuItem onClick={handleLogout}>Logout</MenuItem>
             </Menu>

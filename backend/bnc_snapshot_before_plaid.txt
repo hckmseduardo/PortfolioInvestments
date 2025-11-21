@@ -1,0 +1,9 @@
+✓ Snapshot saved to: /app/bnc_state_before_plaid_sync.json
+
+Summary:
+  Account: Chequing Account
+  Balance: $2453.84
+  Total Transactions: 482
+  - Statement: 482
+  - Plaid: 0
+  - Manual: 0

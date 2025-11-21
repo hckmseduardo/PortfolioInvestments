@@ -18,6 +18,7 @@ import AccountManagement from './pages/AccountManagement';
 import Transactions from './pages/Transactions';
 import Settings from './pages/Settings';
 import SecurityMetadata from './pages/SecurityMetadata';
+import PlaidAuditLogs from './pages/PlaidAuditLogs';
 import { ThemeModeProvider, useThemeMode } from './context/ThemeContext';
 
 const AppShell = () => {
@@ -77,6 +78,7 @@ const AppShell = () => {
                         <Route path="/import" element={<Import />} />
                         <Route path="/security-metadata" element={<SecurityMetadata />} />
                         <Route path="/settings" element={<Settings />} />
+                        <Route path="/plaid-audit-logs" element={<PlaidAuditLogs />} />
                         <Route path="*" element={<Navigate to="/" />} />
                       </Routes>
                       <NotificationContainer />

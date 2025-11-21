@@ -49,11 +49,10 @@ class PlaidClient:
         """Map environment string to Plaid Environment enum"""
         env_map = {
             "sandbox": plaid.Environment.Sandbox,
-            "development": plaid.Environment.Development,
             "production": plaid.Environment.Production,
         }
         env_name = settings.PLAID_ENVIRONMENT.lower()
-        return env_map.get(env_name, plaid.Environment.Sandbox)
+        return env_map.get(env_name, plaid.Environment.Production)
 
     def _initialize_client(self):
         """Initialize Plaid API client"""
@@ -72,7 +71,7 @@ class PlaidClient:
             logger.error(f"Failed to initialize Plaid client: {e}")
             raise
 
-    def create_link_token(self, user_id: str, client_name: str = "Portfolio Investments", access_token: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def create_link_token(self, user_id: str, client_name: Optional[str] = None, access_token: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Create a link token for Plaid Link initialization or update mode
 
@@ -89,14 +88,37 @@ class PlaidClient:
             return None
 
         try:
+            # Use configured client name or fall back to parameter
+            display_name = client_name or settings.PLAID_CLIENT_NAME
+
+            # Start with transactions only for initial connection
+            # This ensures compatibility with all institutions (like National Bank of Canada)
+            # Investments product can be added later via update mode for institutions that support it
+            products_list = [Products("transactions")]
+
+            # If in update mode with an access token, try to add investments product
+            # This will only work for institutions that support it
+            if access_token:
+                products_list.append(Products("investments"))
+                logger.info("Update mode: Requesting transactions + investments products")
+            else:
+                logger.info("Initial mode: Requesting transactions product only")
+
             request_params = {
                 "user": LinkTokenCreateRequestUser(client_user_id=str(user_id)),
-                "client_name": client_name,
-                "products": [Products("transactions"), Products("investments")],  # Request both transactions and investments
+                "client_name": display_name,
+                "products": products_list,
                 "country_codes": [CountryCode("US"), CountryCode("CA")],
                 "language": "en",
-                "redirect_uri": "https://app.home/",  # Required for OAuth institutions like Wealthsimple
             }
+
+            # Only add redirect_uri if configured (optional, only needed for OAuth institutions)
+            # Omitting it allows institutions to use Instant Auth (database authentication)
+            if settings.PLAID_REDIRECT_URI:
+                request_params["redirect_uri"] = settings.PLAID_REDIRECT_URI
+                logger.info(f"Using OAuth mode with redirect_uri: {settings.PLAID_REDIRECT_URI}")
+            else:
+                logger.info(f"Using Instant Auth mode (no redirect_uri) - preferred for Canadian banks")
 
             # If access_token provided, create in update mode to add products
             if access_token:
@@ -583,6 +605,44 @@ class PlaidClient:
         except Exception as e:
             logger.error(f"[PLAID HOLDINGS] Unexpected error getting investment holdings: {e}")
             logger.exception("Full traceback:")
+            return None
+
+    def check_institution_products(self, institution_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Check which products an institution supports
+
+        Args:
+            institution_id: Plaid institution ID (e.g., ins_48 for National Bank of Canada)
+
+        Returns:
+            Dictionary with institution info including supported products
+        """
+        if not self._is_enabled():
+            logger.error("Plaid is not configured")
+            return None
+
+        try:
+            from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
+
+            request = InstitutionsGetByIdRequest(
+                institution_id=institution_id,
+                country_codes=[CountryCode("CA"), CountryCode("US")]
+            )
+            response = self.client.institutions_get_by_id(request)
+            institution = response.get('institution', {})
+
+            products = institution.get('products', [])
+            products_list = [str(p) for p in products]
+
+            return {
+                "institution_id": institution.get('institution_id'),
+                "name": institution.get('name'),
+                "products": products_list,
+                "supports_transactions": 'transactions' in products_list,
+                "supports_investments": 'investments' in products_list,
+            }
+        except Exception as e:
+            logger.error(f"Failed to check institution products: {e}")
             return None
 
     def remove_item(self, access_token: str) -> bool:

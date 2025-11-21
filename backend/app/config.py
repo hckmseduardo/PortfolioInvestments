@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     PLAID_CLIENT_ID: Optional[str] = None
     PLAID_SECRET: Optional[str] = None
     PLAID_ENVIRONMENT: str = "production"  # sandbox, development, or production
+    PLAID_CLIENT_NAME: str = "Portfolio Investments"  # Display name shown to users in Plaid Link
+    PLAID_REDIRECT_URI: Optional[str] = None  # Optional: only needed for OAuth institutions. Leave empty to prefer Instant Auth
     PLAID_QUEUE_NAME: str = "plaid_sync"
     PLAID_JOB_TIMEOUT: int = 1800  # 30 minutes
     PLAID_DEBUG_MODE: bool = False  # Enable debug file writing (disable in production)

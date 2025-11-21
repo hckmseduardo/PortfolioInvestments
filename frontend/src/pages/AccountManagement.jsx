@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -28,7 +29,7 @@ import {
   ListItemIcon,
   ListItemText
 } from '@mui/material';
-import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History, FilterList, MoreVert, DeleteSweep, VpnKey, Replay, Error as ErrorIcon, Link as LinkIcon } from '@mui/icons-material';
+import { Add, Edit, Delete, AccountBalance, Sync, LinkOff, AccountBalanceWallet, History, FilterList, MoreVert, DeleteSweep, VpnKey, Replay, Error as ErrorIcon, Link as LinkIcon, Receipt as ReceiptIcon } from '@mui/icons-material';
 import { accountsAPI, transactionsAPI, plaidAPI } from '../services/api';
 import { stickyTableHeadSx } from '../utils/tableStyles';
 import ExportButtons from '../components/ExportButtons';
@@ -36,6 +37,7 @@ import PlaidLinkButton from '../components/PlaidLink';
 import { useNotification } from '../context/NotificationContext';
 
 const AccountManagement = () => {
+  const navigate = useNavigate();
   const { showJobProgress, updateJobStatus, clearJob, activeJobs } = useNotification();
   const [accounts, setAccounts] = useState([]);
   const [accountBalances, setAccountBalances] = useState({});
@@ -665,6 +667,13 @@ const AccountManagement = () => {
     handleActionMenuClose();
     if (selectedAccount) {
       handleDeleteClick(selectedAccount);
+    }
+  };
+
+  const handleViewTransactions = () => {
+    handleActionMenuClose();
+    if (selectedAccount) {
+      navigate(`/transactions?account=${selectedAccount.id}`);
     }
   };
 
@@ -1335,6 +1344,16 @@ const AccountManagement = () => {
           }
           return null;
         })()}
+
+        <MenuItem onClick={handleViewTransactions}>
+          <ListItemIcon>
+            <ReceiptIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText
+            primary="View Transactions"
+            secondary="Go to transactions page with this account selected"
+          />
+        </MenuItem>
 
         <MenuItem onClick={handleEditFromMenu}>
           <ListItemIcon>

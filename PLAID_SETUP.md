@@ -71,7 +71,21 @@ By default, Sandbox has access to all products. For Production:
    PLAID_CLIENT_ID=your_client_id_here
    PLAID_SECRET=your_secret_here
    PLAID_ENVIRONMENT=sandbox  # Options: sandbox, development, production
+   PLAID_CLIENT_NAME=Portfolio Investment  # Display name shown in Plaid Link
+   # PLAID_REDIRECT_URI=  # Optional: only for OAuth institutions (leave empty for Instant Auth)
    ```
+
+   **Authentication Methods**:
+   - **Instant Auth (Recommended for Canadian banks)**: Leave `PLAID_REDIRECT_URI` unset. Users enter credentials directly in Plaid Link.
+   - **OAuth**: Set `PLAID_REDIRECT_URI=https://yourdomain.com/` for institutions that require browser redirect (like some investment platforms).
+
+   **Important**: Some financial institutions (like National Bank of Canada) block connections from apps with certain names. If you encounter "Connectivity not supported" errors, try using a different `PLAID_CLIENT_NAME` such as:
+   - "Personal Finance App"
+   - "Budget Tracker"
+   - "Financial Dashboard"
+   - Your actual company/product name
+
+   Avoid using generic names like "Portfolio Investments" which may be blocked by certain banks.
 
 2. **Verify Configuration**
 
@@ -344,7 +358,23 @@ All Plaid endpoints are under `/api/plaid`:
 
 ### Common Issues
 
-#### 1. "Plaid is not configured" Error
+#### 1. "Connectivity not supported" or "Plaid doesn't support connections" Error
+
+**Cause**: The financial institution blocks connections from apps with your configured client name
+
+**Solution**:
+- Change `PLAID_CLIENT_NAME` in your `.env` file to a different display name:
+  ```bash
+  PLAID_CLIENT_NAME=Personal Finance App
+  ```
+- Avoid using generic names like "Portfolio Investments" which some banks block
+- Try alternative names like "Budget Tracker", "Financial Dashboard", or your company name
+- Restart the backend server after changing the environment variable
+- Clear browser cache and try connecting again
+
+**Note**: This is an institution-specific restriction. Different banks have different policies about which applications can connect to them.
+
+#### 2. "Plaid is not configured" Error
 
 **Cause**: Missing or incorrect environment variables
 
@@ -353,7 +383,7 @@ All Plaid endpoints are under `/api/plaid`:
 - Restart the backend server after changing environment variables
 - Check for typos in variable names
 
-#### 2. Link Token Creation Fails
+#### 3. Link Token Creation Fails
 
 **Cause**: Invalid credentials or environment mismatch
 
@@ -362,7 +392,7 @@ All Plaid endpoints are under `/api/plaid`:
 - Ensure `PLAID_ENVIRONMENT` matches your credentials (sandbox/development/production)
 - Check Plaid Dashboard for API errors
 
-#### 3. Transactions Not Syncing
+#### 4. Transactions Not Syncing
 
 **Cause**: Multiple possible reasons
 
@@ -373,7 +403,7 @@ All Plaid endpoints are under `/api/plaid`:
 - Check Plaid Dashboard for API errors
 - Verify the Plaid item status in database
 
-#### 4. Duplicate Transactions
+#### 5. Duplicate Transactions
 
 **Cause**: Transaction imported both manually and via Plaid
 
@@ -382,7 +412,7 @@ All Plaid endpoints are under `/api/plaid`:
 - Check if transactions have different timestamps or descriptions
 - If duplicates persist, delete manual transactions for Plaid-linked accounts
 
-#### 5. "Invalid Credentials" in Production
+#### 6. "Invalid Credentials" in Production
 
 **Cause**: Using wrong credentials or environment
 

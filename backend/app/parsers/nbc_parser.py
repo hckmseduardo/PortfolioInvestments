@@ -119,7 +119,16 @@ class NBCParser:
             # Map NBC transaction to our system
             mapped_type = self._map_transaction_type(description, category, amount)
 
-            return {
+            # Extract balance if available (checking accounts have Balance column)
+            balance_str = row.get('Balance', '').strip().strip('"')
+            actual_balance = None
+            if balance_str:
+                try:
+                    actual_balance = float(balance_str.replace(',', ''))
+                except ValueError:
+                    logger.warning(f"Could not parse balance: {balance_str}")
+
+            transaction_data = {
                 "date": date,
                 "type": mapped_type,
                 "description": full_description,
@@ -129,6 +138,12 @@ class NBCParser:
                 "fees": 0.0,
                 "total": amount
             }
+
+            # Include actual_balance if available
+            if actual_balance is not None:
+                transaction_data["actual_balance"] = actual_balance
+
+            return transaction_data
 
         except Exception as e:
             logger.warning(f"Error parsing row: {row}. Error: {e}")

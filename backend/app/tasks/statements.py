@@ -188,19 +188,54 @@ def _reprocess_all_statements(db, session, user, account_scope: Optional[str]):
         logger.info(f"  - {stmt.get('filename')} ({account_map.get(stmt.get('account_id'))})")
 
     # Clear all prior data for the affected accounts
+    # IMPORTANT: Only delete statement-imported data, preserve Plaid data
     account_ids = {stmt.get("account_id") for stmt in statements if stmt.get("account_id")}
     if account_scope:
         account_ids = {account_scope}
 
-    logger.info(f"Clearing existing data for {len(account_ids)} account(s)...")
+    logger.info(f"Clearing existing statement-imported data for {len(account_ids)} account(s)...")
+    logger.info("NOTE: Preserving Plaid-synced transactions, dividends, and positions")
+
+    from app.database.models import Transaction, Dividend, Position
+
+    total_transactions_deleted = 0
+    total_dividends_deleted = 0
+    total_positions_deleted = 0
+
     for account_id in account_ids:
         if not account_id:
             continue
-        db.delete_many("transactions", {"account_id": account_id})
-        db.delete_many("dividends", {"account_id": account_id})
-        db.delete_many("positions", {"account_id": account_id})
+
+        # Delete only NON-Plaid transactions (those without plaid_transaction_id)
+        # This preserves Plaid data while clearing statement imports
+        transactions_deleted = session.query(Transaction).filter(
+            Transaction.account_id == account_id,
+            Transaction.plaid_transaction_id.is_(None)
+        ).delete(synchronize_session=False)
+        total_transactions_deleted += transactions_deleted
+
+        # Delete only statement-imported dividends (those with statement_id)
+        # This preserves Plaid-imported dividends
+        dividends_deleted = session.query(Dividend).filter(
+            Dividend.account_id == account_id,
+            Dividend.statement_id.isnot(None)
+        ).delete(synchronize_session=False)
+        total_dividends_deleted += dividends_deleted
+
+        # For positions, we'll delete all and recalculate from remaining transactions
+        # Positions are recalculated anyway during statement processing
+        positions_deleted = session.query(Position).filter(
+            Position.account_id == account_id
+        ).delete(synchronize_session=False)
+        total_positions_deleted += positions_deleted
+
     session.commit()
-    logger.info("Data cleared successfully")
+    logger.info(
+        f"Data cleared successfully: "
+        f"{total_transactions_deleted} statement transactions, "
+        f"{total_dividends_deleted} statement dividends, "
+        f"{total_positions_deleted} positions (will be recalculated)"
+    )
 
     successful = 0
     failed = 0

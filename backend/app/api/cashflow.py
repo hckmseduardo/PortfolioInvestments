@@ -1847,3 +1847,54 @@ async def get_recategorization_job_status(
         job_info["result"] = sanitized_result
 
     return job_info
+
+
+@router.get("/categorization-rules")
+async def get_user_categorization_rules(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Get all categorization rules for the current user."""
+    db = get_db_service(session)
+
+    # Get all rules for the user
+    rules = db.find("user_categorization_rules", {"user_id": current_user.id})
+
+    # Sort by match_count (most used first) then by created_at (newest first)
+    sorted_rules = sorted(
+        rules,
+        key=lambda r: (r.get("match_count", 0), r.get("created_at", "")),
+        reverse=True
+    )
+
+    return sorted_rules
+
+
+@router.delete("/categorization-rules/{rule_id}")
+async def delete_user_categorization_rule(
+    rule_id: str,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """Delete a specific categorization rule."""
+    db = get_db_service(session)
+
+    # Verify the rule belongs to the current user
+    rule = db.find_one("user_categorization_rules", {"id": rule_id})
+
+    if not rule:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Categorization rule not found"
+        )
+
+    if rule.get("user_id") != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to delete this rule"
+        )
+
+    # Delete the rule
+    db.delete("user_categorization_rules", {"id": rule_id})
+
+    return {"message": "Categorization rule deleted successfully", "id": rule_id}

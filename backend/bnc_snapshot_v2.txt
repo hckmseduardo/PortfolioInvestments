@@ -1,0 +1,18 @@
+✓ Snapshot saved to: /app/bnc_state_before_plaid_sync_v2.json
+
+Summary:
+  Account: Chequing Account
+  Balance: $2453.84
+  Total Transactions: 482
+  - Statement: 482
+  - Plaid: 0
+  - Manual: 0
+
+Verifying 2025-08-15 balance...
+  Transactions on 2025-08-15: 2
+  End-of-day balance: $1109.70
+  ✓ VERIFIED: Balance is $1,109.70
+
+  Transactions on 2025-08-15:
+    RBC Assurance-Vie (Life insurance)                 | $   -118.86 | Bal: $   1109.70
+    Mortgage loan payment (Mortgage & rent)            | $  -1028.25 | Bal: $   1228.56

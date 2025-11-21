@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -32,7 +33,7 @@ import {
   DialogContent,
   DialogActions
 } from '@mui/material';
-import { Warning as WarningIcon } from '@mui/icons-material';
+import { Warning as WarningIcon, Build as BuildIcon } from '@mui/icons-material';
 import { transactionsAPI, accountsAPI, importAPI } from '../services/api';
 import { format, subDays, startOfMonth, startOfYear, subMonths, subYears } from 'date-fns';
 import { stickyTableHeadSx, stickyFilterRowSx } from '../utils/tableStyles';
@@ -64,11 +65,11 @@ const TRANSACTION_FILTER_DEFAULTS = {
   balanceMin: '',
   balanceMax: '',
   description: '',
-  source: '',
-  showOnlyInconsistent: false
+  source: ''
 };
 
 const Transactions = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [transactions, setTransactions] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [statements, setStatements] = useState([]);
@@ -82,6 +83,17 @@ const Transactions = () => {
   const [sortConfig, setSortConfig] = useState({ field: 'date', direction: 'desc' });
   const [filters, setFilters] = useState({ ...TRANSACTION_FILTER_DEFAULTS });
   const [balanceFixDialog, setBalanceFixDialog] = useState({ open: false, transaction: null, correctedBalance: '' });
+
+  // Read account parameter from URL on mount
+  useEffect(() => {
+    const accountParam = searchParams.get('account');
+    if (accountParam) {
+      setSelectedAccount(accountParam);
+      // Clear the URL parameter after setting it
+      searchParams.delete('account');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, []);
 
   useEffect(() => {
     fetchAccounts();
@@ -213,26 +225,54 @@ const Transactions = () => {
     }
   };
 
-  const handleFixBalanceClick = (transaction) => {
+  const handleFixBalanceClick = async () => {
+    if (!selectedAccount) {
+      alert('Please select an account first');
+      return;
+    }
+
+    // Get the most recent transaction for this account
+    const accountTransactions = transactions.filter(t => t.account_id === selectedAccount);
+    if (accountTransactions.length === 0) {
+      alert('No transactions found for this account');
+      return;
+    }
+
+    // Sort by date descending to find the most recent
+    const sortedByDate = [...accountTransactions].sort((a, b) => {
+      const dateA = new Date(a.date);
+      const dateB = new Date(b.date);
+      return dateB - dateA;
+    });
+
+    const lastTransaction = sortedByDate[0];
+
     setBalanceFixDialog({
       open: true,
-      transaction,
-      correctedBalance: transaction.expected_balance || ''
+      transaction: lastTransaction,
+      correctedBalance: lastTransaction.expected_balance || balance?.balance || ''
     });
   };
 
   const handleFixBalanceSubmit = async () => {
     try {
       const { transaction, correctedBalance } = balanceFixDialog;
-      await transactionsAPI.fixBalance(transaction.id, {
-        corrected_balance: parseFloat(correctedBalance)
+      const response = await accountsAPI.fixBalance(transaction.account_id, {
+        current_balance: parseFloat(correctedBalance)
       });
 
       // Close dialog
       setBalanceFixDialog({ open: false, transaction: null, correctedBalance: '' });
 
-      // Refresh transactions
-      await fetchTransactions();
+      // Refresh transactions, balance, and accounts
+      await Promise.all([
+        fetchTransactions(),
+        fetchBalance(),
+        fetchAccounts()
+      ]);
+
+      // Show success message
+      alert(`Balance fixed successfully!\n\n${response.data.transactions_updated} transactions updated.\nNew account balance: $${response.data.current_balance.toFixed(2)}\nNew opening balance: $${response.data.new_opening_balance.toFixed(2)}`);
     } catch (err) {
       console.error('Error fixing balance:', err);
       alert('Failed to fix balance: ' + (err.response?.data?.detail || err.message));
@@ -259,6 +299,40 @@ const Transactions = () => {
       style: 'currency',
       currency: 'CAD'
     }).format(amount);
+  };
+
+  // Get the balance from the most recent transaction's expected_balance (respecting date filters)
+  const getAccountBalance = () => {
+    if (!selectedAccount || transactions.length === 0) {
+      return null;
+    }
+
+    let accountTransactions = transactions.filter(t => t.account_id === selectedAccount);
+    if (accountTransactions.length === 0) {
+      return null;
+    }
+
+    // Apply end date filter if set
+    if (endDate) {
+      const endDateTime = new Date(endDate);
+      accountTransactions = accountTransactions.filter(t => {
+        const txnDate = new Date(t.date);
+        return txnDate <= endDateTime;
+      });
+    }
+
+    if (accountTransactions.length === 0) {
+      return null;
+    }
+
+    // Sort by date descending to find the most recent within the date range
+    const sortedByDate = [...accountTransactions].sort((a, b) => {
+      const dateA = new Date(a.date);
+      const dateB = new Date(b.date);
+      return dateB - dateA;
+    });
+
+    return sortedByDate[0].expected_balance;
   };
 
   const getAccountName = (accountId) => {
@@ -381,10 +455,6 @@ const Transactions = () => {
         }
       }
 
-      if (filters.showOnlyInconsistent && !tx.has_balance_inconsistency) {
-        return false;
-      }
-
       return true;
     });
 
@@ -500,23 +570,36 @@ const Transactions = () => {
         <Grid item xs={12} md={3}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Account Balance
-              </Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <Typography color="textSecondary" gutterBottom>
+                  Account Balance
+                </Typography>
+                {selectedAccount && (
+                  <Tooltip title="Fix Balance">
+                    <IconButton
+                      size="small"
+                      onClick={handleFixBalanceClick}
+                      sx={{ mt: -0.5 }}
+                    >
+                      <BuildIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Box>
               <Typography variant="h4" sx={{
-                color: balance?.balance > 0
+                color: getAccountBalance() > 0
                   ? 'success.main'
-                  : balance?.balance < 0
+                  : getAccountBalance() < 0
                     ? 'error.main'
                     : 'text.primary'
               }}>
-                {balance?.balance !== null && balance?.balance !== undefined
-                  ? formatCurrency(balance.balance)
-                  : '-'}
+                {getAccountBalance() !== null && getAccountBalance() !== undefined
+                  ? formatCurrency(getAccountBalance())
+                  : selectedAccount ? formatCurrency(0) : '-'}
               </Typography>
               <Typography variant="caption" color="textSecondary">
                 {selectedAccount
-                  ? `Balance for selected account`
+                  ? `Balance from most recent transaction`
                   : 'Select an account to view balance'}
               </Typography>
             </CardContent>
@@ -736,21 +819,6 @@ const Transactions = () => {
                         sx={{ width: 90 }}
                       />
                     </Stack>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={filters.showOnlyInconsistent}
-                          onChange={(e) => handleFilterChange('showOnlyInconsistent', e.target.checked)}
-                        />
-                      }
-                      label={
-                        <Typography variant="caption">
-                          Inconsistent only
-                        </Typography>
-                      }
-                      sx={{ mr: 0 }}
-                    />
                   </Stack>
                 </TableCell>
                 <TableCell>
@@ -848,42 +916,6 @@ const Transactions = () => {
                         ) : (
                           <Typography variant="body2" color="text.secondary">-</Typography>
                         )}
-                        {transaction.has_balance_inconsistency && (
-                          <Tooltip
-                            title={
-                              <Box>
-                                <Typography variant="caption" display="block">
-                                  <strong>Balance Inconsistency Detected</strong>
-                                </Typography>
-                                <Typography variant="caption" display="block">
-                                  Expected: {formatCurrency(transaction.expected_balance || 0)}
-                                </Typography>
-                                {transaction.actual_balance !== null && transaction.actual_balance !== undefined && (
-                                  <Typography variant="caption" display="block">
-                                    Actual: {formatCurrency(transaction.actual_balance)}
-                                  </Typography>
-                                )}
-                                {transaction.balance_discrepancy !== null && transaction.balance_discrepancy !== undefined && (
-                                  <Typography variant="caption" display="block">
-                                    Discrepancy: {formatCurrency(transaction.balance_discrepancy)}
-                                  </Typography>
-                                )}
-                                <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                                  Click to fix this balance
-                                </Typography>
-                              </Box>
-                            }
-                          >
-                            <IconButton
-                              size="small"
-                              color="warning"
-                              onClick={() => handleFixBalanceClick(transaction)}
-                              sx={{ p: 0.5 }}
-                            >
-                              <WarningIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        )}
                       </Stack>
                     </TableCell>
                     <TableCell>
@@ -905,46 +937,38 @@ const Transactions = () => {
         </TableContainer>
       </Paper>
 
-      {/* Balance Correction Dialog */}
+      {/* Fix Balance Dialog */}
       <Dialog
         open={balanceFixDialog.open}
         onClose={() => setBalanceFixDialog({ open: false, transaction: null, correctedBalance: '' })}
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Fix Balance Inconsistency</DialogTitle>
+        <DialogTitle>Fix Account Balance</DialogTitle>
         <DialogContent>
           {balanceFixDialog.transaction && (
             <Box sx={{ pt: 1 }}>
               <Typography variant="body2" gutterBottom>
-                <strong>Transaction:</strong> {balanceFixDialog.transaction.description || balanceFixDialog.transaction.type}
+                <strong>Account:</strong> {getAccountName(balanceFixDialog.transaction.account_id)}
               </Typography>
               <Typography variant="body2" gutterBottom>
-                <strong>Date:</strong> {format(new Date(balanceFixDialog.transaction.date), 'MMM dd, yyyy')}
+                <strong>Last Transaction Date:</strong> {format(new Date(balanceFixDialog.transaction.date), 'MMM dd, yyyy')}
               </Typography>
-              <Typography variant="body2" gutterBottom>
-                <strong>Expected Balance:</strong> {formatCurrency(balanceFixDialog.transaction.expected_balance || 0)}
+              <Typography variant="body2" gutterBottom color="text.secondary" sx={{ mt: 2, mb: 2 }}>
+                Enter the current available balance from your financial institution.
+                This will be used as an anchor to recalculate all transaction balances working backward.
               </Typography>
-              {balanceFixDialog.transaction.actual_balance !== null && balanceFixDialog.transaction.actual_balance !== undefined && (
-                <Typography variant="body2" gutterBottom>
-                  <strong>Current Actual Balance:</strong> {formatCurrency(balanceFixDialog.transaction.actual_balance)}
-                </Typography>
-              )}
-              {balanceFixDialog.transaction.balance_discrepancy !== null && balanceFixDialog.transaction.balance_discrepancy !== undefined && (
-                <Typography variant="body2" gutterBottom color="error">
-                  <strong>Discrepancy:</strong> {formatCurrency(balanceFixDialog.transaction.balance_discrepancy)}
-                </Typography>
-              )}
               <TextField
                 autoFocus
                 margin="dense"
-                label="Corrected Balance After This Transaction"
+                label="Current Account Balance"
                 type="number"
                 fullWidth
                 value={balanceFixDialog.correctedBalance}
                 onChange={(e) => setBalanceFixDialog(prev => ({ ...prev, correctedBalance: e.target.value }))}
                 sx={{ mt: 2 }}
-                helperText="Enter the correct account balance after this transaction"
+                helperText="Enter the actual current balance from your institution"
+                inputProps={{ step: "0.01" }}
               />
             </Box>
           )}

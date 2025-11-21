@@ -122,6 +122,7 @@ export const accountsAPI = {
   delete: (id) => api.delete(`/accounts/${id}`),
   getAccountPlaidItem: (id) => api.get(`/accounts/${id}/plaid-item`),
   deletePlaidTransactions: (id) => api.delete(`/accounts/${id}/plaid-transactions`),
+  fixBalance: (id, data) => api.post(`/accounts/${id}/fix-balance`, data),
 };
 
 export const positionsAPI = {
@@ -275,6 +276,10 @@ export const expensesAPI = {
     api.post('/cashflow/recategorize'),
   getRecategorizeJobStatus: (jobId) =>
     api.get(`/cashflow/recategorize/jobs/${jobId}`),
+  getCategorizationRules: () =>
+    api.get('/cashflow/categorization-rules'),
+  deleteCategorizationRule: (id) =>
+    api.delete(`/cashflow/categorization-rules/${id}`),
 };
 
 export const importAPI = {

@@ -19,6 +19,7 @@ from app.database.models import (
     InstrumentMetadata as InstrumentMetadataModel,
     MerchantMemory as MerchantMemoryModel,
     UserCategorizationRule as UserCategorizationRuleModel,
+    PlaidAuditLog as PlaidAuditLogModel,
     AccountTypeEnum, TransactionTypeEnum
 )
 
@@ -40,7 +41,8 @@ COLLECTION_MODEL_MAP = {
     "instrument_industries": InstrumentIndustryModel,
     "instrument_metadata": InstrumentMetadataModel,
     "merchant_memory": MerchantMemoryModel,
-    "user_categorization_rules": UserCategorizationRuleModel
+    "user_categorization_rules": UserCategorizationRuleModel,
+    "plaid_audit_logs": PlaidAuditLogModel
 }
 
 

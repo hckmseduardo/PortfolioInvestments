@@ -115,6 +115,9 @@ const Cashflow = () => {
   const [categoryTabValue, setCategoryTabValue] = useState(0);
   const [editingCategory, setEditingCategory] = useState(null);
   const [newCategory, setNewCategory] = useState({ name: '', type: 'money_out', color: '#4CAF50', budget_limit: '' });
+  const [rulesDialogOpen, setRulesDialogOpen] = useState(false);
+  const [categorizationRules, setCategorizationRules] = useState([]);
+  const [loadingRules, setLoadingRules] = useState(false);
   const [conversionJobId, setConversionJobId] = useState(null);
   const [conversionJobStatus, setConversionJobStatus] = useState(null);
   const [conversionStage, setConversionStage] = useState(null);
@@ -305,12 +308,20 @@ const Cashflow = () => {
     // Set the filter
     handleTableFilterChange('description', description || '');
 
-    // Auto-select all matching expenses
+    // Auto-select all matching expenses based on current tab
     const matchingExpenses = expenses.filter(expense =>
       String(expense.description || '').toLowerCase() === String(description || '').toLowerCase()
     );
     const matchingIds = matchingExpenses.map(exp => exp.id);
-    setSelectedExpenseIds(matchingIds);
+
+    // Update the correct selection state based on active tab
+    if (tabValue === 1) { // Money Out
+      setSelectedExpenseIds(matchingIds);
+    } else if (tabValue === 2) { // Money In
+      setSelectedIncomeIds(matchingIds);
+    } else if (tabValue === 3) { // Transfers
+      setSelectedTransferIds(matchingIds);
+    }
   };
 
   const handleFilterByAmount = (amount) => {
@@ -322,13 +333,21 @@ const Cashflow = () => {
     handleTableFilterChange('amountMin', minAmount.toFixed(2));
     handleTableFilterChange('amountMax', maxAmount.toFixed(2));
 
-    // Auto-select all matching expenses
+    // Auto-select all matching expenses based on current tab
     const matchingExpenses = expenses.filter(expense => {
       const expAmount = Number(expense.amount) || 0;
       return expAmount >= minAmount && expAmount <= maxAmount;
     });
     const matchingIds = matchingExpenses.map(exp => exp.id);
-    setSelectedExpenseIds(matchingIds);
+
+    // Update the correct selection state based on active tab
+    if (tabValue === 1) { // Money Out
+      setSelectedExpenseIds(matchingIds);
+    } else if (tabValue === 2) { // Money In
+      setSelectedIncomeIds(matchingIds);
+    } else if (tabValue === 3) { // Transfers
+      setSelectedTransferIds(matchingIds);
+    }
   };
 
   const clearColumnFilter = (column) => {
@@ -1132,6 +1151,39 @@ const Cashflow = () => {
     setCategoryDialogOpen(true);
   };
 
+  const fetchCategorizationRules = async () => {
+    setLoadingRules(true);
+    try {
+      const response = await expensesAPI.getCategorizationRules();
+      console.log('Categorization rules response:', response);
+      // Ensure we always have an array
+      const rules = Array.isArray(response) ? response : (response?.data || []);
+      setCategorizationRules(rules);
+    } catch (error) {
+      console.error('Error fetching categorization rules:', error);
+      showError('Error loading categorization rules');
+      setCategorizationRules([]); // Set empty array on error
+    } finally {
+      setLoadingRules(false);
+    }
+  };
+
+  const handleOpenRulesDialog = async () => {
+    setRulesDialogOpen(true);
+    await fetchCategorizationRules();
+  };
+
+  const handleDeleteRule = async (ruleId) => {
+    try {
+      await expensesAPI.deleteCategorizationRule(ruleId);
+      showSuccess('Rule deleted successfully');
+      await fetchCategorizationRules();
+    } catch (error) {
+      console.error('Error deleting rule:', error);
+      showError('Error deleting rule');
+    }
+  };
+
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('en-CA', {
@@ -1211,12 +1263,12 @@ const Cashflow = () => {
   // Prepare Money In and Money Out pie chart data
   // Exclude transfer categories from the charts
   const transferCategories = ['Transfer', 'Credit Card Payment', 'Investment In', 'Investment Out'];
-  const moneyInData = categoryData.filter(item =>
-    getCategoryType(item.name) === 'money_in' && !transferCategories.includes(item.name)
-  );
-  const moneyOutData = categoryData.filter(item =>
-    getCategoryType(item.name) === 'money_out' && !transferCategories.includes(item.name)
-  );
+  const moneyInData = categoryData
+    .filter(item => getCategoryType(item.name) === 'money_in' && !transferCategories.includes(item.name))
+    .sort((a, b) => b.value - a.value); // Sort from biggest to smallest
+  const moneyOutData = categoryData
+    .filter(item => getCategoryType(item.name) === 'money_out' && !transferCategories.includes(item.name))
+    .sort((a, b) => b.value - a.value); // Sort from biggest to smallest
 
   const totalMoneyIn = moneyInData.reduce((sum, item) => sum + item.value, 0);
   const totalMoneyOut = moneyOutData.reduce((sum, item) => sum + item.value, 0);
@@ -1446,6 +1498,15 @@ const Cashflow = () => {
               sx={{ touchAction: 'manipulation', minHeight: isMobile ? 48 : 'auto' }}
             >
               Manage Categories
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleOpenRulesDialog}
+              fullWidth={isMobile}
+              size={isMobile ? "medium" : "medium"}
+              sx={{ touchAction: 'manipulation', minHeight: isMobile ? 48 : 'auto' }}
+            >
+              Manage Rules
             </Button>
             <Button
               variant="outlined"
@@ -2121,7 +2182,7 @@ const Cashflow = () => {
                           <MenuItem key="uncategorized" value="Uncategorized">
                             {renderCategoryLabel('Uncategorized', 'Uncategorized')}
                           </MenuItem>
-                          {categories.filter(cat => cat.type === 'money_out').map((category) => (
+                          {categories.filter(cat => cat.type === 'money_out').sort((a, b) => a.name.localeCompare(b.name)).map((category) => (
                             <MenuItem key={category.id} value={category.name}>
                               {renderCategoryLabel(category.name, category.name)}
                             </MenuItem>
@@ -2248,7 +2309,7 @@ const Cashflow = () => {
                               <MenuItem key="uncategorized-category" value="Uncategorized">
                                 {renderCategoryLabel('Uncategorized', 'Uncategorized')}
                               </MenuItem>
-                              {categories.filter(cat => cat.type === 'money_out').map(cat => (
+                              {categories.filter(cat => cat.type === 'money_out').sort((a, b) => a.name.localeCompare(b.name)).map(cat => (
                                 <MenuItem key={cat.id} value={cat.name}>
                                   {renderCategoryLabel(cat.name, cat.name)}
                                 </MenuItem>
@@ -2314,7 +2375,7 @@ const Cashflow = () => {
                   <MenuItem value="">
                     <em>Select category</em>
                   </MenuItem>
-                  {categories.filter(cat => cat.type === 'money_out').map((category) => (
+                  {categories.filter(cat => cat.type === 'money_out').sort((a, b) => a.name.localeCompare(b.name)).map((category) => (
                     <MenuItem key={category.id} value={category.name}>
                       {renderCategoryLabel(category.name, category.name)}
                     </MenuItem>
@@ -2507,7 +2568,7 @@ const Cashflow = () => {
                           <MenuItem key="uncategorized" value="Uncategorized">
                             {renderCategoryLabel('Uncategorized', 'Uncategorized')}
                           </MenuItem>
-                          {categories.filter(cat => cat.type === 'money_in').map((category) => (
+                          {categories.filter(cat => cat.type === 'money_in').sort((a, b) => a.name.localeCompare(b.name)).map((category) => (
                             <MenuItem key={category.id} value={category.name}>
                               {renderCategoryLabel(category.name, category.name)}
                             </MenuItem>
@@ -2634,7 +2695,7 @@ const Cashflow = () => {
                               <MenuItem key="uncategorized-category" value="Uncategorized">
                                 {renderCategoryLabel('Uncategorized', 'Uncategorized')}
                               </MenuItem>
-                              {categories.filter(cat => cat.type === 'money_in').map(cat => (
+                              {categories.filter(cat => cat.type === 'money_in').sort((a, b) => a.name.localeCompare(b.name)).map(cat => (
                                 <MenuItem key={cat.id} value={cat.name}>
                                   {renderCategoryLabel(cat.name, cat.name)}
                                 </MenuItem>
@@ -2699,7 +2760,7 @@ const Cashflow = () => {
                   <MenuItem value="">
                     <em>Select category</em>
                   </MenuItem>
-                  {categories.filter(cat => cat.type === 'money_in').map((category) => (
+                  {categories.filter(cat => cat.type === 'money_in').sort((a, b) => a.name.localeCompare(b.name)).map((category) => (
                     <MenuItem key={category.id} value={category.name}>
                       {renderCategoryLabel(category.name, category.name)}
                     </MenuItem>
@@ -3060,7 +3121,19 @@ const Cashflow = () => {
                     return (
                       <TableRow key={transfer.id}>
                         <TableCell>{formatDate(transfer.date)}</TableCell>
-                        <TableCell>{transfer.description}</TableCell>
+                        <TableCell>
+                          <Box display="flex" alignItems="center" gap={0.5}>
+                            {transfer.description}
+                            <IconButton
+                              size="small"
+                              onClick={() => handleFilterByDescription(transfer.description)}
+                              title="Filter and select all with this description"
+                              sx={{ ml: 0.5 }}
+                            >
+                              <FilterAltIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
                         <TableCell>{sourceAccount}</TableCell>
                         <TableCell>{destinationAccount}</TableCell>
                         <TableCell>
@@ -3083,7 +3156,7 @@ const Cashflow = () => {
                               <MenuItem key="uncategorized-category" value="Uncategorized">
                                 {renderCategoryLabel('Uncategorized', 'Uncategorized')}
                               </MenuItem>
-                              {categories.filter(cat => cat.type === categoryType).map(cat => (
+                              {categories.filter(cat => cat.type === categoryType).sort((a, b) => a.name.localeCompare(b.name)).map(cat => (
                                 <MenuItem key={cat.id} value={cat.name}>
                                   {renderCategoryLabel(cat.name, cat.name)}
                                 </MenuItem>
@@ -3091,8 +3164,20 @@ const Cashflow = () => {
                             </Select>
                           </FormControl>
                         </TableCell>
-                        <TableCell align="right" sx={{ color: transfer.amount < 0 ? 'error.main' : 'success.main', fontWeight: 600 }}>
-                          {formatCurrency(transfer.amount)}
+                        <TableCell align="right">
+                          <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
+                            <Typography sx={{ color: transfer.amount < 0 ? 'error.main' : 'success.main', fontWeight: 600 }}>
+                              {formatCurrency(transfer.amount)}
+                            </Typography>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleFilterByAmount(transfer.amount)}
+                              title="Filter and select similar amounts (±10%)"
+                              sx={{ ml: 0.5 }}
+                            >
+                              <FilterAltIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
                         </TableCell>
                         <TableCell>{transfer.notes}</TableCell>
                       </TableRow>
@@ -3327,6 +3412,97 @@ const Cashflow = () => {
               Create Category
             </Button>
           </Box>
+        </DialogActions>
+      </Dialog>
+
+      {/* Categorization Rules Management Dialog */}
+      <Dialog open={rulesDialogOpen} onClose={() => setRulesDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>Manage Categorization Rules</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            These rules were learned from your manual categorizations and will be automatically applied to future transactions.
+          </Typography>
+          {loadingRules ? (
+            <Box display="flex" justifyContent="center" py={4}>
+              <CircularProgress />
+            </Box>
+          ) : categorizationRules.length === 0 ? (
+            <Box textAlign="center" py={4}>
+              <Typography color="textSecondary">
+                No categorization rules found. Rules are created automatically when you manually categorize transactions.
+              </Typography>
+            </Box>
+          ) : (
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Description Pattern</TableCell>
+                    <TableCell>Category</TableCell>
+                    <TableCell>Account</TableCell>
+                    <TableCell>Amount Range</TableCell>
+                    <TableCell>Times Used</TableCell>
+                    <TableCell>Created</TableCell>
+                    <TableCell align="right">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {(categorizationRules || []).map((rule) => (
+                    <TableRow key={rule.id}>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                          {rule.description_pattern}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={rule.category_name}
+                          size="small"
+                          sx={{
+                            bgcolor: getCategoryColor(rule.category_name),
+                            color: 'white'
+                          }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {rule.account_id ? getAccountLabel(rule.account_id) : 'All accounts'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {rule.amount_min != null || rule.amount_max != null
+                            ? `${rule.amount_min != null ? formatCurrency(rule.amount_min) : 'Any'} - ${rule.amount_max != null ? formatCurrency(rule.amount_max) : 'Any'}`
+                            : 'Any amount'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip label={rule.match_count || 0} size="small" variant="outlined" />
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="textSecondary">
+                          {rule.created_at ? new Date(rule.created_at).toLocaleDateString() : '-'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => handleDeleteRule(rule.id)}
+                          title="Delete rule"
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRulesDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
 

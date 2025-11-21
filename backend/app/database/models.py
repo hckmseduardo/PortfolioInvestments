@@ -2,6 +2,7 @@
 SQLAlchemy ORM Models for PostgreSQL
 """
 from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Text, Enum as SQLEnum, Integer, Boolean, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -441,6 +442,11 @@ class PlaidItem(Base):
     last_synced = Column(DateTime, nullable=True)
     error_message = Column(Text, nullable=True)
 
+    # Investment product support tracking
+    supports_investments = Column(Boolean, default=False, nullable=False)  # Does institution support investments product?
+    investments_enabled = Column(Boolean, default=False, nullable=False)  # Has user enabled investments for this connection?
+    investments_enabled_at = Column(DateTime, nullable=True)  # When was investments enabled?
+
     # Relationships
     user = relationship("User", backref="plaid_items")
     plaid_accounts = relationship("PlaidAccount", back_populates="plaid_item", cascade="all, delete-orphan")
@@ -478,6 +484,29 @@ class PlaidSyncCursor(Base):
 
     # Relationships
     plaid_item = relationship("PlaidItem", back_populates="sync_cursor")
+
+
+class PlaidAuditLog(Base):
+    """Audit logs of all Plaid API interactions"""
+    __tablename__ = "plaid_audit_logs"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    plaid_item_id = Column(String, ForeignKey("plaid_items.id", ondelete="CASCADE"), nullable=True, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    endpoint = Column(String, nullable=False, index=True)
+    sync_type = Column(String, nullable=True)
+    method = Column(String, nullable=False)
+    status_code = Column(Integer, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    request_params = Column(JSONB, nullable=True)
+    response_summary = Column(JSONB, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    user = relationship("User")
+    plaid_item = relationship("PlaidItem")
 
 
 class DashboardLayout(Base):
