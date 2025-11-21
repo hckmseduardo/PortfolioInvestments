@@ -315,6 +315,8 @@ const Transactions = () => {
     // Apply end date filter if set
     if (endDate) {
       const endDateTime = new Date(endDate);
+      // Set to end of day to include all transactions on that date
+      endDateTime.setHours(23, 59, 59, 999);
       accountTransactions = accountTransactions.filter(t => {
         const txnDate = new Date(t.date);
         return txnDate <= endDateTime;
@@ -325,14 +327,35 @@ const Transactions = () => {
       return null;
     }
 
-    // Sort by date descending to find the most recent within the date range
-    const sortedByDate = [...accountTransactions].sort((a, b) => {
+    // Sort chronologically: by date (ascending), then by amount (descending - credits before debits), then by ID
+    // This matches the order used by the backend for calculating running_balance
+    const sortedTransactions = [...accountTransactions].sort((a, b) => {
       const dateA = new Date(a.date);
       const dateB = new Date(b.date);
-      return dateB - dateA;
+
+      // First compare dates (date part only)
+      const dateOnlyA = new Date(dateA.getFullYear(), dateA.getMonth(), dateA.getDate());
+      const dateOnlyB = new Date(dateB.getFullYear(), dateB.getMonth(), dateB.getDate());
+
+      if (dateOnlyA.getTime() !== dateOnlyB.getTime()) {
+        return dateOnlyA - dateOnlyB;  // Ascending date
+      }
+
+      // Same date - sort by amount descending (larger amounts first, credits before debits)
+      if (a.total !== b.total) {
+        return b.total - a.total;  // Descending amount
+      }
+
+      // Same date and amount - sort by ID
+      return a.id.localeCompare(b.id);
     });
 
-    return sortedByDate[0].expected_balance;
+    // Return the running_balance of the LAST transaction in the sorted list
+    // This is the end-of-day balance for the end of the selected period
+    const lastTransaction = sortedTransactions[sortedTransactions.length - 1];
+    return lastTransaction.running_balance !== undefined && lastTransaction.running_balance !== null
+      ? lastTransaction.running_balance
+      : lastTransaction.expected_balance;
   };
 
   const getAccountName = (accountId) => {
@@ -599,7 +622,9 @@ const Transactions = () => {
               </Typography>
               <Typography variant="caption" color="textSecondary">
                 {selectedAccount
-                  ? `Balance from most recent transaction`
+                  ? endDate
+                    ? `Balance at end of day on ${format(new Date(endDate), 'MMM dd, yyyy')}`
+                    : `Current balance (most recent transaction)`
                   : 'Select an account to view balance'}
               </Typography>
             </CardContent>
