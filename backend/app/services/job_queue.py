@@ -45,6 +45,7 @@ def enqueue_cashflow_conversion_job(user_id: str, account_id: Optional[str] = No
         user_id,
         account_id,
         job_timeout=settings.CASHFLOW_JOB_TIMEOUT,
+        result_ttl=3600,  # Keep job result for 1 hour (instead of default 500 seconds)
     )
     logger.info("Enqueued cashflow conversion job %s for user %s", job.id, user_id)
     return job
@@ -58,6 +59,7 @@ def enqueue_cashflow_recategorization_job(user_id: str) -> Job:
         run_cashflow_recategorization_job,
         user_id,
         job_timeout=settings.CASHFLOW_JOB_TIMEOUT,
+        result_ttl=3600,  # Keep job result for 1 hour (instead of default 500 seconds)
     )
     logger.info("Enqueued cashflow recategorization job %s for user %s", job.id, user_id)
     return job
