@@ -5,6 +5,7 @@ Maps Plaid transactions to our Transaction and Expense models.
 Handles duplicate detection and categorization.
 """
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.orm import Session
@@ -206,19 +207,29 @@ class PlaidTransactionMapper:
         # Check by date, amount, and description (fuzzy match)
         date = self._parse_plaid_date(plaid_txn['date'])
 
-        amount = abs(plaid_txn['amount'])
+        # IMPORTANT: Use signed amount, not absolute value
+        # Plaid convention: positive = debit (money out), negative = credit (money in)
+        # Our convention: negative = money out, positive = money in
+        # So we need to negate Plaid's amount to match our stored transactions
+        plaid_amount = plaid_txn['amount']
+        our_amount = -plaid_amount  # Convert to our convention
+
         description = self._build_description(plaid_txn)
 
-        # Define time window
-        start_date = date - timedelta(hours=window_hours)
-        end_date = date + timedelta(hours=window_hours)
+        # Define time window - use tighter window for exact date matching
+        # Only check same date (not 24-hour window which could span 2 days)
+        from datetime import date as date_type
+        date_only = date.date() if isinstance(date, datetime) else date
+        start_of_day = datetime.combine(date_only, datetime.min.time())
+        end_of_day = datetime.combine(date_only, datetime.max.time())
 
         # Query for similar transactions
+        # IMPORTANT: Match signed amounts exactly (Money In only matches Money In, Money Out only matches Money Out)
         similar_txns = self.db.query(Transaction).filter(
             Transaction.account_id == account_id,
-            Transaction.date >= start_date,
-            Transaction.date <= end_date,
-            Transaction.total == amount or Transaction.total == -amount
+            Transaction.date >= start_of_day,
+            Transaction.date <= end_of_day,
+            Transaction.total == our_amount  # Exact signed amount match
         ).all()
 
         # Check description similarity
@@ -229,8 +240,8 @@ class PlaidTransactionMapper:
 
             if self._descriptions_match(description, txn.description or ''):
                 logger.debug(
-                    f"Found duplicate by fuzzy match: date={date}, "
-                    f"amount={amount}, desc={description[:50]}"
+                    f"Found duplicate by fuzzy match: date={date_only}, "
+                    f"amount=${our_amount:.2f}, desc={description[:50]}"
                 )
                 return True
 
@@ -332,10 +343,15 @@ class PlaidTransactionMapper:
         """
         Check if two descriptions are similar enough to be considered duplicates
 
+        This uses a more conservative matching approach to avoid false positives:
+        - Exact match only
+        - Base description match after removing payment channel suffix like "(Online)", "(Other)"
+        - High similarity threshold (>= 0.9) for word-based matching
+
         Args:
-            desc1: First description
-            desc2: Second description
-            threshold: Similarity threshold (0-1)
+            desc1: First description (from Plaid)
+            desc2: Second description (from existing transaction)
+            threshold: Similarity threshold (0-1) - currently unused, kept for API compatibility
 
         Returns:
             True if descriptions match
@@ -348,23 +364,44 @@ class PlaidTransactionMapper:
         if desc1 == desc2:
             return True
 
-        # Check if one contains the other (for cases like "Starbucks" vs "Starbucks #1234")
-        if desc1 in desc2 or desc2 in desc1:
+        # Extract base description (before parentheses) to handle cases where
+        # Plaid and Statement have different payment channels but same merchant/name
+        # Example: "INTERAC e-Transfer (Online)" vs "INTERAC e-Transfer (Other)"
+        # This ONLY strips the payment channel suffix at the END, not merchant details
+        base1 = re.sub(r'\s*\([^)]*\)\s*$', '', desc1).strip()
+        base2 = re.sub(r'\s*\([^)]*\)\s*$', '', desc2).strip()
+
+        # If base descriptions match exactly, consider it a duplicate
+        # This is the most reliable match after exact match
+        if base1 and base2 and base1 == base2:
             return True
 
-        # Simple word-based similarity
-        words1 = set(desc1.split())
-        words2 = set(desc2.split())
+        # REMOVED overly broad matching:
+        # - No substring matching (was: if desc1 in desc2 or desc2 in desc1)
+        # - No word subset matching (was: if words_base1.issubset(words_base2))
+        # - Raised similarity threshold from 0.8 to 0.95 for stricter matching
 
-        if not words1 or not words2:
-            return False
+        # Only allow very high similarity matches (>= 0.95) to avoid false positives
+        # This handles minor variations like "INTERAC e-Transfer PAYMENT" vs "INTERAC e-Transfer"
+        if base1 and base2 and base1 != base2:
+            words_base1 = set(base1.split())
+            words_base2 = set(base2.split())
 
-        intersection = len(words1 & words2)
-        union = len(words1 | words2)
+            if words_base1 and words_base2:
+                intersection_base = len(words_base1 & words_base2)
+                union_base = len(words_base1 | words_base2)
+                similarity_base = intersection_base / union_base if union_base > 0 else 0
 
-        similarity = intersection / union if union > 0 else 0
+                # Require 95% similarity instead of 80% to avoid false positives
+                if similarity_base >= 0.95:
+                    return True
 
-        return similarity >= threshold
+        # No fallback matching - we've already tried:
+        # 1. Exact match
+        # 2. Base description exact match (after removing payment channel)
+        # 3. Base description high similarity (>= 0.95)
+        # Any looser matching causes too many false positives
+        return False
 
     def _extract_pfc(self, plaid_txn: Dict[str, Any]) -> Dict[str, Optional[str]]:
         """

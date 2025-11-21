@@ -368,11 +368,8 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                     modified_count += 1
                     logger.debug(f"Updated existing transaction: {plaid_txn['transaction_id']}")
                 else:
-                    # Check for duplicates by other criteria (e.g., amount/date/description)
-                    if mapper.is_duplicate(plaid_txn, account_id):
-                        duplicate_count += 1
-                        logger.debug(f"Skipping duplicate transaction: {plaid_txn['transaction_id']}")
-                        continue
+                    # No duplicate detection - use upsert with plaid_transaction_id as unique key
+                    # Cleanup overlapping logic will handle removing non-Plaid duplicates
 
                     # Create new transaction
                     transaction = Transaction(
@@ -689,6 +686,10 @@ def run_plaid_sync_job(user_id: str, plaid_item_id: str, full_resync: bool = Fal
                 plaid_accounts=plaid_accounts,
                 plaid_account_map=plaid_account_map
             )
+
+            # Expire all objects in session to prevent StaleDataError
+            # after cleanup deleted transactions
+            db.expire_all()
 
             db.commit()
 
